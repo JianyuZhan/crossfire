@@ -1,0 +1,204 @@
+// packages/adapter-core/src/event-schema.ts
+
+import { z } from "zod";
+
+// Base schemas
+const AdapterIdSchema = z.enum(["claude", "codex", "gemini"]);
+
+const BaseEventFields = {
+	kind: z.string(),
+	timestamp: z.number(),
+	adapterId: AdapterIdSchema,
+	adapterSessionId: z.string(),
+	turnId: z.string().optional(),
+};
+
+const AdapterCapabilitiesSchema = z.object({
+	supportsResume: z.boolean(),
+	resumeMode: z.enum(["protocol-native", "native-cli", "stateless"]),
+	resumeStability: z.enum(["stable", "experimental", "none"]),
+	supportsExternalHistoryInjection: z.boolean(),
+	supportsRawThinking: z.boolean(),
+	supportsReasoningSummary: z.boolean(),
+	supportsPlan: z.boolean(),
+	supportsApproval: z.boolean(),
+	supportsInterrupt: z.boolean(),
+	supportsSubagents: z.boolean(),
+	supportsStreamingDelta: z.boolean(),
+});
+
+// Session lifecycle
+const SessionStartedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("session.started"),
+	model: z.string(),
+	tools: z.array(z.string()),
+	providerSessionId: z.string(),
+	capabilities: AdapterCapabilitiesSchema,
+});
+
+// Text stream
+const MessageDeltaSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("message.delta"),
+	text: z.string(),
+	role: z.literal("assistant"),
+});
+
+const MessageFinalSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("message.final"),
+	text: z.string(),
+	role: z.literal("assistant"),
+	stopReason: z.string().optional(),
+});
+
+// Thinking / reasoning
+const ThinkingDeltaSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("thinking.delta"),
+	text: z.string(),
+	thinkingType: z.enum(["raw-thinking", "reasoning-summary"]),
+});
+
+// Plan
+const PlanUpdatedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("plan.updated"),
+	steps: z.array(
+		z.object({
+			description: z.string(),
+			status: z.enum(["pending", "in_progress", "completed", "failed"]),
+		}),
+	),
+});
+
+// Tool lifecycle
+const ToolCallSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("tool.call"),
+	toolUseId: z.string(),
+	toolName: z.string(),
+	input: z.unknown(),
+});
+
+const ToolProgressSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("tool.progress"),
+	toolUseId: z.string(),
+	toolName: z.string(),
+	elapsedSeconds: z.number(),
+});
+
+const ToolResultSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("tool.result"),
+	toolUseId: z.string(),
+	toolName: z.string(),
+	success: z.boolean(),
+	output: z.unknown().optional(),
+	error: z.string().optional(),
+});
+
+// Approval
+const ApprovalRequestSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("approval.request"),
+	requestId: z.string(),
+	approvalType: z.enum(["tool", "command", "file-change", "user-input"]),
+	title: z.string(),
+	payload: z.unknown(),
+	suggestion: z.enum(["allow", "deny"]).optional(),
+});
+
+const ApprovalResolvedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("approval.resolved"),
+	requestId: z.string(),
+	decision: z.enum(["allow", "deny", "allow-always"]),
+});
+
+// Subagent
+const SubagentStartedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("subagent.started"),
+	subagentId: z.string(),
+	description: z.string().optional(),
+});
+
+const SubagentCompletedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("subagent.completed"),
+	subagentId: z.string(),
+});
+
+// Usage
+const UsageUpdatedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("usage.updated"),
+	inputTokens: z.number(),
+	outputTokens: z.number(),
+	totalCostUsd: z.number().optional(),
+});
+
+// Turn completion
+const TurnCompletedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("turn.completed"),
+	status: z.enum(["completed", "interrupted", "failed", "timeout"]),
+	durationMs: z.number(),
+	usage: z
+		.object({
+			inputTokens: z.number(),
+			outputTokens: z.number(),
+			totalCostUsd: z.number().optional(),
+		})
+		.optional(),
+});
+
+// Errors
+const RunErrorSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("run.error"),
+	message: z.string(),
+	recoverable: z.boolean(),
+});
+
+const RunWarningSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("run.warning"),
+	message: z.string(),
+});
+
+// Known event schemas (16 total)
+const KnownEventSchema = z.discriminatedUnion("kind", [
+	SessionStartedSchema,
+	MessageDeltaSchema,
+	MessageFinalSchema,
+	ThinkingDeltaSchema,
+	PlanUpdatedSchema,
+	ToolCallSchema,
+	ToolProgressSchema,
+	ToolResultSchema,
+	ApprovalRequestSchema,
+	ApprovalResolvedSchema,
+	SubagentStartedSchema,
+	SubagentCompletedSchema,
+	UsageUpdatedSchema,
+	TurnCompletedSchema,
+	RunErrorSchema,
+	RunWarningSchema,
+]);
+
+// Fallback for unknown kinds (forward compat)
+const UnknownEventSchema = z
+	.object({
+		...BaseEventFields,
+	})
+	.passthrough();
+
+// Union: try known first, fall back to unknown
+export const NormalizedEventSchema = z.union([
+	KnownEventSchema,
+	UnknownEventSchema,
+]);

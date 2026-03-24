@@ -1,0 +1,36 @@
+# Claude Code
+.claude/
+
+# Git worktrees
+.worktrees/
+
+# pnpm store
+.pnpm-store/
+
+# Misc
+unified_inbox.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debate output (generated at runtime)
+run_output/
+debate-*/
+
+# Logs
+*.log
+
+# Node.js / TypeScript
+node_modules/
+dist/
+packages/*/dist/
+*.tsbuildinfo
+.turbo/

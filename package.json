@@ -1,0 +1,19 @@
+{
+	"name": "crossfire-adapters",
+	"private": true,
+	"packageManager": "pnpm@9.15.4",
+	"type": "module",
+	"scripts": {
+		"build": "turbo run build",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.0",
+		"turbo": "^2.3.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	}
+}
