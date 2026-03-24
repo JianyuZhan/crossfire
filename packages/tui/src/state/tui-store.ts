@@ -15,14 +15,12 @@ import type {
   TuiState,
 } from "./types.js";
 import { stripInternalToolBlocks } from "./strip-internal.js";
+export { stripInternalToolBlocks } from "./strip-internal.js";
 
 const MAX_THINKING_BYTES = 4096;
 
 /** Internal meta-tool names that should not appear in the TUI */
 const INTERNAL_TOOLS = new Set(["debate_meta", "judge_verdict"]);
-
-// Re-export for backward compatibility
-export { stripInternalToolBlocks } from "./strip-internal.js";
 
 function defaultAgentPanel(
   role: "proposer" | "challenger",
