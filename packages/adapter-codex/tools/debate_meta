@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# debate_meta — Crossfire meta-tool for structured debate data extraction
+# Usage: debate_meta '{"stance":"agree","confidence":0.8,"key_points":["..."]}'
+# Accepts JSON as argument(s) and echoes it back for the adapter to parse.
+
+if [ $# -eq 0 ]; then
+  cat
+else
+  echo "$*"
+fi

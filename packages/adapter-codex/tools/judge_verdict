@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# judge_verdict — Crossfire meta-tool for structured judge evaluation
+# Usage: judge_verdict '{"leading":"proposer","score":{"proposer":7,"challenger":5},"reasoning":"...","should_continue":true}'
+# Accepts JSON as argument(s) and echoes it back for the adapter to parse.
+
+if [ $# -eq 0 ]; then
+  cat
+else
+  echo "$*"
+fi

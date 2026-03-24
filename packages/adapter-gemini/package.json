@@ -1,0 +1,19 @@
+{
+	"name": "@crossfire/adapter-gemini",
+	"version": "0.1.0",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@crossfire/adapter-core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"vitest": "^3.0.0",
+		"typescript": "^5.7.0"
+	}
+}
