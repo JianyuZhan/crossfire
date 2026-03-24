@@ -8,10 +8,13 @@ export {
 export { evaluateClarification } from "./clarification-policy.js";
 export {
   generateSummary,
-  generateActionPlan,
-  generateActionPlanHtml,
+  generateActionPlanHtmlFromDeepSummary,
+  generateActionPlanHtmlFallback,
   formatFinalOutcome,
   type DebateSummary,
+  type DeepSummary,
+  type DeepSummaryItem,
+  type DeepSummaryUnresolved,
 } from "./summary-generator.js";
 export type {
   DirectorAction,

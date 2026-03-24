@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   formatFinalOutcome,
   generateSummary,
+  generateActionPlanHtmlFromDeepSummary,
+  generateActionPlanHtmlFallback,
 } from "../../src/director/summary-generator.js";
+import type { DeepSummary } from "../../src/director/summary-generator.js";
 import type {
   DebateConfig,
   DebateState,
@@ -158,5 +161,57 @@ describe("formatFinalOutcome", () => {
     expect(md).toContain("## Final Outcome");
     expect(md).toContain("**Termination**: judge-decision");
     expect(md).toContain("**Leading**: proposer");
+  });
+});
+
+describe("generateActionPlanHtmlFromDeepSummary", () => {
+  it("produces HTML with consensus and unresolved sections", () => {
+    const summary: DeepSummary = {
+      consensus: [
+        {
+          title: "Use modular monolith",
+          detail: "Both agreed on starting with monolith.",
+          nextSteps: "Define module boundaries.",
+        },
+      ],
+      unresolved: [
+        {
+          title: "Database strategy",
+          proposerPosition: "DB per service",
+          challengerPosition: "Shared DB",
+          risk: "Query complexity",
+        },
+      ],
+    };
+    const html = generateActionPlanHtmlFromDeepSummary(
+      "Microservices vs Monolith",
+      summary,
+      3,
+    );
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain("Microservices vs Monolith");
+    expect(html).toContain("Use modular monolith");
+    expect(html).toContain("Database strategy");
+    expect(html).toContain("DB per service");
+    expect(html).toContain("Query complexity");
+  });
+});
+
+describe("generateActionPlanHtmlFallback", () => {
+  it("produces HTML from basic DebateSummary when judge deep summary fails", () => {
+    const summary = {
+      consensus: ["Both agree on modular approach"],
+      unresolved: ["Database sharing unclear"],
+      terminationReason: "max-rounds",
+      roundsCompleted: 3,
+      leading: "proposer",
+      judgeScore: { proposer: 7, challenger: 5 },
+      recommendedAction: "Adopt modular monolith",
+      totalTurns: 6,
+      stanceTrajectory: { proposer: [], challenger: [] },
+    };
+    const html = generateActionPlanHtmlFallback("Test topic", summary);
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain("modular approach");
   });
 });
