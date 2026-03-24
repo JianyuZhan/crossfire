@@ -4,8 +4,11 @@ import type {
   SessionHandle,
 } from "@crossfire/adapter-core";
 import { JudgeVerdictSchema } from "@crossfire/orchestrator-core";
-import type { JudgeVerdict } from "@crossfire/orchestrator-core";
-import type { AnyEvent } from "@crossfire/orchestrator-core";
+import type {
+  AnyEvent,
+  DeepSummary,
+  JudgeVerdict,
+} from "@crossfire/orchestrator-core";
 import type { DebateEventBus } from "./event-bus.js";
 
 export interface JudgeTurnInput {
@@ -230,4 +233,60 @@ export async function runJudgeTurn(
 
   unsub();
   return verdict;
+}
+
+export async function runJudgeSummarization(
+  adapter: AgentAdapter,
+  handle: SessionHandle,
+  bus: DebateEventBus,
+  prompt: string,
+): Promise<DeepSummary | undefined> {
+  let finalText = "";
+
+  const unsub = bus.subscribe((event: AnyEvent) => {
+    if (event.kind === "message.final" && "text" in event) {
+      finalText = (event as { text: string }).text;
+    }
+  });
+
+  try {
+    await adapter.sendTurn(handle, {
+      turnId: "j-summarize",
+      prompt,
+    });
+    // Wait for turn completion
+    await new Promise<void>((resolve) => {
+      const u2 = bus.subscribe((event: AnyEvent) => {
+        if (event.kind === "turn.completed" && "turnId" in event) {
+          const e = event as { turnId: string };
+          if (e.turnId === "j-summarize") {
+            u2();
+            resolve();
+          }
+        }
+      });
+    });
+  } finally {
+    unsub();
+  }
+
+  if (!finalText) return undefined;
+
+  // Extract JSON from response
+  try {
+    // Try fenced ```json block
+    const jsonMatch = finalText.match(/```json\s*\n([\s\S]*?)\n\s*```/);
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : finalText.trim();
+    const parsed = JSON.parse(jsonStr);
+    if (
+      parsed &&
+      Array.isArray(parsed.consensus) &&
+      Array.isArray(parsed.unresolved)
+    ) {
+      return parsed as DeepSummary;
+    }
+  } catch {
+    /* parse failed — fallback handled by caller */
+  }
+  return undefined;
 }
