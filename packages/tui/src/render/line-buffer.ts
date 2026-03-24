@@ -1,4 +1,5 @@
 import stringWidth from "string-width";
+import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type {
   ContentChunk,
   RenderBlock,
@@ -354,24 +355,61 @@ export function buildGlobalLineBuffer(
     switch (chunk.type) {
       case "round": {
         if (chunk.collapsed) {
-          const summary = chunk.collapsedSummary ?? "";
+          const summary = chunk.collapsedSummary;
+          const hint = `/expand ${chunk.roundNumber} to expand`;
+          // Line 1: round label + /expand hint
           result.push(
             screenLine([
               {
-                text: truncate(
-                  `\u25B8 Round ${chunk.roundNumber}: ${summary}`,
-                  contentWidth,
-                ),
-                style: { dim: true },
+                text: `\u25B8 Round ${chunk.roundNumber}/${chunk.maxRounds}`,
+                style: { bold: true },
               },
+              { text: `  ${hint}`, style: { color: "cyan", bold: true } },
             ]),
           );
+          if (summary) {
+            // Line 2: P summary
+            result.push(
+              screenLine([
+                { text: "  P: ", style: { color: "cyan", bold: true } },
+                {
+                  text: truncate(summary.proposerLine, contentWidth - 6),
+                  style: { dim: true },
+                },
+              ]),
+            );
+            // Line 3: C summary
+            result.push(
+              screenLine([
+                { text: "  C: ", style: { color: "#ffb86c", bold: true } },
+                {
+                  text: truncate(summary.challengerLine, contentWidth - 6),
+                  style: { dim: true },
+                },
+              ]),
+            );
+            // Line 4: Judge summary (optional)
+            if (summary.judgeLine) {
+              result.push(
+                screenLine([
+                  { text: "  \u2696 ", style: { color: "yellow", bold: true } },
+                  {
+                    text: truncate(summary.judgeLine, contentWidth - 5),
+                    style: { dim: true },
+                  },
+                ]),
+              );
+            }
+          }
         } else {
-          // Top border: ┌── Round N ──────────┐
-          const label = ` Round ${chunk.roundNumber} `;
+          // Top border: ┌── Round N/M ──────────┐
+          const label = ` Round ${chunk.roundNumber}/${chunk.maxRounds} `;
+          const borderStyle = chunk.active
+            ? { bold: true, color: "cyan" }
+            : { dim: true };
           const remainWidth = Math.max(0, contentWidth - 2 - label.length);
           const topBorder = `\u250C\u2500${label}${"\u2500".repeat(remainWidth)}\u2510`;
-          result.push(screenLine([{ text: topBorder, style: { dim: true } }]));
+          result.push(screenLine([{ text: topBorder, style: borderStyle }]));
           for (let i = 0; i < chunk.height; i++) {
             const left = chunk.leftLines[i] ?? emptyLine(panelWidth);
             const right = chunk.rightLines[i] ?? emptyLine(panelWidth);
@@ -379,22 +417,127 @@ export function buildGlobalLineBuffer(
           }
           // Bottom border: └────────────────────┘
           const bottomBorder = `\u2514${"\u2500".repeat(Math.max(0, contentWidth - 2))}\u2518`;
-          result.push(
-            screenLine([{ text: bottomBorder, style: { dim: true } }]),
-          );
+          result.push(screenLine([{ text: bottomBorder, style: borderStyle }]));
+
+          // Embedded judge section (for completed rounds with judge result)
+          if (chunk.judgeResult && chunk.judgeResult.status === "done") {
+            const jr = chunk.judgeResult;
+            // Judge header
+            result.push(
+              screenLine([
+                {
+                  text: `  \u2696 Judge (Round ${chunk.roundNumber})`,
+                  style: { color: "yellow", bold: true },
+                },
+              ]),
+            );
+            // Judge evaluation text (wrapped)
+            const stripped = stripInternalToolBlocks(jr.messageText);
+            if (stripped) {
+              const judgeLines = wrapText(stripped, contentWidth - 4, {
+                continuationIndent: 2,
+                style: { dim: true },
+              });
+              for (const jl of judgeLines) {
+                result.push(
+                  screenLine([{ text: "  ", style: {} }, ...jl.segments]),
+                );
+              }
+            }
+            // Decision line
+            if (jr.verdict) {
+              const v = jr.verdict;
+              const cont = v.shouldContinue;
+              const decisionIcon = cont ? "\u2192" : "\u2717";
+              const decisionText = cont
+                ? `Continue to Round ${chunk.roundNumber + 1}`
+                : "Debate ended";
+              const score = v.score
+                ? v.leading === "tie"
+                  ? `Tied ${v.score.proposer}-${v.score.challenger}`
+                  : v.leading === "proposer"
+                    ? `P leads ${v.score.proposer}-${v.score.challenger}`
+                    : `C leads ${v.score.challenger}-${v.score.proposer}`
+                : "";
+              const fullDecision = `  ${decisionIcon} ${decisionText}${score ? ` | ${score}` : ""}`;
+              result.push(
+                screenLine([
+                  {
+                    text: fullDecision,
+                    style: { bold: true, color: cont ? "green" : "red" },
+                  },
+                ]),
+              );
+            }
+          }
         }
         break;
       }
       case "judge": {
+        // Top border: ╔══ Judge (Round N) ══════╗
+        const judgeLabel = ` Judge (Round ${chunk.roundNumber}) `;
+        const judgeRemain = Math.max(0, contentWidth - 2 - judgeLabel.length);
+        const judgeTop = `\u2554\u2550${judgeLabel}${"\u2550".repeat(judgeRemain)}\u2557`;
         result.push(
           screenLine([
-            {
-              text: `\u2550\u2550 Judge (Round ${chunk.roundNumber}) \u2550\u2550`,
-              style: { bold: true },
-            },
+            { text: judgeTop, style: { bold: true, color: "yellow" } },
           ]),
         );
-        result.push(...chunk.lines);
+        // Content lines with side borders
+        for (const line of chunk.lines) {
+          const lineText = line.segments.map((s) => s.text).join("");
+          const innerWidth = Math.max(0, contentWidth - 4); // 2 border + 2 padding
+          const truncatedText = truncate(lineText, innerWidth);
+          const textWidth = [...truncatedText].reduce((w, _) => w + 1, 0); // approximate
+          const pad = Math.max(0, innerWidth - textWidth);
+          result.push(
+            screenLine([
+              { text: "\u2551 ", style: { color: "yellow", dim: true } },
+              ...line.segments,
+              {
+                text: " ".repeat(pad) + " \u2551",
+                style: { color: "yellow", dim: true },
+              },
+            ]),
+          );
+        }
+        // Decision line
+        if (chunk.status === "done") {
+          const decisionText =
+            chunk.shouldContinue === false
+              ? "\u2717 Judge decided to end debate"
+              : chunk.shouldContinue === true
+                ? "\u2713 Continuing to next round"
+                : "";
+          if (decisionText) {
+            const decisionColor = chunk.shouldContinue ? "green" : "red";
+            const decisionInner = Math.max(0, contentWidth - 4);
+            const decisionPad = Math.max(
+              0,
+              decisionInner - decisionText.length,
+            );
+            result.push(
+              screenLine([
+                { text: "\u2551 ", style: { color: "yellow", dim: true } },
+                {
+                  text: decisionText,
+                  style: { bold: true, color: decisionColor },
+                },
+                {
+                  text: " ".repeat(decisionPad) + " \u2551",
+                  style: { color: "yellow", dim: true },
+                },
+              ]),
+            );
+          }
+        }
+        // Bottom border: ╚══════════════════════╝
+        const judgeBottom = `\u255A${"\u2550".repeat(Math.max(0, contentWidth - 2))}\u255D`;
+        result.push(
+          screenLine([
+            { text: judgeBottom, style: { bold: true, color: "yellow" } },
+          ]),
+        );
         break;
       }
       case "summary": {
