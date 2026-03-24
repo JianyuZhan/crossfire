@@ -472,7 +472,7 @@ function renderTurnPrompt(ctx: PromptContext): string {
   }
 
   sections.push(
-    `[OUTPUT INSTRUCTIONS]\nAfter your argument, you MUST call the debate_meta tool with your structured summary:\n- stance: one of "strongly_agree", "agree", "neutral", "disagree", "strongly_disagree"\n- confidence: a number from 0.0 to 1.0\n- key_points: array of your main arguments this turn (2-4 items)\n- concessions: array of points you concede to the opponent (0+ items)\n- wants_to_conclude: boolean indicating if you want to end the debate`,
+    `[OUTPUT INSTRUCTIONS]\nAfter your argument, you MUST output a fenced JSON block labeled debate_meta with your structured summary.\nExample format (use EXACTLY this structure):\n\`\`\`debate_meta\n{"stance":"agree","confidence":0.75,"key_points":["point 1","point 2"],"concessions":["concession 1"],"wants_to_conclude":false}\n\`\`\`\nField rules:\n- stance: one of "strongly_agree", "agree", "neutral", "disagree", "strongly_disagree"\n- confidence: number 0.0 to 1.0\n- key_points: array of 2-4 main arguments this turn\n- concessions: array of points you concede (can be empty [])\n- wants_to_conclude: boolean\nIMPORTANT: Output valid JSON inside the fenced block. Do NOT use markdown bullet points.`,
   );
 
   return sections.join("\n\n");
@@ -484,18 +484,16 @@ function renderTurnPrompt(ctx: PromptContext): string {
 
 function renderJudgePrompt(ctx: JudgePromptContext): string {
   const sections: string[] = [];
-  const defaultLang =
-    "You MUST respond in the same language as the debate topic.";
 
   sections.push(`[TOPIC]\n${ctx.topic}`);
 
   sections.push(
-    `[JUDGE TASK]\nYou are the judge evaluating this debate. Assess argument quality, evidence use, logical reasoning, and responsiveness to the opponent.\nThis is the evaluation after round ${ctx.roundNumber} of ${ctx.maxRounds}.`,
+    `[JUDGE TASK]\nYou are the judge evaluating this debate after round ${ctx.roundNumber} of ${ctx.maxRounds}.\nBe concise and direct. Do NOT narrate your analysis process (no "Let me analyze..." or "I'll evaluate..."). Go straight to your assessment: briefly state who is leading and why, then give your verdict via the judge_verdict tool.`,
   );
 
-  if (ctx.languageHint !== defaultLang) {
-    sections.push(`[LANGUAGE]\n${ctx.languageHint}`);
-  }
+  sections.push(
+    `[LANGUAGE]\n${ctx.languageHint}\nYour reasoning, verdict text, and all output MUST be in the same language as the debate topic. Do NOT mix languages.`,
+  );
 
   // Structured summary
   const summaryLines: string[] = [];
@@ -544,7 +542,7 @@ function renderJudgePrompt(ctx: JudgePromptContext): string {
   );
 
   sections.push(
-    `[OUTPUT INSTRUCTIONS]\nYou MUST call the judge_verdict tool with your evaluation:\n- leading: "proposer", "challenger", or "tie"\n- score: { "proposer": 0-10, "challenger": 0-10 }\n- reasoning: your analysis of the debate (2-4 sentences)\n- should_continue: boolean indicating whether the debate should continue`,
+    `[OUTPUT INSTRUCTIONS]\nYou MUST output a fenced JSON block labeled judge_verdict with your evaluation.\nExample format (use EXACTLY this structure):\n\`\`\`judge_verdict\n{"leading":"challenger","score":{"proposer":6,"challenger":7},"reasoning":"Brief analysis here.","should_continue":true}\n\`\`\`\nField rules:\n- leading: "proposer", "challenger", or "tie"\n- score: { "proposer": 0-10, "challenger": 0-10 }\n- reasoning: your analysis (2-4 sentences, same language as topic)\n- should_continue: boolean\nIMPORTANT: Output valid JSON inside the fenced block. Do NOT use markdown formatting or bullet points for the verdict.`,
   );
 
   return sections.join("\n\n");

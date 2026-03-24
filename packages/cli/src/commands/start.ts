@@ -12,7 +12,7 @@ import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
 import { loadProfile } from "../profile/loader.js";
-import { resolveRoles } from "../profile/resolver.js";
+import { resolveAdapterType, resolveRoles } from "../profile/resolver.js";
 import { createAdapters } from "../wiring/create-adapters.js";
 import type { AdapterFactoryMap } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
@@ -30,7 +30,10 @@ export const startCommand = new Command("start")
     "--topic-file <path>",
     "File containing debate topic (mutually exclusive with --topic)",
   )
-  .option("--judge <profile>", "Judge agent profile", "none")
+  .option(
+    "--judge <profile>",
+    "Judge agent profile (default: inferred from proposer; use 'none' to disable)",
+  )
   .option("--max-rounds <n>", "Maximum number of rounds", "10")
   .option("--judge-every-n-rounds <n>", "Judge evaluation frequency", "3")
   .option(
@@ -63,21 +66,32 @@ export const startCommand = new Command("start")
       const topic =
         options.topic ?? readFileSync(options.topicFile, "utf-8").trim();
 
-      // Validate judge configuration
-      if (options.judge === "none") {
-        if (options.judgeModel) {
-          console.error(
-            "Error: --judge-model cannot be used with --judge none",
-          );
-          process.exit(1);
-        }
-      }
-
       // Load profiles
       const proposerProfile = loadProfile(options.proposer);
       const challengerProfile = loadProfile(options.challenger);
-      const judgeProfile =
-        options.judge === "none" ? "none" : loadProfile(options.judge);
+
+      // Resolve judge profile: infer from proposer adapter type if not specified
+      const judgeDisabled = options.judge === "none";
+      if (judgeDisabled && options.judgeModel) {
+        console.error("Error: --judge-model cannot be used with --judge none");
+        process.exit(1);
+      }
+      let judgeProfile: ReturnType<typeof loadProfile> | "none";
+      if (judgeDisabled) {
+        judgeProfile = "none";
+      } else if (options.judge) {
+        judgeProfile = loadProfile(options.judge);
+      } else {
+        // Infer from proposer's adapter type
+        const adapterType = resolveAdapterType(proposerProfile.agent);
+        const inferredJudge = `${adapterType}/judge`;
+        judgeProfile = loadProfile(inferredJudge);
+        if (options.verbose) {
+          console.log(
+            `  Judge profile inferred from proposer: ${inferredJudge}`,
+          );
+        }
+      }
 
       // Resolve roles
       const roles = resolveRoles({
@@ -102,10 +116,9 @@ export const startCommand = new Command("start")
       const config: DebateConfig = {
         topic,
         maxRounds: Number.parseInt(options.maxRounds, 10),
-        judgeEveryNRounds:
-          options.judge === "none"
-            ? 0
-            : Number.parseInt(options.judgeEveryNRounds, 10),
+        judgeEveryNRounds: judgeDisabled
+          ? 0
+          : Number.parseInt(options.judgeEveryNRounds, 10),
         convergenceThreshold: Number.parseFloat(options.convergenceThreshold),
         proposerModel: roles.proposer.model,
         challengerModel: roles.challenger.model,
@@ -323,7 +336,13 @@ export const startCommand = new Command("start")
         const finalState = await runDebate(config, adapterBundle.adapters, {
           bus: busBundle.bus,
           debateId,
+          outputDir,
         });
+
+        // Give TUI time to render the final summary before unmount
+        if (inkInstance) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
 
         if (!options.headless) {
           console.log("\nDebate completed!");

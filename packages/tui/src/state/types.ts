@@ -119,6 +119,7 @@ export interface DebateSummaryView {
   consensus: string[];
   unresolved: string[];
   totalTurns: number;
+  outputDir?: string;
 }
 
 export interface TuiState {

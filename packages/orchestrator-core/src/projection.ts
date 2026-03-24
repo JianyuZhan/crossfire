@@ -106,7 +106,29 @@ export function projectState(events: AnyEvent[]): DebateState {
           lastTurn.content = text;
           // Extract debate_meta from fenced code block if no tool.call provided it
           if (!lastTurn.meta) {
-            const meta = extractFencedJson(text, "debate_meta");
+            // Try fenced ```debate_meta block first
+            let meta = extractFencedJson(text, "debate_meta");
+            // Fallback: try ```json block containing debate_meta fields
+            if (!meta) {
+              const jsonBlocks = text.matchAll(
+                /```json\s*\n([\s\S]*?)\n\s*```/g,
+              );
+              for (const m of jsonBlocks) {
+                try {
+                  const obj = JSON.parse(m[1].trim());
+                  if (obj && typeof obj === "object" && "stance" in obj) {
+                    meta = obj;
+                    break;
+                  }
+                } catch {
+                  /* skip */
+                }
+              }
+            }
+            // Fallback: extract from markdown prose format
+            if (!meta) {
+              meta = extractMetaFromProse(text);
+            }
             if (meta) {
               const parsed = DebateMetaSchema.safeParse(meta);
               if (parsed.success) {
@@ -179,4 +201,90 @@ function extractFencedJson(text: string, label: string): unknown | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Fallback: extract debate_meta from markdown prose format.
+ * Handles output like:
+ *   **stance**: agree（some annotation）
+ *   **confidence**: 0.80
+ *   **key_points**: 1. point one  2. point two
+ *   **wants_to_conclude**: false
+ */
+function extractMetaFromProse(text: string): unknown | undefined {
+  // Only look at the debate_meta section (after the label)
+  const sectionMatch = text.match(
+    /\*{0,2}debate_meta[^*]*\*{0,2}[\s\S]{0,50}?(?:：|:)\s*\n([\s\S]+?)$/i,
+  );
+  const section = sectionMatch ? sectionMatch[1] : text;
+
+  // Extract stance
+  const stanceMatch = section.match(/\*{0,2}stance\*{0,2}\s*[:：]\s*(\w+)/i);
+  if (!stanceMatch) return undefined;
+
+  const rawStance = stanceMatch[1].toLowerCase();
+  const stanceMap: Record<string, string> = {
+    strongly_agree: "strongly_agree",
+    agree: "agree",
+    neutral: "neutral",
+    disagree: "disagree",
+    strongly_disagree: "strongly_disagree",
+  };
+  const stance = stanceMap[rawStance];
+  if (!stance) return undefined;
+
+  // Extract confidence
+  const confMatch = section.match(
+    /\*{0,2}confidence\*{0,2}\s*[:：]\s*([\d.]+)/i,
+  );
+  const confidence = confMatch ? Number.parseFloat(confMatch[1]) : undefined;
+
+  // Extract key_points (numbered list items after **key_points**:)
+  const keyPoints: string[] = [];
+  const kpMatch = section.match(
+    /\*{0,2}key_points\*{0,2}\s*[:：]\s*\n([\s\S]*?)(?=\n\s*[-*]*\s*\*{0,2}(?:concessions|wants_to_conclude)\*{0,2}|$)/i,
+  );
+  if (kpMatch) {
+    const lines = kpMatch[1].split("\n");
+    for (const line of lines) {
+      const item = line.replace(/^\s*(?:\d+[.)]\s*|\*\s*|-\s*)/, "").trim();
+      if (item && item.length > 2) {
+        // Strip leading bold markers
+        keyPoints.push(item.replace(/^\*{1,2}/, "").replace(/\*{1,2}$/, ""));
+      }
+    }
+  }
+
+  // Extract concessions
+  const concessions: string[] = [];
+  const concMatch = section.match(
+    /\*{0,2}concessions\*{0,2}\s*[:：]\s*\n([\s\S]*?)(?=\n\s*[-*]*\s*\*{0,2}wants_to_conclude\*{0,2}|$)/i,
+  );
+  if (concMatch) {
+    const lines = concMatch[1].split("\n");
+    for (const line of lines) {
+      const item = line.replace(/^\s*(?:\d+[.)]\s*|\*\s*|-\s*)/, "").trim();
+      if (item && item.length > 2) {
+        concessions.push(item.replace(/^\*{1,2}/, "").replace(/\*{1,2}$/, ""));
+      }
+    }
+  }
+
+  // Extract wants_to_conclude
+  const wtcMatch = section.match(
+    /\*{0,2}wants_to_conclude\*{0,2}\s*[:：]\s*(true|false)/i,
+  );
+  const wantsToConclude = wtcMatch
+    ? wtcMatch[1].toLowerCase() === "true"
+    : undefined;
+
+  if (keyPoints.length === 0 && confidence === undefined) return undefined;
+
+  return {
+    stance,
+    confidence: confidence ?? 0.5,
+    key_points: keyPoints,
+    concessions: concessions.length > 0 ? concessions : undefined,
+    wants_to_conclude: wantsToConclude,
+  };
 }

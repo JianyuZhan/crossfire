@@ -9,6 +9,7 @@ export { evaluateClarification } from "./clarification-policy.js";
 export {
   generateSummary,
   generateActionPlan,
+  generateActionPlanHtml,
   formatFinalOutcome,
   type DebateSummary,
 } from "./summary-generator.js";

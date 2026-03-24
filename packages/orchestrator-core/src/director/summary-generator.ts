@@ -53,11 +53,25 @@ export function generateSummary(
     )
     .flatMap((t) => t.meta?.keyPoints ?? []);
 
+  // Infer leading from stance trajectory when no verdict available
+  let leading = verdict?.leading ?? "unknown";
+  if (
+    leading === "unknown" &&
+    proposerTrajectory.length > 0 &&
+    challengerTrajectory.length > 0
+  ) {
+    const lastP = proposerTrajectory[proposerTrajectory.length - 1];
+    const lastC = challengerTrajectory[challengerTrajectory.length - 1];
+    if (lastP.confidence > lastC.confidence + 0.1) leading = "proposer";
+    else if (lastC.confidence > lastP.confidence + 0.1) leading = "challenger";
+    else leading = "tie";
+  }
+
   return {
     terminationReason:
       terminationReasonOverride ?? state.terminationReason ?? "unknown",
     roundsCompleted: state.currentRound,
-    leading: verdict?.leading ?? "unknown",
+    leading,
     judgeScore: verdict?.score ?? null,
     recommendedAction: verdict?.reasoning ?? null,
     stanceTrajectory: {
@@ -200,6 +214,57 @@ export function generateActionPlan(
   }
 
   return lines.join("\n");
+}
+
+export function generateActionPlanHtml(
+  state: DebateState,
+  summary: DebateSummary,
+): string {
+  const md = generateActionPlan(state, summary);
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const title = esc(state.config.topic);
+
+  // Simple markdown-to-HTML conversion for the action plan
+  const bodyHtml = md
+    .split("\n")
+    .map((line) => {
+      if (line.startsWith("# ")) return `<h1>${esc(line.slice(2))}</h1>`;
+      if (line.startsWith("## ")) return `<h2>${esc(line.slice(3))}</h2>`;
+      if (line.startsWith("> "))
+        return `<blockquote>${esc(line.slice(2))}</blockquote>`;
+      if (line.startsWith("| ")) return `<pre>${esc(line)}</pre>`;
+      if (/^\d+\.\s/.test(line)) return `<p>${esc(line)}</p>`;
+      if (line.startsWith("- ")) return `<p>${esc(line)}</p>`;
+      if (line.trim() === "") return "";
+      // Bold markers
+      const boldConverted = esc(line).replace(
+        /\*\*(.+?)\*\*/g,
+        "<strong>$1</strong>",
+      );
+      return `<p>${boldConverted}</p>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crossfire: ${title}</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#333}
+h1{border-bottom:2px solid #2563eb;padding-bottom:.5rem}
+h2{color:#2563eb;margin-top:2rem}
+blockquote{border-left:4px solid #94a3b8;margin:1rem 0;padding:.5rem 1rem;color:#64748b;background:#f8fafc}
+pre{background:#f1f5f9;padding:.5rem 1rem;overflow-x:auto;font-size:.9rem}
+strong{color:#1e40af}
+</style>
+</head>
+<body>
+${bodyHtml}
+</body>
+</html>`;
 }
 
 /** Items both sides conceded — approximate match by substring overlap */

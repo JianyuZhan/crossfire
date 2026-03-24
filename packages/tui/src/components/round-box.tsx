@@ -29,7 +29,13 @@ export function RoundBox({
           {active ? "▶" : "✓"} Round {roundNumber}/{maxRounds}
         </Text>
         {collapsed && (
-          <Text dimColor> [collapsed] /expand {roundNumber} to view</Text>
+          <>
+            <Text dimColor> [collapsed] </Text>
+            <Text color="cyan" bold>
+              /expand {roundNumber}
+            </Text>
+            <Text dimColor> to view</Text>
+          </>
         )}
       </Box>
       {collapsed && collapsedSummary && (

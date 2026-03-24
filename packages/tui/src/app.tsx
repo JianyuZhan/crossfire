@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box } from "ink";
 import React, { useEffect, useState } from "react";
 import { AgentPanel } from "./components/agent-panel.js";
 import {
@@ -14,24 +14,7 @@ import { RoundBox } from "./components/round-box.js";
 import { SplitPanel } from "./components/split-panel.js";
 import type { EventSource } from "./replay/event-source.js";
 import type { TuiStore } from "./state/tui-store.js";
-import type { JudgeRoundResult, TuiRound, TuiState } from "./state/types.js";
-
-/** Compact one-line judge summary shown when round is collapsed */
-function JudgeSummaryLine({
-  result,
-}: {
-  result: JudgeRoundResult;
-}): React.ReactElement {
-  const v = result.verdict;
-  const line = v
-    ? `Judge (R${result.roundNumber}): ${v.leading} leads ${v.score.proposer}:${v.score.challenger} | Continue: ${v.shouldContinue ? "Yes" : "No"}`
-    : `Judge (R${result.roundNumber}): no structured verdict`;
-  return (
-    <Box paddingX={1}>
-      <Text color="yellow">{line}</Text>
-    </Box>
-  );
-}
+import type { TuiRound, TuiState } from "./state/types.js";
 
 interface AppProps {
   store: TuiStore;
@@ -125,10 +108,7 @@ export function App({
                   collapsedSummary={summary}
                 />
                 {roundJudgeResults.map((jr, i) => (
-                  <JudgeSummaryLine
-                    key={`j-${round.roundNumber}-${i}`}
-                    result={jr}
-                  />
+                  <JudgePanel key={`j-${round.roundNumber}-${i}`} result={jr} />
                 ))}
               </React.Fragment>
             );
@@ -217,7 +197,16 @@ export function App({
           />
         )}
         {/* Final summary after debate completion */}
-        {state.summary && <FinalSummaryPanel summary={state.summary} />}
+        {state.summary && (
+          <FinalSummaryPanel
+            summary={state.summary}
+            lastJudgeResult={
+              state.judgeResults.length > 0
+                ? state.judgeResults[state.judgeResults.length - 1]
+                : undefined
+            }
+          />
+        )}
       </Box>
       <MetricsBar state={state.metrics} />
       <CommandStatusLine state={state.command} />

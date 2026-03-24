@@ -20,7 +20,7 @@ const MAX_THINKING_BYTES = 4096;
 /** Internal meta-tool names that should not appear in the TUI */
 const INTERNAL_TOOLS = new Set(["debate_meta", "judge_verdict"]);
 
-/** Strip markdown code blocks containing internal tool calls from display text */
+/** Strip markdown code blocks and labels containing internal tool calls from display text */
 export function stripInternalToolBlocks(text: string): string {
   return (
     text
@@ -30,6 +30,11 @@ export function stripInternalToolBlocks(text: string): string {
       .replace(/```(?:debate_meta|judge_verdict)[\s\S]*$/g, "")
       // Bare label followed by JSON (no backtick fencing, e.g. Codex output)
       .replace(/\n?(?:debate_meta|judge_verdict)\s*\n\s*\{[\s\S]*?\}\s*$/g, "")
+      // Markdown-bold labels like **debate_meta 结构化总结：** or **debate_meta summary:**
+      .replace(
+        /\n?\*{0,2}(?:debate_meta|judge_verdict)[^*\n]*\*{0,2}\s*[:：]?\s*\n?/gi,
+        "",
+      )
       .trim()
   );
 }
@@ -155,8 +160,15 @@ export class TuiStore {
     this.state.metrics.stanceDelta = ds.convergence.stanceDelta;
     this.state.metrics.mutualConcessions = ds.convergence.mutualConcessions;
     this.state.metrics.bothWantToConclude = ds.convergence.bothWantToConclude;
+    // Composite convergence: 50% stance, 30% concessions, 20% conclude
+    const stanceScore = Math.max(0, 1 - ds.convergence.stanceDelta);
+    const concessionScore = Math.min(ds.convergence.mutualConcessions / 5, 1.0);
+    const concludeScore = ds.convergence.bothWantToConclude ? 1.0 : 0.0;
     this.state.metrics.convergencePercent = Math.round(
-      Math.max(0, 1 - ds.convergence.stanceDelta / 1.0) * 100,
+      Math.min(
+        (stanceScore * 0.5 + concessionScore * 0.3 + concludeScore * 0.2) * 100,
+        100,
+      ),
     );
 
     for (const cb of this.listeners) cb();
@@ -506,10 +518,11 @@ export class TuiStore {
         break;
       }
       case "debate.completed": {
-        // Clear judge panel on debate end
-        this.state.judge.visible = false;
-        this.state.judge.judgeStatus = "idle";
-        const e = event as { summary?: Record<string, unknown> };
+        // Keep judge panel visible on debate end (user wants to read it)
+        const e = event as {
+          summary?: Record<string, unknown>;
+          outputDir?: string;
+        };
         if (e.summary) {
           this.state.summary = {
             terminationReason: String(e.summary.terminationReason ?? "unknown"),
@@ -529,6 +542,7 @@ export class TuiStore {
               ? (e.summary.unresolved as string[])
               : [],
             totalTurns: Number(e.summary.totalTurns ?? 0),
+            outputDir: e.outputDir ? String(e.outputDir) : undefined,
           };
         }
         break;

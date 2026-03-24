@@ -1,14 +1,18 @@
+import { join } from "node:path";
 import { Box, Text } from "ink";
 import type React from "react";
-import type { DebateSummaryView } from "../state/types.js";
+import type { DebateSummaryView, JudgeRoundResult } from "../state/types.js";
 
 interface FinalSummaryPanelProps {
   summary: DebateSummaryView;
+  lastJudgeResult?: JudgeRoundResult;
 }
 
 export function FinalSummaryPanel({
   summary,
+  lastJudgeResult,
 }: FinalSummaryPanelProps): React.ReactElement {
+  const v = lastJudgeResult?.verdict;
   return (
     <Box
       flexDirection="column"
@@ -23,13 +27,38 @@ export function FinalSummaryPanel({
         Termination: {summary.terminationReason} (Round{" "}
         {summary.roundsCompleted}, {summary.totalTurns} turns)
       </Text>
-      {summary.judgeScore ? (
+      {(v ?? summary.judgeScore) ? (
         <Text>
-          Leading: {summary.leading} (Score: {summary.judgeScore.proposer} vs{" "}
-          {summary.judgeScore.challenger})
+          Leading:{" "}
+          <Text bold color="cyan">
+            {v?.leading ?? summary.leading}
+          </Text>{" "}
+          (Score: {(v?.score ?? summary.judgeScore)?.proposer} vs{" "}
+          {(v?.score ?? summary.judgeScore)?.challenger})
         </Text>
       ) : (
-        <Text>Leading: {summary.leading}</Text>
+        <Text>
+          Leading:{" "}
+          <Text bold color="cyan">
+            {summary.leading}
+          </Text>
+        </Text>
+      )}
+      {v?.reasoning && (
+        <Box marginTop={1}>
+          <Text>
+            <Text bold>Judge: </Text>
+            {v.reasoning}
+          </Text>
+        </Box>
+      )}
+      {!v?.reasoning && summary.recommendedAction && (
+        <Box marginTop={1}>
+          <Text>
+            <Text bold>Judge: </Text>
+            {summary.recommendedAction}
+          </Text>
+        </Box>
       )}
       {summary.consensus.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
@@ -51,9 +80,11 @@ export function FinalSummaryPanel({
           ))}
         </Box>
       )}
-      {summary.recommendedAction && (
+      {summary.outputDir && (
         <Box marginTop={1}>
-          <Text>Judge reasoning: {summary.recommendedAction}</Text>
+          <Text dimColor>
+            Report: file://{join(summary.outputDir, "action-plan.html")}
+          </Text>
         </Box>
       )}
     </Box>
