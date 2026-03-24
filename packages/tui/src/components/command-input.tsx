@@ -21,6 +21,8 @@ export type ParsedCommand =
   | { type: "jump"; target: "round" | "turn"; value: number | string }
   | { type: "expand"; roundNumber: number }
   | { type: "collapse"; roundNumber: number }
+  | { type: "top" }
+  | { type: "bottom" }
   | { type: "unknown"; raw: string };
 
 export function parseCommand(input: string, mode: string): ParsedCommand {
@@ -83,7 +85,13 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
       return { type: "collapse", roundNumber: n };
     }
     case "/jump": {
-      const target = parts[1] as "round" | "turn";
+      const arg1 = parts[1];
+      if (!arg1) return { type: "unknown", raw: input };
+      const directN = Number.parseInt(arg1, 10);
+      if (!isNaN(directN) && parts.length === 2) {
+        return { type: "jump", target: "round", value: directN };
+      }
+      const target = arg1 as "round" | "turn";
       if (target !== "round" && target !== "turn")
         return { type: "unknown", raw: input };
       const value =
@@ -93,6 +101,10 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
       if (!value) return { type: "unknown", raw: input };
       return { type: "jump", target, value: value as number | string };
     }
+    case "/top":
+      return { type: "top" };
+    case "/bottom":
+      return { type: "bottom" };
     default:
       return { type: "unknown", raw: input };
   }
