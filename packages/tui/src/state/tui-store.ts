@@ -332,8 +332,44 @@ export class TuiStore {
       this.viewport.contentWidth,
     );
     this.viewport.contentHeight = this.globalLines.length;
+
+    // Assign layoutMeta FIRST (needed for autoFollow target calculation)
+    let lineIdx = 0;
+    for (let ci = 0; ci < this.chunks.length; ci++) {
+      if (ci > 0) lineIdx++; // separator between chunks
+      const chunk = this.chunks[ci];
+      const startLine = lineIdx;
+      if (chunk.type === "round") {
+        if (chunk.collapsed) {
+          // header(1) + P(1) + C(1) + optional judge(1)
+          const hasJudge =
+            chunk.collapsedSummary &&
+            typeof chunk.collapsedSummary === "object" &&
+            chunk.collapsedSummary.judgeLine;
+          lineIdx += 3 + (hasJudge ? 1 : 0);
+        } else {
+          // top-border(1) + content(height) + bottom-border(1)
+          let roundLines = 2 + chunk.height;
+          // Embedded judge section lines
+          if (chunk.judgeResult && chunk.judgeResult.status === "done") {
+            const textLen = (chunk.judgeResult.messageText ?? "").length;
+            const judgeTextLines = Math.max(
+              1,
+              Math.ceil(textLen / Math.max(1, this.viewport.contentWidth - 4)),
+            );
+            roundLines +=
+              1 + judgeTextLines + (chunk.judgeResult.verdict ? 1 : 0);
+          }
+          lineIdx += roundLines;
+        }
+      } else {
+        lineIdx += 1 + (chunk.lines?.length ?? 0);
+      }
+      chunk.layoutMeta = { startLine, endLine: lineIdx - 1 };
+    }
+
     if (this.viewport.autoFollow) {
-      this.viewport.scrollOffset = 0;
+      this.scrollToActiveContent();
     }
     const maxOffset = Math.max(
       0,
@@ -343,19 +379,39 @@ export class TuiStore {
       this.viewport.scrollOffset,
       maxOffset,
     );
-    // Assign layoutMeta to chunks for jumpToRound
-    let lineIdx = 0;
-    for (let ci = 0; ci < this.chunks.length; ci++) {
-      if (ci > 0) lineIdx++; // separator between chunks
-      const chunk = this.chunks[ci];
-      const startLine = lineIdx;
-      if (chunk.type === "round") {
-        // collapsed: 1 line; expanded: top-border(1) + content(height) + bottom-border(1)
-        lineIdx += chunk.collapsed ? 1 : 2 + chunk.height;
-      } else {
-        lineIdx += 1 + (chunk.lines?.length ?? 0);
-      }
-      chunk.layoutMeta = { startLine, endLine: lineIdx - 1 };
+  }
+
+  /**
+   * In auto-follow mode, scroll so the active speaker's latest line
+   * is visible at the bottom of the viewport.
+   *
+   * In a side-by-side round, the active speaker's content may be in the
+   * shorter panel (e.g. challenger just started while proposer has 20 lines).
+   * Scrolling to the absolute bottom would show proposer's end + empty space,
+   * missing the challenger's output entirely.
+   */
+  private scrollToActiveContent(): void {
+    // Find the active (non-collapsed) round chunk
+    const activeChunk = this.chunks.find(
+      (c) => c.type === "round" && !c.collapsed && c.active,
+    );
+
+    if (activeChunk && activeChunk.type === "round" && activeChunk.layoutMeta) {
+      const activeLines =
+        this.activeSpeaker === "challenger"
+          ? activeChunk.rightLines
+          : activeChunk.leftLines;
+      // Active content ends at: roundStart + 1 (top border) + activeLines.length
+      const activeContentEnd =
+        activeChunk.layoutMeta.startLine + 1 + Math.max(1, activeLines.length);
+      // scrollOffset is from bottom: offset = totalLines - desiredEndLine
+      this.viewport.scrollOffset = Math.max(
+        0,
+        this.globalLines.length - activeContentEnd,
+      );
+    } else {
+      // No active round (judge, summary, between rounds) → bottom
+      this.viewport.scrollOffset = 0;
     }
   }
 
@@ -484,11 +540,15 @@ export class TuiStore {
           p.status = "speaking";
           p.currentMessageText += (event as { text: string }).text;
         } else if (this.state.judge.judgeStatus === "evaluating") {
-          // Route judge message to judge panel
-          this.state.judge.judgeMessageText += (event as { text: string }).text;
-          // Also update the active judgeResults entry
+          // Route judge message to judge panel, strip internal tool blocks during streaming
+          const rawJudge =
+            this.state.judge.judgeMessageText +
+            (event as { text: string }).text;
+          this.state.judge.judgeMessageText = rawJudge;
+          const stripped = stripInternalToolBlocks(rawJudge);
+          // Also update the active judgeResults entry (always stripped for display)
           const jr = this.activeJudgeResult();
-          if (jr) jr.messageText = this.state.judge.judgeMessageText;
+          if (jr) jr.messageText = stripped;
         }
         break;
       }
