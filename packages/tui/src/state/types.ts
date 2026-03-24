@@ -32,6 +32,7 @@ export interface TuiRound {
   proposer?: AgentTurnSnapshot;
   challenger?: AgentTurnSnapshot;
   collapsed?: boolean;
+  userCollapsed?: boolean;
 }
 
 /** Judge evaluation result for a specific round */
@@ -132,4 +133,100 @@ export interface TuiState {
   command: CommandState;
   debateState: DebateState;
   summary?: DebateSummaryView;
+}
+
+// ── Viewport Scrolling Types ──
+
+export interface ViewportState {
+  scrollOffset: number;
+  autoFollow: boolean;
+  viewportHeight: number;
+  contentWidth: number;
+  contentHeight: number;
+}
+
+export interface StyledSegment {
+  text: string;
+  style: {
+    bold?: boolean;
+    dim?: boolean;
+    color?: string;
+    italic?: boolean;
+  };
+}
+
+export interface ScreenLine {
+  segments: StyledSegment[];
+  displayWidth: number;
+}
+
+export type RenderBlock =
+  | {
+      kind: "agent-header";
+      role: "proposer" | "challenger";
+      agentType?: string;
+      status: string;
+      duration?: number;
+    }
+  | { kind: "thinking"; text: string }
+  | {
+      kind: "tool-call";
+      toolName: string;
+      status: "running" | "success" | "error";
+      summary?: string;
+      elapsedMs?: number;
+    }
+  | { kind: "message"; text: string; isFinal: boolean }
+  | { kind: "warning"; text: string }
+  | { kind: "error"; text: string }
+  | { kind: "separator" };
+
+export interface ChunkLayoutMeta {
+  startLine: number;
+  endLine: number;
+}
+
+export interface RoundRenderChunk {
+  type: "round";
+  roundNumber: number;
+  collapsed: boolean;
+  collapsedSummary?: string;
+  leftBlocks?: RenderBlock[];
+  rightBlocks?: RenderBlock[];
+  leftLines: ScreenLine[];
+  rightLines: ScreenLine[];
+  height: number;
+  layoutMeta?: ChunkLayoutMeta;
+}
+
+export interface JudgeRenderChunk {
+  type: "judge";
+  roundNumber: number;
+  status: "streaming" | "done";
+  lines: ScreenLine[];
+  layoutMeta?: ChunkLayoutMeta;
+}
+
+export interface SummaryRenderChunk {
+  type: "summary";
+  lines: ScreenLine[];
+  layoutMeta?: ChunkLayoutMeta;
+}
+
+export type ContentChunk =
+  | RoundRenderChunk
+  | JudgeRenderChunk
+  | SummaryRenderChunk;
+
+export type ViewportAction =
+  | { type: "scroll"; delta: number }
+  | { type: "top" }
+  | { type: "bottom" }
+  | { type: "jump-round"; roundNumber: number }
+  | { type: "resize"; height: number; width: number };
+
+export interface RenderSnapshot {
+  state: TuiState;
+  viewport: ViewportState;
+  visibleLines: ScreenLine[];
 }
