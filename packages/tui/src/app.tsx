@@ -1,20 +1,16 @@
-import { Box } from "ink";
+import { Box, useInput } from "ink";
 import React, { useEffect, useState } from "react";
-import { AgentPanel } from "./components/agent-panel.js";
 import {
   CommandInput,
   type ParsedCommand,
 } from "./components/command-input.js";
 import { CommandStatusLine } from "./components/command-status-line.js";
-import { FinalSummaryPanel } from "./components/final-summary-panel.js";
 import { HeaderBar } from "./components/header-bar.js";
-import { JudgePanel } from "./components/judge-panel.js";
 import { MetricsBar } from "./components/metrics-bar.js";
-import { RoundBox } from "./components/round-box.js";
-import { SplitPanel } from "./components/split-panel.js";
+import { ScrollableContent } from "./components/scrollable-content.js";
 import type { EventSource } from "./replay/event-source.js";
 import type { TuiStore } from "./state/tui-store.js";
-import type { TuiRound, TuiState } from "./state/types.js";
+import type { RenderSnapshot, TuiState } from "./state/types.js";
 
 interface AppProps {
   store: TuiStore;
@@ -22,20 +18,16 @@ interface AppProps {
   onCommand?: (cmd: ParsedCommand) => void;
 }
 
-/**
- * Determine which round is "active" (still has a live speaker).
- * An active round is one that exists in rounds[] but is missing
- * at least one agent snapshot, meaning a turn is in progress.
- */
-function findActiveRound(state: TuiState): TuiRound | undefined {
-  if (state.rounds.length === 0) return undefined;
-  const last = state.rounds[state.rounds.length - 1];
-  if (!last.proposer || !last.challenger) return last;
-  return undefined;
-}
+const PAGE_UP = "\x1b[5~";
+const PAGE_DOWN = "\x1b[6~";
+const HOME_SEQS = ["\x1b[H", "\x1b[1~"];
+const END_SEQS = ["\x1b[F", "\x1b[4~"];
 
-function isCompleted(round: TuiRound): boolean {
-  return !!round.proposer && !!round.challenger;
+function computeFixedAreaHeight(_state: TuiState): number {
+  // HeaderBar: border(2) + title(1) + topic(1) + agents(1) + round/phase(1) = 6
+  // MetricsBar: 1, CommandStatusLine: 1, CommandInput: 1
+  // Conservative upper bound = 9
+  return 9;
 }
 
 export function App({
@@ -43,12 +35,13 @@ export function App({
   source,
   onCommand,
 }: AppProps): React.ReactElement {
-  const [state, setState] = useState<TuiState>(store.getState());
+  const [snapshot, setSnapshot] = useState<RenderSnapshot>(
+    store.getRenderSnapshot(),
+  );
 
+  // Subscribe to store + start event source
   useEffect(() => {
-    const unsub = store.subscribe(() => {
-      setState({ ...store.getState() });
-    });
+    const unsub = store.subscribe(() => setSnapshot(store.getRenderSnapshot()));
     source.start();
     return () => {
       unsub();
@@ -56,17 +49,69 @@ export function App({
     };
   }, [store, source]);
 
+  // Resize effect A: bind resize listener
+  useEffect(() => {
+    const stdout = process.stdout;
+    const onResize = () => {
+      store.setViewportDimensions(
+        stdout.rows - computeFixedAreaHeight(store.getState()),
+        stdout.columns,
+      );
+    };
+    stdout.on("resize", onResize);
+    onResize(); // initial measurement
+    return () => {
+      stdout.off("resize", onResize);
+    };
+  }, [store]);
+
+  // Resize effect B: re-measure when fixed-area-affecting state changes
+  useEffect(() => {
+    const stdout = process.stdout;
+    store.setViewportDimensions(
+      stdout.rows - computeFixedAreaHeight(store.getState()),
+      stdout.columns,
+    );
+  }, [store, snapshot.state.command.mode, snapshot.state.judge.visible]);
+
+  // Scroll key handling
+  const pageSize = Math.max(1, snapshot.viewport.viewportHeight - 2);
+  useInput((input, key) => {
+    // Don't process scroll keys when command input is focused
+    if (key.upArrow) store.scroll(-1);
+    else if (key.downArrow) store.scroll(1);
+    else if (input === PAGE_UP) store.scroll(-pageSize);
+    else if (input === PAGE_DOWN) store.scroll(pageSize);
+    else if (HOME_SEQS.includes(input)) store.scrollToTop();
+    else if (END_SEQS.includes(input)) store.scrollToBottom();
+    // Ctrl+U / Ctrl+D as fallback for PgUp/PgDn
+    else if (input === "u" && key.ctrl) store.scroll(-pageSize);
+    else if (input === "d" && key.ctrl) store.scroll(pageSize);
+  });
+
   const handleCommand = (cmd: ParsedCommand): void => {
     if (cmd.type === "expand" || cmd.type === "collapse") {
       store.toggleRoundCollapse(cmd.roundNumber);
       return;
     }
+    if (cmd.type === "top") {
+      store.scrollToTop();
+      return;
+    }
+    if (cmd.type === "bottom") {
+      store.scrollToBottom();
+      return;
+    }
+    if (cmd.type === "jump") {
+      if (cmd.target === "round" && typeof cmd.value === "number") {
+        store.jumpToRound(cmd.value);
+        return;
+      }
+    }
     onCommand?.(cmd);
   };
 
-  const maxRounds = state.metrics.maxRounds;
-  const activeRound = findActiveRound(state);
-  const completedRounds = state.rounds.filter(isCompleted);
+  const { state, viewport, visibleLines } = snapshot;
 
   const proposerInfo = state.proposer.agentType
     ? { agentType: state.proposer.agentType, model: state.proposer.model }
@@ -81,134 +126,14 @@ export function App({
         debateId={state.metrics.debateId}
         topic={state.debateState.config.topic}
         currentRound={state.metrics.currentRound}
-        maxRounds={maxRounds}
+        maxRounds={state.metrics.maxRounds}
         phase={state.debateState.phase}
         mode={state.command.mode}
         proposerInfo={proposerInfo}
         challengerInfo={challengerInfo}
       />
-      <Box flexDirection="column" flexGrow={1}>
-        {/* Completed rounds */}
-        {completedRounds.map((round) => {
-          const roundJudgeResults = state.judgeResults.filter(
-            (j) => j.roundNumber === round.roundNumber && j.status === "done",
-          );
-          if (round.collapsed) {
-            const pText = round.proposer?.messageText ?? "";
-            const cText = round.challenger?.messageText ?? "";
-            const pSummary = pText.slice(0, 60).replace(/\n/g, " ");
-            const cSummary = cText.slice(0, 60).replace(/\n/g, " ");
-            const summary = `P: ${pSummary}...  C: ${cSummary}...`;
-            return (
-              <React.Fragment key={round.roundNumber}>
-                <RoundBox
-                  roundNumber={round.roundNumber}
-                  maxRounds={maxRounds}
-                  collapsed
-                  collapsedSummary={summary}
-                />
-                {roundJudgeResults.map((jr, i) => (
-                  <JudgePanel key={`j-${round.roundNumber}-${i}`} result={jr} />
-                ))}
-              </React.Fragment>
-            );
-          }
-          return (
-            <React.Fragment key={round.roundNumber}>
-              <RoundBox roundNumber={round.roundNumber} maxRounds={maxRounds}>
-                <SplitPanel>
-                  <AgentPanel
-                    mode="snapshot"
-                    role="proposer"
-                    agentType={state.proposer.agentType}
-                    snapshot={round.proposer!}
-                  />
-                  <AgentPanel
-                    mode="snapshot"
-                    role="challenger"
-                    agentType={state.challenger.agentType}
-                    snapshot={round.challenger!}
-                  />
-                </SplitPanel>
-              </RoundBox>
-              {roundJudgeResults.map((jr, i) => (
-                <JudgePanel key={`j-${round.roundNumber}-${i}`} result={jr} />
-              ))}
-            </React.Fragment>
-          );
-        })}
-        {/* Active round (in progress) */}
-        {activeRound && (
-          <RoundBox
-            roundNumber={activeRound.roundNumber}
-            maxRounds={maxRounds}
-            active
-          >
-            <SplitPanel>
-              {activeRound.proposer ? (
-                <AgentPanel
-                  mode="snapshot"
-                  role="proposer"
-                  agentType={state.proposer.agentType}
-                  snapshot={activeRound.proposer}
-                />
-              ) : (
-                <AgentPanel
-                  mode="live"
-                  role="proposer"
-                  agentType={state.proposer.agentType}
-                  state={state.proposer}
-                />
-              )}
-              {activeRound.challenger ? (
-                <AgentPanel
-                  mode="snapshot"
-                  role="challenger"
-                  agentType={state.challenger.agentType}
-                  snapshot={activeRound.challenger}
-                />
-              ) : activeRound.proposer ? (
-                <AgentPanel
-                  mode="live"
-                  role="challenger"
-                  agentType={state.challenger.agentType}
-                  state={state.challenger}
-                />
-              ) : (
-                <AgentPanel
-                  mode="idle"
-                  role="challenger"
-                  agentType={state.challenger.agentType}
-                />
-              )}
-            </SplitPanel>
-          </RoundBox>
-        )}
-        {/* Active judge: visible during evaluation and after completion (until next round starts) */}
-        {state.judge.visible && state.judge.judgeStatus !== "idle" && (
-          <JudgePanel
-            result={{
-              roundNumber: state.judge.roundNumber,
-              status:
-                state.judge.judgeStatus === "done" ? "done" : "evaluating",
-              messageText: state.judge.judgeMessageText,
-              verdict: state.judge.verdict,
-            }}
-          />
-        )}
-        {/* Final summary after debate completion */}
-        {state.summary && (
-          <FinalSummaryPanel
-            summary={state.summary}
-            lastJudgeResult={
-              state.judgeResults.length > 0
-                ? state.judgeResults[state.judgeResults.length - 1]
-                : undefined
-            }
-          />
-        )}
-      </Box>
-      <MetricsBar state={state.metrics} />
+      <ScrollableContent lines={visibleLines} viewport={viewport} />
+      <MetricsBar state={state.metrics} viewport={viewport} />
       <CommandStatusLine state={state.command} />
       <CommandInput state={state.command} onCommand={handleCommand} />
     </Box>
