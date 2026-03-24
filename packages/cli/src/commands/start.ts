@@ -259,6 +259,8 @@ export const startCommand = new Command("start")
       // Render TUI if not headless
       let inkInstance: { clear: () => void; unmount: () => void } | undefined;
       if (tuiBundle) {
+        // Enter alternate screen for fullscreen viewport
+        process.stdout.write("\x1b[?1049h");
         inkInstance = render(
           React.createElement(App, {
             store: tuiBundle.store,
@@ -355,6 +357,8 @@ export const startCommand = new Command("start")
         process.off("SIGINT", triggerShutdown);
         if (inkInstance) {
           inkInstance.unmount();
+          // Leave alternate screen
+          process.stdout.write("\x1b[?1049l");
         }
         await adapterBundle.closeAll();
         await busBundle.close();
