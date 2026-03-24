@@ -16,13 +16,13 @@ import {
   buildJudgePrompt,
   buildTurnPrompt,
   formatFinalOutcome,
-  generateActionPlan,
-  generateActionPlanHtml,
+  generateActionPlanHtmlFromDeepSummary,
+  generateActionPlanHtmlFallback,
   generateSummary,
 } from "@crossfire/orchestrator-core";
 import type { AnyEvent } from "@crossfire/orchestrator-core";
 import { DebateEventBus } from "./event-bus.js";
-import { runJudgeTurn } from "./judge.js";
+import { runJudgeSummarization, runJudgeTurn } from "./judge.js";
 
 export interface AdapterMap {
   proposer: { adapter: AgentAdapter; session: SessionHandle };
@@ -338,26 +338,59 @@ export async function runDebate(
       terminationReason,
     );
     if (options?.outputDir) {
+      // summary.json (kept)
       try {
         writeFileSync(
           join(options.outputDir, "summary.json"),
           JSON.stringify(summary, null, 2) + "\n",
         );
       } catch {
-        /* File write failure is non-fatal */
+        /* non-fatal */
       }
+
+      // action-plan.html — try deep summary from judge, fallback to basic
       try {
-        const actionPlan = generateActionPlan(preCompleteState, summary);
-        writeFileSync(join(options.outputDir, "action-plan.md"), actionPlan);
+        let actionPlanHtml: string;
+        if (adapters.judge) {
+          const sumPrompt = buildSummarizationPrompt(preCompleteState);
+          const deepSummary = await Promise.race([
+            runJudgeSummarization(
+              adapters.judge.adapter,
+              adapters.judge.session,
+              bus,
+              sumPrompt,
+            ),
+            new Promise<undefined>((resolve) =>
+              setTimeout(() => resolve(undefined), 60_000),
+            ),
+          ]);
+          if (deepSummary) {
+            actionPlanHtml = generateActionPlanHtmlFromDeepSummary(
+              preCompleteState.config.topic,
+              deepSummary,
+              summary.roundsCompleted,
+            );
+          } else {
+            actionPlanHtml = generateActionPlanHtmlFallback(
+              preCompleteState.config.topic,
+              summary,
+            );
+          }
+        } else {
+          actionPlanHtml = generateActionPlanHtmlFallback(
+            preCompleteState.config.topic,
+            summary,
+          );
+        }
+        writeFileSync(
+          join(options.outputDir, "action-plan.html"),
+          actionPlanHtml,
+        );
       } catch {
-        /* File write failure is non-fatal */
+        /* non-fatal */
       }
-      try {
-        const html = generateActionPlanHtml(preCompleteState, summary);
-        writeFileSync(join(options.outputDir, "action-plan.html"), html);
-      } catch {
-        /* File write failure is non-fatal */
-      }
+
+      // transcript.html is written by TranscriptWriter.close()
     }
 
     // Push debate.completed LAST
@@ -372,6 +405,40 @@ export async function runDebate(
   } finally {
     for (const unsub of unsubs) unsub();
   }
+}
+
+function buildSummarizationPrompt(state: DebateState): string {
+  const transcript = state.turns
+    .map((t) => `[Round ${t.roundNumber} - ${t.role}]\n${t.content}`)
+    .join("\n\n");
+
+  return `You are the judge of a multi-round debate. Based on the full transcript below, produce a deep summary.
+
+Topic: ${state.config.topic}
+Rounds: ${state.currentRound}
+
+${transcript}
+
+Output the following sections in the same language as the topic:
+
+1. **Consensus — Detailed Action Plan**: For each point both sides agreed on:
+   - title: the consensus point
+   - detail: detailed explanation of what was agreed
+   - nextSteps: concrete next steps or implementation approach
+
+2. **Unresolved Issues & Risks**: For each disputed/unexplored point:
+   - title: the issue
+   - proposerPosition: proposer's stance
+   - challengerPosition: challenger's stance
+   - risk: potential risks if not addressed
+
+Format your response as JSON:
+\`\`\`json
+{
+  "consensus": [{ "title": "...", "detail": "...", "nextSteps": "..." }],
+  "unresolved": [{ "title": "...", "proposerPosition": "...", "challengerPosition": "...", "risk": "..." }]
+}
+\`\`\``;
 }
 
 function waitForTurnCompleted(
