@@ -246,12 +246,6 @@ export function buildPanelLines(
         break;
       }
       case "tool-call": {
-        const icon =
-          block.status === "running"
-            ? "\u25B6"
-            : block.status === "success"
-              ? "\u2713"
-              : "\u2717";
         const prefix =
           block.status === "running"
             ? ">>"
