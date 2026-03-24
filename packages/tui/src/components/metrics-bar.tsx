@@ -52,16 +52,39 @@ export function MetricsBar({
       {viewport && (
         <>
           <Text dimColor> | </Text>
-          <Text color={viewport.autoFollow ? "green" : "yellow"}>
-            {viewport.autoFollow
-              ? "LIVE \u2191\u2193scroll"
-              : `SCROLLED ${Math.max(1, viewport.contentHeight - viewport.scrollOffset - viewport.viewportHeight + 1)}/${viewport.contentHeight}`}
-          </Text>
-          {!viewport.autoFollow && (
-            <Text color="yellow" dimColor>
-              {" "}
-              [End=LIVE]
-            </Text>
+          {viewport.autoFollow ? (
+            <>
+              <Text color="green" bold>
+                {"\u25CF"} LIVE
+              </Text>
+              <Text color="green" dimColor>
+                {" "}
+                {"\u2191\u2193"}arrow to scroll
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text color="yellow" bold>
+                {"\u25CB"} SCROLLED{" "}
+                {Math.max(
+                  1,
+                  viewport.contentHeight -
+                    viewport.scrollOffset -
+                    viewport.viewportHeight +
+                    1,
+                )}
+                /{viewport.contentHeight}
+              </Text>
+              <Text color="cyan" bold>
+                {" "}
+                {"\u2193\u2193"}Ctrl+D
+              </Text>
+              <Text color="cyan"> or </Text>
+              <Text color="cyan" bold>
+                /bottom
+              </Text>
+              <Text color="cyan"> {"\u2192"} LIVE</Text>
+            </>
           )}
         </>
       )}
