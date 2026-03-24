@@ -54,9 +54,15 @@ export function MetricsBar({
           <Text dimColor> | </Text>
           <Text color={viewport.autoFollow ? "green" : "yellow"}>
             {viewport.autoFollow
-              ? "LIVE"
+              ? "LIVE \u2191\u2193scroll"
               : `SCROLLED ${Math.max(1, viewport.contentHeight - viewport.scrollOffset - viewport.viewportHeight + 1)}/${viewport.contentHeight}`}
           </Text>
+          {!viewport.autoFollow && (
+            <Text color="yellow" dimColor>
+              {" "}
+              [End=LIVE]
+            </Text>
+          )}
         </>
       )}
     </Box>

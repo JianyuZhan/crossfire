@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildGlobalLineBuffer } from "../../src/render/line-buffer.js";
 import type {
-  RoundRenderChunk,
   JudgeRenderChunk,
+  RoundRenderChunk,
   ScreenLine,
 } from "../../src/state/types.js";
 
@@ -42,8 +42,8 @@ describe("buildGlobalLineBuffer", () => {
     };
     // contentWidth=43 => panelWidth=floor((43-3)/2)=20
     const lines = buildGlobalLineBuffer([chunk], 43);
-    // 1 header + 2 merged rows = 3
-    expect(lines).toHaveLength(3);
+    // 1 top-border + 2 merged rows + 1 bottom-border = 4
+    expect(lines).toHaveLength(4);
   });
 
   it("inserts separator between chunks", () => {
