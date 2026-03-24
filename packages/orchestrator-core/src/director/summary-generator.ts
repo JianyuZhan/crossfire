@@ -1,157 +1,157 @@
-import type { DebateState, DebateTurn, JudgeVerdict } from "../types.js";
 import { filterUnresolved } from "../debate-memory.js";
+import type { DebateState, DebateTurn, JudgeVerdict } from "../types.js";
 
 export interface DebateSummary {
-  terminationReason: string;
-  roundsCompleted: number;
-  leading: string;
-  judgeScore: { proposer: number; challenger: number } | null;
-  recommendedAction: string | null;
-  stanceTrajectory: {
-    proposer: Array<{ round: number; stance: string; confidence: number }>;
-    challenger: Array<{ round: number; stance: string; confidence: number }>;
-  };
-  consensus: string[];
-  unresolved: string[];
-  totalTurns: number;
+	terminationReason: string;
+	roundsCompleted: number;
+	leading: string;
+	judgeScore: { proposer: number; challenger: number } | null;
+	recommendedAction: string | null;
+	stanceTrajectory: {
+		proposer: Array<{ round: number; stance: string; confidence: number }>;
+		challenger: Array<{ round: number; stance: string; confidence: number }>;
+	};
+	consensus: string[];
+	unresolved: string[];
+	totalTurns: number;
 }
 
 export function generateSummary(
-  state: DebateState,
-  verdict: JudgeVerdict | undefined,
-  terminationReasonOverride?: string,
+	state: DebateState,
+	verdict: JudgeVerdict | undefined,
+	terminationReasonOverride?: string,
 ): DebateSummary {
-  const proposerTrajectory = buildTrajectory(state.turns, "proposer");
-  const challengerTrajectory = buildTrajectory(state.turns, "challenger");
+	const proposerTrajectory = buildTrajectory(state.turns, "proposer");
+	const challengerTrajectory = buildTrajectory(state.turns, "challenger");
 
-  const proposerConcessions = new Set(
-    state.turns
-      .filter((t) => t.role === "proposer" && t.meta?.concessions)
-      .flatMap((t) => t.meta?.concessions ?? []),
-  );
-  const challengerConcessions = new Set(
-    state.turns
-      .filter((t) => t.role === "challenger" && t.meta?.concessions)
-      .flatMap((t) => t.meta?.concessions ?? []),
-  );
+	const proposerConcessions = new Set(
+		state.turns
+			.filter((t) => t.role === "proposer" && t.meta?.concessions)
+			.flatMap((t) => t.meta?.concessions ?? []),
+	);
+	const challengerConcessions = new Set(
+		state.turns
+			.filter((t) => t.role === "challenger" && t.meta?.concessions)
+			.flatMap((t) => t.meta?.concessions ?? []),
+	);
 
-  const latestRound = state.currentRound;
-  const latestProposerPoints = state.turns
-    .filter(
-      (t) =>
-        t.role === "proposer" &&
-        t.roundNumber === latestRound &&
-        t.meta?.keyPoints,
-    )
-    .flatMap((t) => t.meta?.keyPoints ?? []);
-  const latestChallengerPoints = state.turns
-    .filter(
-      (t) =>
-        t.role === "challenger" &&
-        t.roundNumber === latestRound &&
-        t.meta?.keyPoints,
-    )
-    .flatMap((t) => t.meta?.keyPoints ?? []);
+	const latestRound = state.currentRound;
+	const latestProposerPoints = state.turns
+		.filter(
+			(t) =>
+				t.role === "proposer" &&
+				t.roundNumber === latestRound &&
+				t.meta?.keyPoints,
+		)
+		.flatMap((t) => t.meta?.keyPoints ?? []);
+	const latestChallengerPoints = state.turns
+		.filter(
+			(t) =>
+				t.role === "challenger" &&
+				t.roundNumber === latestRound &&
+				t.meta?.keyPoints,
+		)
+		.flatMap((t) => t.meta?.keyPoints ?? []);
 
-  // Infer leading from stance trajectory when no verdict available
-  let leading = verdict?.leading ?? "unknown";
-  if (
-    leading === "unknown" &&
-    proposerTrajectory.length > 0 &&
-    challengerTrajectory.length > 0
-  ) {
-    const lastP = proposerTrajectory[proposerTrajectory.length - 1];
-    const lastC = challengerTrajectory[challengerTrajectory.length - 1];
-    if (lastP.confidence > lastC.confidence + 0.1) leading = "proposer";
-    else if (lastC.confidence > lastP.confidence + 0.1) leading = "challenger";
-    else leading = "tie";
-  }
+	// Infer leading from stance trajectory when no verdict available
+	let leading = verdict?.leading ?? "unknown";
+	if (
+		leading === "unknown" &&
+		proposerTrajectory.length > 0 &&
+		challengerTrajectory.length > 0
+	) {
+		const lastP = proposerTrajectory[proposerTrajectory.length - 1];
+		const lastC = challengerTrajectory[challengerTrajectory.length - 1];
+		if (lastP.confidence > lastC.confidence + 0.1) leading = "proposer";
+		else if (lastC.confidence > lastP.confidence + 0.1) leading = "challenger";
+		else leading = "tie";
+	}
 
-  return {
-    terminationReason:
-      terminationReasonOverride ?? state.terminationReason ?? "unknown",
-    roundsCompleted: state.currentRound,
-    leading,
-    judgeScore: verdict?.score ?? null,
-    recommendedAction: verdict?.reasoning ?? null,
-    stanceTrajectory: {
-      proposer: proposerTrajectory,
-      challenger: challengerTrajectory,
-    },
-    consensus: computeConsensus(proposerConcessions, challengerConcessions),
-    unresolved: computeUnresolved(
-      latestProposerPoints,
-      latestChallengerPoints,
-      proposerConcessions,
-      challengerConcessions,
-    ),
-    totalTurns: state.turns.length,
-  };
+	return {
+		terminationReason:
+			terminationReasonOverride ?? state.terminationReason ?? "unknown",
+		roundsCompleted: state.currentRound,
+		leading,
+		judgeScore: verdict?.score ?? null,
+		recommendedAction: verdict?.reasoning ?? null,
+		stanceTrajectory: {
+			proposer: proposerTrajectory,
+			challenger: challengerTrajectory,
+		},
+		consensus: computeConsensus(proposerConcessions, challengerConcessions),
+		unresolved: computeUnresolved(
+			latestProposerPoints,
+			latestChallengerPoints,
+			proposerConcessions,
+			challengerConcessions,
+		),
+		totalTurns: state.turns.length,
+	};
 }
 
 export function formatFinalOutcome(
-  state: DebateState,
-  verdict: JudgeVerdict | undefined,
+	state: DebateState,
+	verdict: JudgeVerdict | undefined,
 ): string {
-  const summary = generateSummary(state, verdict);
-  const lines: string[] = [];
-  lines.push("## Final Outcome");
-  lines.push("");
-  lines.push(
-    `**Termination**: ${summary.terminationReason} (Round ${summary.roundsCompleted})`,
-  );
+	const summary = generateSummary(state, verdict);
+	const lines: string[] = [];
+	lines.push("## Final Outcome");
+	lines.push("");
+	lines.push(
+		`**Termination**: ${summary.terminationReason} (Round ${summary.roundsCompleted})`,
+	);
 
-  if (summary.judgeScore) {
-    lines.push(
-      `**Leading**: ${summary.leading} (Judge score: ${summary.judgeScore.proposer} vs ${summary.judgeScore.challenger})`,
-    );
-  } else {
-    lines.push(`**Leading**: ${summary.leading}`);
-  }
+	if (summary.judgeScore) {
+		lines.push(
+			`**Leading**: ${summary.leading} (Judge score: ${summary.judgeScore.proposer} vs ${summary.judgeScore.challenger})`,
+		);
+	} else {
+		lines.push(`**Leading**: ${summary.leading}`);
+	}
 
-  if (summary.consensus.length > 0) {
-    lines.push(`**Consensus** (${summary.consensus.length} items):`);
-    for (const c of summary.consensus) lines.push(`  - ${c}`);
-  }
-  if (summary.unresolved.length > 0) {
-    lines.push(`**Unresolved** (${summary.unresolved.length} items):`);
-    for (const u of summary.unresolved) lines.push(`  - ${u}`);
-  }
+	if (summary.consensus.length > 0) {
+		lines.push(`**Consensus** (${summary.consensus.length} items):`);
+		for (const c of summary.consensus) lines.push(`  - ${c}`);
+	}
+	if (summary.unresolved.length > 0) {
+		lines.push(`**Unresolved** (${summary.unresolved.length} items):`);
+		for (const u of summary.unresolved) lines.push(`  - ${u}`);
+	}
 
-  lines.push("**Stance Trajectory**:");
-  lines.push(
-    `  Proposer: ${summary.stanceTrajectory.proposer.map((s) => s.stance).join(" -> ")} (confidence: ${summary.stanceTrajectory.proposer.map((s) => s.confidence).join(" -> ")})`,
-  );
-  lines.push(
-    `  Challenger: ${summary.stanceTrajectory.challenger.map((s) => s.stance).join(" -> ")} (confidence: ${summary.stanceTrajectory.challenger.map((s) => s.confidence).join(" -> ")})`,
-  );
+	lines.push("**Stance Trajectory**:");
+	lines.push(
+		`  Proposer: ${summary.stanceTrajectory.proposer.map((s) => s.stance).join(" -> ")} (confidence: ${summary.stanceTrajectory.proposer.map((s) => s.confidence).join(" -> ")})`,
+	);
+	lines.push(
+		`  Challenger: ${summary.stanceTrajectory.challenger.map((s) => s.stance).join(" -> ")} (confidence: ${summary.stanceTrajectory.challenger.map((s) => s.confidence).join(" -> ")})`,
+	);
 
-  if (summary.recommendedAction)
-    lines.push(`**Recommended Action**: ${summary.recommendedAction}`);
-  lines.push(`**Cost**: ${summary.totalTurns} turns`);
-  if (summary.consensus.length > 0 || summary.unresolved.length > 0) {
-    lines.push("");
-    lines.push("*Detailed action plan saved to `action-plan.html`*");
-  }
-  return lines.join("\n");
+	if (summary.recommendedAction)
+		lines.push(`**Recommended Action**: ${summary.recommendedAction}`);
+	lines.push(`**Cost**: ${summary.totalTurns} turns`);
+	if (summary.consensus.length > 0 || summary.unresolved.length > 0) {
+		lines.push("");
+		lines.push("*Detailed action plan saved to `action-plan.html`*");
+	}
+	return lines.join("\n");
 }
 
 export interface DeepSummaryItem {
-  title: string;
-  detail: string;
-  nextSteps: string;
+	title: string;
+	detail: string;
+	nextSteps: string;
 }
 
 export interface DeepSummaryUnresolved {
-  title: string;
-  proposerPosition: string;
-  challengerPosition: string;
-  risk: string;
+	title: string;
+	proposerPosition: string;
+	challengerPosition: string;
+	risk: string;
 }
 
 export interface DeepSummary {
-  consensus: DeepSummaryItem[];
-  unresolved: DeepSummaryUnresolved[];
+	consensus: DeepSummaryItem[];
+	unresolved: DeepSummaryUnresolved[];
 }
 
 const HTML_STYLES = `
@@ -171,38 +171,38 @@ h2{color:#2c5f8a;margin-top:2.5rem;font-size:1.3rem}
 `.trim();
 
 export function generateActionPlanHtmlFromDeepSummary(
-  topic: string,
-  ds: DeepSummary,
-  roundsCompleted: number,
+	topic: string,
+	ds: DeepSummary,
+	roundsCompleted: number,
 ): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const t = esc(topic);
+	const esc = (s: string) =>
+		s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	const t = esc(topic);
 
-  let body = "";
+	let body = "";
 
-  if (ds.consensus.length > 0) {
-    body += `<div class="consensus"><h2>Consensus — Detailed Action Plan</h2>\n`;
-    for (const item of ds.consensus) {
-      body += `<div class="card"><h3>${esc(item.title)}</h3>`;
-      body += `<div class="detail">${esc(item.detail)}</div>`;
-      body += `<div class="next-steps">Next steps: ${esc(item.nextSteps)}</div></div>\n`;
-    }
-    body += `</div>\n`;
-  }
+	if (ds.consensus.length > 0) {
+		body += `<div class="consensus"><h2>Consensus — Detailed Action Plan</h2>\n`;
+		for (const item of ds.consensus) {
+			body += `<div class="card"><h3>${esc(item.title)}</h3>`;
+			body += `<div class="detail">${esc(item.detail)}</div>`;
+			body += `<div class="next-steps">Next steps: ${esc(item.nextSteps)}</div></div>\n`;
+		}
+		body += `</div>\n`;
+	}
 
-  if (ds.unresolved.length > 0) {
-    body += `<div class="unresolved"><h2>Unresolved Issues &amp; Risks</h2>\n`;
-    for (const item of ds.unresolved) {
-      body += `<div class="card"><h3>${esc(item.title)}</h3>`;
-      body += `<div class="position"><strong>Proposer:</strong> ${esc(item.proposerPosition)}</div>`;
-      body += `<div class="position"><strong>Challenger:</strong> ${esc(item.challengerPosition)}</div>`;
-      body += `<div class="risk">Risk: ${esc(item.risk)}</div></div>\n`;
-    }
-    body += `</div>\n`;
-  }
+	if (ds.unresolved.length > 0) {
+		body += `<div class="unresolved"><h2>Unresolved Issues &amp; Risks</h2>\n`;
+		for (const item of ds.unresolved) {
+			body += `<div class="card"><h3>${esc(item.title)}</h3>`;
+			body += `<div class="position"><strong>Proposer:</strong> ${esc(item.proposerPosition)}</div>`;
+			body += `<div class="position"><strong>Challenger:</strong> ${esc(item.challengerPosition)}</div>`;
+			body += `<div class="risk">Risk: ${esc(item.risk)}</div></div>\n`;
+		}
+		body += `</div>\n`;
+	}
 
-  return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Crossfire: ${t}</title><style>${HTML_STYLES}</style></head>
@@ -214,78 +214,78 @@ ${body}
 }
 
 export function generateActionPlanHtmlFallback(
-  topic: string,
-  summary: DebateSummary,
+	topic: string,
+	summary: DebateSummary,
 ): string {
-  const ds: DeepSummary = {
-    consensus: summary.consensus.map((c) => ({
-      title: c,
-      detail: "",
-      nextSteps: "",
-    })),
-    unresolved: summary.unresolved.map((u) => ({
-      title: u,
-      proposerPosition: "",
-      challengerPosition: "",
-      risk: "",
-    })),
-  };
-  return generateActionPlanHtmlFromDeepSummary(
-    topic,
-    ds,
-    summary.roundsCompleted,
-  );
+	const ds: DeepSummary = {
+		consensus: summary.consensus.map((c) => ({
+			title: c,
+			detail: "",
+			nextSteps: "",
+		})),
+		unresolved: summary.unresolved.map((u) => ({
+			title: u,
+			proposerPosition: "",
+			challengerPosition: "",
+			risk: "",
+		})),
+	};
+	return generateActionPlanHtmlFromDeepSummary(
+		topic,
+		ds,
+		summary.roundsCompleted,
+	);
 }
 
 /** Items both sides conceded — approximate match by substring overlap */
 function computeConsensus(
-  proposerConcessions: Set<string | undefined>,
-  challengerConcessions: Set<string | undefined>,
+	proposerConcessions: Set<string | undefined>,
+	challengerConcessions: Set<string | undefined>,
 ): string[] {
-  const all = new Set<string>();
-  for (const pc of proposerConcessions) {
-    if (!pc) continue;
-    all.add(pc);
-  }
-  for (const cc of challengerConcessions) {
-    if (!cc) continue;
-    all.add(cc);
-  }
-  return [...all];
+	const all = new Set<string>();
+	for (const pc of proposerConcessions) {
+		if (!pc) continue;
+		all.add(pc);
+	}
+	for (const cc of challengerConcessions) {
+		if (!cc) continue;
+		all.add(cc);
+	}
+	return [...all];
 }
 
 /** Key points NOT acknowledged by the other side's concessions */
 function computeUnresolved(
-  proposerPoints: string[],
-  challengerPoints: string[],
-  proposerConcessions: Set<string | undefined>,
-  challengerConcessions: Set<string | undefined>,
+	proposerPoints: string[],
+	challengerPoints: string[],
+	proposerConcessions: Set<string | undefined>,
+	challengerConcessions: Set<string | undefined>,
 ): string[] {
-  const allConcessions = [
-    ...[...proposerConcessions].filter(Boolean),
-    ...[...challengerConcessions].filter(Boolean),
-  ] as string[];
+	const allConcessions = [
+		...[...proposerConcessions].filter(Boolean),
+		...[...challengerConcessions].filter(Boolean),
+	] as string[];
 
-  return filterUnresolved(
-    [...proposerPoints, ...challengerPoints],
-    allConcessions,
-  );
+	return filterUnresolved(
+		[...proposerPoints, ...challengerPoints],
+		allConcessions,
+	);
 }
 
 function buildTrajectory(
-  turns: DebateTurn[],
-  role: "proposer" | "challenger",
+	turns: DebateTurn[],
+	role: "proposer" | "challenger",
 ): Array<{ round: number; stance: string; confidence: number }> {
-  const seen = new Map<number, { stance: string; confidence: number }>();
-  for (const t of turns) {
-    if (t.role === role && t.meta) {
-      seen.set(t.roundNumber, {
-        stance: t.meta.stance,
-        confidence: t.meta.confidence,
-      });
-    }
-  }
-  return [...seen.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([round, data]) => ({ round, ...data }));
+	const seen = new Map<number, { stance: string; confidence: number }>();
+	for (const t of turns) {
+		if (t.role === role && t.meta) {
+			seen.set(t.roundNumber, {
+				stance: t.meta.stance,
+				confidence: t.meta.confidence,
+			});
+		}
+	}
+	return [...seen.entries()]
+		.sort(([a], [b]) => a - b)
+		.map(([round, data]) => ({ round, ...data }));
 }

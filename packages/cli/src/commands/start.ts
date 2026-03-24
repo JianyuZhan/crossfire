@@ -19,456 +19,456 @@ import { createBus } from "../wiring/create-bus.js";
 import { createTui } from "../wiring/create-tui.js";
 
 function buildExitSummary(
-  state: {
-    metrics: { currentRound: number; maxRounds: number; debateId?: string };
-    debateState: { phase: string; terminationReason?: string };
-    summary?: {
-      terminationReason: string;
-      roundsCompleted: number;
-      recommendedAction: string | null;
-      outputDir?: string;
-    };
-    judgeResults: Array<{
-      roundNumber: number;
-      verdict?: { shouldContinue: boolean; reasoning: string };
-    }>;
-  },
-  outputDir: string,
+	state: {
+		metrics: { currentRound: number; maxRounds: number; debateId?: string };
+		debateState: { phase: string; terminationReason?: string };
+		summary?: {
+			terminationReason: string;
+			roundsCompleted: number;
+			recommendedAction: string | null;
+			outputDir?: string;
+		};
+		judgeResults: Array<{
+			roundNumber: number;
+			verdict?: { shouldContinue: boolean; reasoning: string };
+		}>;
+	},
+	outputDir: string,
 ): string {
-  const w = 60;
-  const lines: string[] = [];
-  lines.push("");
-  lines.push(`\u2694  Crossfire — Debate Complete`);
-  lines.push("\u2550".repeat(w));
+	const w = 60;
+	const lines: string[] = [];
+	lines.push("");
+	lines.push(`\u2694  Crossfire — Debate Complete`);
+	lines.push("\u2550".repeat(w));
 
-  // Basic info
-  if (state.metrics.debateId) {
-    lines.push(`  ID:         ${state.metrics.debateId}`);
-  }
-  lines.push(
-    `  Rounds:     ${state.metrics.currentRound}/${state.metrics.maxRounds}`,
-  );
-  if (state.summary) {
-    lines.push(`  Terminated: ${state.summary.terminationReason}`);
-  } else {
-    lines.push(`  Phase:      ${state.debateState.phase}`);
-    if (state.debateState.terminationReason) {
-      lines.push(`  Reason:     ${state.debateState.terminationReason}`);
-    }
-  }
+	// Basic info
+	if (state.metrics.debateId) {
+		lines.push(`  ID:         ${state.metrics.debateId}`);
+	}
+	lines.push(
+		`  Rounds:     ${state.metrics.currentRound}/${state.metrics.maxRounds}`,
+	);
+	if (state.summary) {
+		lines.push(`  Terminated: ${state.summary.terminationReason}`);
+	} else {
+		lines.push(`  Phase:      ${state.debateState.phase}`);
+		if (state.debateState.terminationReason) {
+			lines.push(`  Reason:     ${state.debateState.terminationReason}`);
+		}
+	}
 
-  // Last judge decision
-  const lastJudge = [...state.judgeResults].reverse().find((j) => j.verdict);
-  if (lastJudge?.verdict) {
-    const action = lastJudge.verdict.shouldContinue
-      ? "Continue debate"
-      : "End debate";
-    lines.push(`  Judge:      ${action} (Round ${lastJudge.roundNumber})`);
-  }
+	// Last judge decision
+	const lastJudge = [...state.judgeResults].reverse().find((j) => j.verdict);
+	if (lastJudge?.verdict) {
+		const action = lastJudge.verdict.shouldContinue
+			? "Continue debate"
+			: "End debate";
+		lines.push(`  Judge:      ${action} (Round ${lastJudge.roundNumber})`);
+	}
 
-  // Judge reasoning / recommended action
-  if (state.summary?.recommendedAction) {
-    lines.push("");
-    lines.push("  Decision:");
-    // Word-wrap the recommendation at ~w chars with indent
-    const words = state.summary.recommendedAction.split(/\s+/);
-    let line = "    ";
-    for (const word of words) {
-      if (line.length + word.length + 1 > w && line.trim()) {
-        lines.push(line);
-        line = "    " + word;
-      } else {
-        line += (line.trim() ? " " : "") + word;
-      }
-    }
-    if (line.trim()) lines.push(line);
-  }
+	// Judge reasoning / recommended action
+	if (state.summary?.recommendedAction) {
+		lines.push("");
+		lines.push("  Decision:");
+		// Word-wrap the recommendation at ~w chars with indent
+		const words = state.summary.recommendedAction.split(/\s+/);
+		let line = "    ";
+		for (const word of words) {
+			if (line.length + word.length + 1 > w && line.trim()) {
+				lines.push(line);
+				line = "    " + word;
+			} else {
+				line += (line.trim() ? " " : "") + word;
+			}
+		}
+		if (line.trim()) lines.push(line);
+	}
 
-  lines.push("");
-  lines.push("\u2550".repeat(w));
+	lines.push("");
+	lines.push("\u2550".repeat(w));
 
-  // Output files — the main deliverable
-  const dir = resolve(outputDir);
-  lines.push("  Output files:");
-  lines.push(
-    `    \u2022 Action Plan:  file://${join(dir, "action-plan.html")}`,
-  );
-  lines.push(`    \u2022 Transcript:   file://${join(dir, "transcript.html")}`);
-  lines.push(`    \u2022 Full log:     ${dir}`);
-  lines.push("");
+	// Output files — the main deliverable
+	const dir = resolve(outputDir);
+	lines.push("  Output files:");
+	lines.push(
+		`    \u2022 Action Plan:  file://${join(dir, "action-plan.html")}`,
+	);
+	lines.push(`    \u2022 Transcript:   file://${join(dir, "transcript.html")}`);
+	lines.push(`    \u2022 Full log:     ${dir}`);
+	lines.push("");
 
-  return lines.join("\n");
+	return lines.join("\n");
 }
 
 export const startCommand = new Command("start")
-  .description("Start a new debate")
-  .requiredOption("--proposer <profile>", "Proposer agent profile")
-  .requiredOption("--challenger <profile>", "Challenger agent profile")
-  .option(
-    "--topic <text>",
-    "Debate topic (mutually exclusive with --topic-file)",
-  )
-  .option(
-    "--topic-file <path>",
-    "File containing debate topic (mutually exclusive with --topic)",
-  )
-  .option(
-    "--judge <profile>",
-    "Judge agent profile (default: inferred from proposer; use 'none' to disable)",
-  )
-  .option("--max-rounds <n>", "Maximum number of rounds", "10")
-  .option("--judge-every-n-rounds <n>", "Judge evaluation frequency", "3")
-  .option(
-    "--convergence-threshold <n>",
-    "Convergence detection threshold",
-    "0.3",
-  )
-  .option("--output <dir>", "Output directory for debate logs")
-  .option("--model <model>", "Default model for all agents")
-  .option("--proposer-model <model>", "Model override for proposer")
-  .option("--challenger-model <model>", "Model override for challenger")
-  .option("--judge-model <model>", "Model override for judge")
-  .option("--headless", "Run without TUI", false)
-  .option("-v, --verbose", "Verbose output", false)
-  .action(async (options) => {
-    try {
-      // Validate mutually exclusive topic options
-      if (!options.topic && !options.topicFile) {
-        console.error(
-          "Error: Either --topic or --topic-file must be specified",
-        );
-        process.exit(1);
-      }
-      if (options.topic && options.topicFile) {
-        console.error("Error: --topic and --topic-file are mutually exclusive");
-        process.exit(1);
-      }
+	.description("Start a new debate")
+	.requiredOption("--proposer <profile>", "Proposer agent profile")
+	.requiredOption("--challenger <profile>", "Challenger agent profile")
+	.option(
+		"--topic <text>",
+		"Debate topic (mutually exclusive with --topic-file)",
+	)
+	.option(
+		"--topic-file <path>",
+		"File containing debate topic (mutually exclusive with --topic)",
+	)
+	.option(
+		"--judge <profile>",
+		"Judge agent profile (default: inferred from proposer; use 'none' to disable)",
+	)
+	.option("--max-rounds <n>", "Maximum number of rounds", "10")
+	.option("--judge-every-n-rounds <n>", "Judge evaluation frequency", "3")
+	.option(
+		"--convergence-threshold <n>",
+		"Convergence detection threshold",
+		"0.3",
+	)
+	.option("--output <dir>", "Output directory for debate logs")
+	.option("--model <model>", "Default model for all agents")
+	.option("--proposer-model <model>", "Model override for proposer")
+	.option("--challenger-model <model>", "Model override for challenger")
+	.option("--judge-model <model>", "Model override for judge")
+	.option("--headless", "Run without TUI", false)
+	.option("-v, --verbose", "Verbose output", false)
+	.action(async (options) => {
+		try {
+			// Validate mutually exclusive topic options
+			if (!options.topic && !options.topicFile) {
+				console.error(
+					"Error: Either --topic or --topic-file must be specified",
+				);
+				process.exit(1);
+			}
+			if (options.topic && options.topicFile) {
+				console.error("Error: --topic and --topic-file are mutually exclusive");
+				process.exit(1);
+			}
 
-      // Load topic
-      const topic =
-        options.topic ?? readFileSync(options.topicFile, "utf-8").trim();
+			// Load topic
+			const topic =
+				options.topic ?? readFileSync(options.topicFile, "utf-8").trim();
 
-      // Load profiles
-      const proposerProfile = loadProfile(options.proposer);
-      const challengerProfile = loadProfile(options.challenger);
+			// Load profiles
+			const proposerProfile = loadProfile(options.proposer);
+			const challengerProfile = loadProfile(options.challenger);
 
-      // Resolve judge profile: infer from proposer adapter type if not specified
-      const judgeDisabled = options.judge === "none";
-      if (judgeDisabled && options.judgeModel) {
-        console.error("Error: --judge-model cannot be used with --judge none");
-        process.exit(1);
-      }
-      let judgeProfile: ReturnType<typeof loadProfile> | "none";
-      if (judgeDisabled) {
-        judgeProfile = "none";
-      } else if (options.judge) {
-        judgeProfile = loadProfile(options.judge);
-      } else {
-        // Infer from proposer's adapter type
-        const adapterType = resolveAdapterType(proposerProfile.agent);
-        const inferredJudge = `${adapterType}/judge`;
-        judgeProfile = loadProfile(inferredJudge);
-        if (options.verbose) {
-          console.log(
-            `  Judge profile inferred from proposer: ${inferredJudge}`,
-          );
-        }
-      }
+			// Resolve judge profile: infer from proposer adapter type if not specified
+			const judgeDisabled = options.judge === "none";
+			if (judgeDisabled && options.judgeModel) {
+				console.error("Error: --judge-model cannot be used with --judge none");
+				process.exit(1);
+			}
+			let judgeProfile: ReturnType<typeof loadProfile> | "none";
+			if (judgeDisabled) {
+				judgeProfile = "none";
+			} else if (options.judge) {
+				judgeProfile = loadProfile(options.judge);
+			} else {
+				// Infer from proposer's adapter type
+				const adapterType = resolveAdapterType(proposerProfile.agent);
+				const inferredJudge = `${adapterType}/judge`;
+				judgeProfile = loadProfile(inferredJudge);
+				if (options.verbose) {
+					console.log(
+						`  Judge profile inferred from proposer: ${inferredJudge}`,
+					);
+				}
+			}
 
-      // Resolve roles
-      const roles = resolveRoles({
-        proposer: {
-          profile: proposerProfile,
-          cliModel: options.proposerModel ?? options.model,
-        },
-        challenger: {
-          profile: challengerProfile,
-          cliModel: options.challengerModel ?? options.model,
-        },
-        judge:
-          judgeProfile === "none"
-            ? "none"
-            : {
-                profile: judgeProfile,
-                cliModel: options.judgeModel ?? options.model,
-              },
-      });
+			// Resolve roles
+			const roles = resolveRoles({
+				proposer: {
+					profile: proposerProfile,
+					cliModel: options.proposerModel ?? options.model,
+				},
+				challenger: {
+					profile: challengerProfile,
+					cliModel: options.challengerModel ?? options.model,
+				},
+				judge:
+					judgeProfile === "none"
+						? "none"
+						: {
+								profile: judgeProfile,
+								cliModel: options.judgeModel ?? options.model,
+							},
+			});
 
-      // Build debate config
-      const config: DebateConfig = {
-        topic,
-        maxRounds: Number.parseInt(options.maxRounds, 10),
-        judgeEveryNRounds: judgeDisabled
-          ? 0
-          : Number.parseInt(options.judgeEveryNRounds, 10),
-        convergenceThreshold: Number.parseFloat(options.convergenceThreshold),
-        proposerModel: roles.proposer.model,
-        challengerModel: roles.challenger.model,
-        judgeModel: roles.judge?.model,
-      };
+			// Build debate config
+			const config: DebateConfig = {
+				topic,
+				maxRounds: Number.parseInt(options.maxRounds, 10),
+				judgeEveryNRounds: judgeDisabled
+					? 0
+					: Number.parseInt(options.judgeEveryNRounds, 10),
+				convergenceThreshold: Number.parseFloat(options.convergenceThreshold),
+				proposerModel: roles.proposer.model,
+				challengerModel: roles.challenger.model,
+				judgeModel: roles.judge?.model,
+			};
 
-      // Generate debate ID and output directory
-      const now = new Date();
-      const debateId = `d-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
-      const outputDir = options.output ?? `run_output/${debateId}`;
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
-      }
+			// Generate debate ID and output directory
+			const now = new Date();
+			const debateId = `d-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+			const outputDir = options.output ?? `run_output/${debateId}`;
+			if (!existsSync(outputDir)) {
+				mkdirSync(outputDir, { recursive: true });
+			}
 
-      // Write meta.json with profile mapping
-      const meta = {
-        debateId,
-        config,
-        profiles: {
-          proposer: {
-            name: proposerProfile.name,
-            agent: proposerProfile.agent,
-            model: roles.proposer.model,
-          },
-          challenger: {
-            name: challengerProfile.name,
-            agent: challengerProfile.agent,
-            model: roles.challenger.model,
-          },
-          ...(roles.judge && judgeProfile !== "none"
-            ? {
-                judge: {
-                  name: judgeProfile.name,
-                  agent: judgeProfile.agent,
-                  model: roles.judge.model,
-                },
-              }
-            : {}),
-        },
-        versions: {
-          crossfire: "0.1.0",
-          nodeVersion: process.version,
-        },
-      };
-      writeFileSync(
-        join(outputDir, "meta.json"),
-        JSON.stringify(meta, null, 2) + "\n",
-      );
+			// Write meta.json with profile mapping
+			const meta = {
+				debateId,
+				config,
+				profiles: {
+					proposer: {
+						name: proposerProfile.name,
+						agent: proposerProfile.agent,
+						model: roles.proposer.model,
+					},
+					challenger: {
+						name: challengerProfile.name,
+						agent: challengerProfile.agent,
+						model: roles.challenger.model,
+					},
+					...(roles.judge && judgeProfile !== "none"
+						? {
+								judge: {
+									name: judgeProfile.name,
+									agent: judgeProfile.agent,
+									model: roles.judge.model,
+								},
+							}
+						: {}),
+				},
+				versions: {
+					crossfire: "0.1.0",
+					nodeVersion: process.version,
+				},
+			};
+			writeFileSync(
+				join(outputDir, "meta.json"),
+				JSON.stringify(meta, null, 2) + "\n",
+			);
 
-      if (options.verbose) {
-        console.log("Configuration:");
-        console.log(`  Topic: ${topic}`);
-        console.log(
-          `  Proposer: ${proposerProfile.name} (${roles.proposer.adapterType})`,
-        );
-        console.log(
-          `  Challenger: ${challengerProfile.name} (${roles.challenger.adapterType})`,
-        );
-        if (roles.judge && judgeProfile !== "none") {
-          console.log(
-            `  Judge: ${judgeProfile.name} (${roles.judge.adapterType})`,
-          );
-        }
-        console.log(`  Output: ${outputDir}`);
-      }
+			if (options.verbose) {
+				console.log("Configuration:");
+				console.log(`  Topic: ${topic}`);
+				console.log(
+					`  Proposer: ${proposerProfile.name} (${roles.proposer.adapterType})`,
+				);
+				console.log(
+					`  Challenger: ${challengerProfile.name} (${roles.challenger.adapterType})`,
+				);
+				if (roles.judge && judgeProfile !== "none") {
+					console.log(
+						`  Judge: ${judgeProfile.name} (${roles.judge.adapterType})`,
+					);
+				}
+				console.log(`  Output: ${outputDir}`);
+			}
 
-      // Create adapter factories
-      const factories: AdapterFactoryMap = {
-        claude: () => {
-          // Lazy-load SDK — resolved on first queryFn call
-          const sdkPromise = import("@anthropic-ai/claude-agent-sdk");
-          let sdkQuery: typeof import("@anthropic-ai/claude-agent-sdk").query;
+			// Create adapter factories
+			const factories: AdapterFactoryMap = {
+				claude: () => {
+					// Lazy-load SDK — resolved on first queryFn call
+					const sdkPromise = import("@anthropic-ai/claude-agent-sdk");
+					let sdkQuery: typeof import("@anthropic-ai/claude-agent-sdk").query;
 
-          const queryFn: QueryFn = (opts) => {
-            // Create an async generator that awaits SDK before yielding
-            async function* gen() {
-              if (!sdkQuery) {
-                const sdk = await sdkPromise;
-                sdkQuery = sdk.query;
-              }
-              const q = sdkQuery({
-                prompt: opts.prompt,
-                options: {
-                  resume: opts.resume,
-                  model: opts.model,
-                  canUseTool: opts.canUseTool as never,
-                  hooks: opts.hooks as never,
-                  includePartialMessages: true,
-                },
-              });
-              currentQuery = q;
-              yield* q as AsyncGenerator<
-                { type: string; [key: string]: unknown },
-                void,
-                unknown
-              >;
-            }
+					const queryFn: QueryFn = (opts) => {
+						// Create an async generator that awaits SDK before yielding
+						async function* gen() {
+							if (!sdkQuery) {
+								const sdk = await sdkPromise;
+								sdkQuery = sdk.query;
+							}
+							const q = sdkQuery({
+								prompt: opts.prompt,
+								options: {
+									resume: opts.resume,
+									model: opts.model,
+									canUseTool: opts.canUseTool as never,
+									hooks: opts.hooks as never,
+									includePartialMessages: true,
+								},
+							});
+							currentQuery = q;
+							yield* q as AsyncGenerator<
+								{ type: string; [key: string]: unknown },
+								void,
+								unknown
+							>;
+						}
 
-            let currentQuery: { interrupt: () => void } | undefined;
-            return {
-              messages: gen(),
-              interrupt: () => {
-                currentQuery?.interrupt();
-              },
-            };
-          };
+						let currentQuery: { interrupt: () => void } | undefined;
+						return {
+							messages: gen(),
+							interrupt: () => {
+								currentQuery?.interrupt();
+							},
+						};
+					};
 
-          return new ClaudeAdapter({ queryFn });
-        },
-        codex: () =>
-          new CodexAdapter({
-            spawnFn: () => {
-              const proc = spawn("codex", ["app-server"], {
-                stdio: ["pipe", "pipe", "inherit"],
-                env: {
-                  ...process.env,
-                  PATH: `${CODEX_TOOLS_DIR}:${process.env.PATH}`,
-                },
-              });
-              return {
-                stdin: proc.stdin,
-                stdout: proc.stdout,
-              };
-            },
-          }),
-        gemini: () => new GeminiAdapter(),
-      };
+					return new ClaudeAdapter({ queryFn });
+				},
+				codex: () =>
+					new CodexAdapter({
+						spawnFn: () => {
+							const proc = spawn("codex", ["app-server"], {
+								stdio: ["pipe", "pipe", "inherit"],
+								env: {
+									...process.env,
+									PATH: `${CODEX_TOOLS_DIR}:${process.env.PATH}`,
+								},
+							});
+							return {
+								stdin: proc.stdin,
+								stdout: proc.stdout,
+							};
+						},
+					}),
+				gemini: () => new GeminiAdapter(),
+			};
 
-      // Create adapters
-      const adapterBundle = await createAdapters(roles, factories);
+			// Create adapters
+			const adapterBundle = await createAdapters(roles, factories);
 
-      // Create bus
-      const busBundle = createBus({ outputDir });
+			// Create bus
+			const busBundle = createBus({ outputDir });
 
-      // Create TUI
-      const tuiBundle = createTui(busBundle.bus, options.headless);
+			// Create TUI
+			const tuiBundle = createTui(busBundle.bus, options.headless);
 
-      // Render TUI if not headless
-      let inkInstance: { clear: () => void; unmount: () => void } | undefined;
-      let userQuitResolve: (() => void) | undefined;
-      if (tuiBundle) {
-        inkInstance = render(
-          React.createElement(App, {
-            store: tuiBundle.store,
-            source: tuiBundle.source,
-            onCommand: (cmd: {
-              type: string;
-              requestId?: string;
-              target?: string;
-              text?: string;
-              priority?: string;
-            }) => {
-              if (cmd.type === "quit") {
-                // User explicitly quit — resolve the wait
-                userQuitResolve?.();
-              } else if (cmd.type === "stop") {
-                // During debate: trigger shutdown. After completion: treat as quit.
-                if (userQuitResolve) {
-                  userQuitResolve();
-                } else {
-                  triggerShutdown();
-                }
-              } else if (cmd.type === "approve" || cmd.type === "deny") {
-                const state = tuiBundle.store.getState();
-                const pending = state.command.pendingApprovals;
-                const requestId = cmd.requestId ?? pending[0]?.requestId;
-                if (requestId) {
-                  const decision = cmd.type === "approve" ? "allow" : "deny";
-                  for (const a of [
-                    adapterBundle.adapters.proposer,
-                    adapterBundle.adapters.challenger,
-                  ]) {
-                    a.adapter.approve?.({ requestId, decision });
-                  }
-                }
-              } else if (cmd.type === "inject") {
-                const targets: Array<"proposer" | "challenger"> =
-                  cmd.target === "both"
-                    ? ["proposer", "challenger"]
-                    : [cmd.target as "proposer" | "challenger"];
-                for (const t of targets) {
-                  busBundle.bus.push({
-                    kind: "user.inject",
-                    target: t,
-                    text: cmd.text ?? "",
-                    priority: (cmd.priority ?? "normal") as "normal" | "high",
-                    timestamp: Date.now(),
-                  });
-                }
-              } else if (cmd.type === "inject-judge") {
-                busBundle.bus.push({
-                  kind: "user.inject",
-                  target: "judge",
-                  text: cmd.text ?? "",
-                  priority: "high",
-                  timestamp: Date.now(),
-                });
-              }
-            },
-          }),
-        );
-      }
+			// Render TUI if not headless
+			let inkInstance: { clear: () => void; unmount: () => void } | undefined;
+			let userQuitResolve: (() => void) | undefined;
+			if (tuiBundle) {
+				inkInstance = render(
+					React.createElement(App, {
+						store: tuiBundle.store,
+						source: tuiBundle.source,
+						onCommand: (cmd: {
+							type: string;
+							requestId?: string;
+							target?: string;
+							text?: string;
+							priority?: string;
+						}) => {
+							if (cmd.type === "quit") {
+								// User explicitly quit — resolve the wait
+								userQuitResolve?.();
+							} else if (cmd.type === "stop") {
+								// During debate: trigger shutdown. After completion: treat as quit.
+								if (userQuitResolve) {
+									userQuitResolve();
+								} else {
+									triggerShutdown();
+								}
+							} else if (cmd.type === "approve" || cmd.type === "deny") {
+								const state = tuiBundle.store.getState();
+								const pending = state.command.pendingApprovals;
+								const requestId = cmd.requestId ?? pending[0]?.requestId;
+								if (requestId) {
+									const decision = cmd.type === "approve" ? "allow" : "deny";
+									for (const a of [
+										adapterBundle.adapters.proposer,
+										adapterBundle.adapters.challenger,
+									]) {
+										a.adapter.approve?.({ requestId, decision });
+									}
+								}
+							} else if (cmd.type === "inject") {
+								const targets: Array<"proposer" | "challenger"> =
+									cmd.target === "both"
+										? ["proposer", "challenger"]
+										: [cmd.target as "proposer" | "challenger"];
+								for (const t of targets) {
+									busBundle.bus.push({
+										kind: "user.inject",
+										target: t,
+										text: cmd.text ?? "",
+										priority: (cmd.priority ?? "normal") as "normal" | "high",
+										timestamp: Date.now(),
+									});
+								}
+							} else if (cmd.type === "inject-judge") {
+								busBundle.bus.push({
+									kind: "user.inject",
+									target: "judge",
+									text: cmd.text ?? "",
+									priority: "high",
+									timestamp: Date.now(),
+								});
+							}
+						},
+					}),
+				);
+			}
 
-      // Abort controller for graceful shutdown
-      const abortController = new AbortController();
+			// Abort controller for graceful shutdown
+			const abortController = new AbortController();
 
-      const triggerShutdown = () => {
-        // If debate already completed, treat as quit
-        if (userQuitResolve) {
-          userQuitResolve();
-          return;
-        }
-        if (abortController.signal.aborted) {
-          // Second attempt — force exit
-          process.exit(1);
-        }
-        abortController.abort();
-        busBundle.bus.push({
-          kind: "debate.completed",
-          reason: "user-interrupt",
-          timestamp: Date.now(),
-        });
-      };
+			const triggerShutdown = () => {
+				// If debate already completed, treat as quit
+				if (userQuitResolve) {
+					userQuitResolve();
+					return;
+				}
+				if (abortController.signal.aborted) {
+					// Second attempt — force exit
+					process.exit(1);
+				}
+				abortController.abort();
+				busBundle.bus.push({
+					kind: "debate.completed",
+					reason: "user-interrupt",
+					timestamp: Date.now(),
+				});
+			};
 
-      process.on("SIGINT", triggerShutdown);
+			process.on("SIGINT", triggerShutdown);
 
-      // Run debate
-      try {
-        const finalState = await runDebate(config, adapterBundle.adapters, {
-          bus: busBundle.bus,
-          debateId,
-          outputDir,
-        });
+			// Run debate
+			try {
+				const finalState = await runDebate(config, adapterBundle.adapters, {
+					bus: busBundle.bus,
+					debateId,
+					outputDir,
+				});
 
-        if (inkInstance) {
-          // Debate complete — keep TUI interactive until user quits (q, /quit, Ctrl+C)
-          await new Promise<void>((resolve) => {
-            userQuitResolve = resolve;
-          });
-        } else if (!options.headless) {
-          console.log("\nDebate completed!");
-          console.log(`Reason: ${finalState.terminationReason}`);
-          console.log(`Total rounds: ${finalState.currentRound}`);
-          console.log(`Output saved to: ${outputDir}`);
-        }
-      } finally {
-        // Capture final state before cleanup
-        const finalSummaryText = tuiBundle
-          ? buildExitSummary(tuiBundle.store.getState(), outputDir)
-          : undefined;
-        // Cleanup
-        process.off("SIGINT", triggerShutdown);
-        tuiBundle?.store.dispose();
-        if (inkInstance) {
-          inkInstance.unmount();
-        }
-        // Print summary to main screen so user sees final state
-        if (finalSummaryText) {
-          console.log(finalSummaryText);
-        }
-        await adapterBundle.closeAll();
-        await busBundle.close();
-      }
-    } catch (error) {
-      console.error(
-        "Error:",
-        error instanceof Error ? error.message : String(error),
-      );
-      process.exit(1);
-    }
-  });
+				if (inkInstance) {
+					// Debate complete — keep TUI interactive until user quits (q, /quit, Ctrl+C)
+					await new Promise<void>((resolve) => {
+						userQuitResolve = resolve;
+					});
+				} else if (!options.headless) {
+					console.log("\nDebate completed!");
+					console.log(`Reason: ${finalState.terminationReason}`);
+					console.log(`Total rounds: ${finalState.currentRound}`);
+					console.log(`Output saved to: ${outputDir}`);
+				}
+			} finally {
+				// Capture final state before cleanup
+				const finalSummaryText = tuiBundle
+					? buildExitSummary(tuiBundle.store.getState(), outputDir)
+					: undefined;
+				// Cleanup
+				process.off("SIGINT", triggerShutdown);
+				tuiBundle?.store.dispose();
+				if (inkInstance) {
+					inkInstance.unmount();
+				}
+				// Print summary to main screen so user sees final state
+				if (finalSummaryText) {
+					console.log(finalSummaryText);
+				}
+				await adapterBundle.closeAll();
+				await busBundle.close();
+			}
+		} catch (error) {
+			console.error(
+				"Error:",
+				error instanceof Error ? error.message : String(error),
+			);
+			process.exit(1);
+		}
+	});
