@@ -8,9 +8,7 @@ import type {
   TuiState,
   TuiRound,
   ContentChunk,
-  RoundRenderChunk,
   JudgeRenderChunk,
-  SummaryRenderChunk,
   JudgeRoundResult,
 } from "../state/types.js";
 
@@ -159,7 +157,10 @@ function buildJudgeChunk(jr: JudgeRoundResult): JudgeRenderChunk {
   if (jr.verdict) {
     lines.push(
       screenLine([
-        { text: `Verdict: winner=${jr.verdict.winner}`, style: { bold: true } },
+        {
+          text: `Verdict: leading=${jr.verdict.leading}`,
+          style: { bold: true },
+        },
       ]),
     );
   }
