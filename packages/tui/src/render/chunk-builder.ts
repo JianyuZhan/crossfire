@@ -4,12 +4,13 @@ import {
   idleBlocks,
 } from "./render-blocks.js";
 import { buildPanelLines, screenLine } from "./line-buffer.js";
+import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type {
   TuiState,
   TuiRound,
   ContentChunk,
-  JudgeRenderChunk,
   JudgeRoundResult,
+  CollapsedRoundSummary,
 } from "../state/types.js";
 
 export function shouldCollapse(
@@ -31,12 +32,35 @@ function findActiveRound(state: TuiState): TuiRound | undefined {
   return undefined;
 }
 
-function buildCollapsedSummary(round: TuiRound): string {
-  const pText = round.proposer?.messageText ?? "";
-  const cText = round.challenger?.messageText ?? "";
-  const p = pText.slice(0, 60).replace(/\n/g, " ");
-  const c = cText.slice(0, 60).replace(/\n/g, " ");
-  return `P: ${p}... | C: ${c}...`;
+function buildCollapsedLines(
+  round: TuiRound,
+  judgeResults: JudgeRoundResult[],
+): CollapsedRoundSummary {
+  const pText = (round.proposer?.messageText ?? "").replace(/\n/g, " ");
+  const cText = (round.challenger?.messageText ?? "").replace(/\n/g, " ");
+
+  const jr = judgeResults.find(
+    (j) => j.roundNumber === round.roundNumber && j.status === "done",
+  );
+
+  let judgeLine: string | undefined;
+  if (jr?.verdict) {
+    const v = jr.verdict;
+    const reasoning = stripInternalToolBlocks(jr.messageText)
+      .replace(/\n/g, " ")
+      .slice(0, 40);
+    const decision = v.shouldContinue ? "Continue" : "End";
+    const score = v.score
+      ? v.leading === "tie"
+        ? `Tied ${v.score.proposer}-${v.score.challenger}`
+        : v.leading === "proposer"
+          ? `P leads ${v.score.proposer}-${v.score.challenger}`
+          : `C leads ${v.score.challenger}-${v.score.proposer}`
+      : "";
+    judgeLine = `${reasoning}… → ${decision}${score ? ` | ${score}` : ""}`;
+  }
+
+  return { proposerLine: pText, challengerLine: cText, judgeLine };
 }
 
 export function rebuildChunks(state: TuiState): ContentChunk[] {
@@ -46,15 +70,22 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
   // 1. Completed rounds
   for (const round of completedRounds) {
     const collapsed = shouldCollapse(round, state.rounds);
+    const jr = state.judgeResults.find(
+      (j) => j.roundNumber === round.roundNumber && j.status === "done",
+    );
+
     if (collapsed) {
       chunks.push({
         type: "round",
         roundNumber: round.roundNumber,
+        maxRounds: state.metrics.maxRounds,
+        active: false,
         collapsed: true,
-        collapsedSummary: buildCollapsedSummary(round),
+        collapsedSummary: buildCollapsedLines(round, state.judgeResults),
         leftLines: [],
         rightLines: [],
         height: 0,
+        judgeResult: jr,
       });
     } else {
       const leftBlocks = snapshotToBlocks(
@@ -70,20 +101,16 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
       chunks.push({
         type: "round",
         roundNumber: round.roundNumber,
+        maxRounds: state.metrics.maxRounds,
+        active: false,
         collapsed: false,
         leftBlocks,
         rightBlocks,
         leftLines: [], // Populated by caller with populateChunkLines
         rightLines: [],
         height: 0,
+        judgeResult: jr,
       });
-    }
-
-    // Judge results for this round
-    for (const jr of state.judgeResults.filter(
-      (j) => j.roundNumber === round.roundNumber && j.status === "done",
-    )) {
-      chunks.push(buildJudgeChunk(jr));
     }
   }
 
@@ -106,6 +133,8 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
     chunks.push({
       type: "round",
       roundNumber: active.roundNumber,
+      maxRounds: state.metrics.maxRounds,
+      active: true,
       collapsed: false,
       leftBlocks,
       rightBlocks,
@@ -117,13 +146,26 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
 
   // 3. Active judge
   if (state.judge.visible && state.judge.judgeStatus !== "idle") {
+    const isDone = state.judge.judgeStatus === "done";
+    const stripped = stripInternalToolBlocks(state.judge.judgeMessageText);
+    const judgeLines = stripped
+      ? [screenLine([{ text: stripped, style: {} }])]
+      : !isDone
+        ? [
+            screenLine([
+              {
+                text: "Evaluating...",
+                style: { color: "yellow", italic: true },
+              },
+            ]),
+          ]
+        : [];
     chunks.push({
       type: "judge",
       roundNumber: state.judge.roundNumber,
-      status: state.judge.judgeStatus === "done" ? "done" : "streaming",
-      lines: state.judge.judgeMessageText
-        ? [screenLine([{ text: state.judge.judgeMessageText, style: {} }])]
-        : [],
+      status: isDone ? "done" : "streaming",
+      shouldContinue: state.judge.verdict?.shouldContinue,
+      lines: judgeLines,
     });
   }
 
@@ -132,44 +174,25 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
     const summaryLines = [
       screenLine([
         {
-          text: `Leading: ${state.summary.leading ?? "undecided"}`,
-          style: { bold: true },
-        },
-      ]),
-      screenLine([
-        {
           text: `Terminated: ${state.summary.terminationReason ?? "unknown"} (${state.summary.roundsCompleted} rounds)`,
           style: {},
         },
       ]),
     ];
+    if (state.summary.recommendedAction) {
+      summaryLines.push(
+        screenLine([
+          {
+            text: `Decision: ${state.summary.recommendedAction}`,
+            style: { bold: true },
+          },
+        ]),
+      );
+    }
     chunks.push({ type: "summary", lines: summaryLines });
   }
 
   return chunks;
-}
-
-function buildJudgeChunk(jr: JudgeRoundResult): JudgeRenderChunk {
-  const lines = [];
-  if (jr.messageText) {
-    lines.push(screenLine([{ text: jr.messageText, style: {} }]));
-  }
-  if (jr.verdict) {
-    lines.push(
-      screenLine([
-        {
-          text: `Verdict: leading=${jr.verdict.leading}`,
-          style: { bold: true },
-        },
-      ]),
-    );
-  }
-  return {
-    type: "judge",
-    roundNumber: jr.roundNumber,
-    status: "done",
-    lines,
-  };
 }
 
 /**
