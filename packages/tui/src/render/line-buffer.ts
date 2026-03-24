@@ -1,5 +1,10 @@
 import stringWidth from "string-width";
-import type { ScreenLine, StyledSegment } from "../state/types.js";
+import type {
+  ScreenLine,
+  StyledSegment,
+  RenderBlock,
+  ContentChunk,
+} from "../state/types.js";
 
 /**
  * Grapheme-safe truncation with ellipsis based on display width.
@@ -182,6 +187,230 @@ export function wrapText(
 
       result.push(screenLine(segs));
       isFirstWrapped = false;
+    }
+  }
+
+  return result;
+}
+
+const STATUS_ICONS: Record<string, string> = {
+  idle: "\u25CB", // ○
+  thinking: "\u25D0", // ◐
+  tool: "\u2699", // ⚙
+  speaking: "\u25C9", // ◉
+  done: "\u2713", // ✓
+  error: "\u2717", // ✗
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  proposer: "green",
+  challenger: "red",
+};
+
+export function buildPanelLines(
+  blocks: RenderBlock[],
+  panelWidth: number,
+): ScreenLine[] {
+  const result: ScreenLine[] = [];
+
+  for (const block of blocks) {
+    switch (block.kind) {
+      case "agent-header": {
+        const icon = STATUS_ICONS[block.status] ?? "\u25CB";
+        const color = ROLE_COLORS[block.role] ?? "white";
+        const label = block.role === "proposer" ? "Proposer" : "Challenger";
+        const agent = block.agentType ? ` [${block.agentType}]` : "";
+        result.push(
+          screenLine([
+            { text: `${icon} ${label}${agent}`, style: { bold: true, color } },
+          ]),
+        );
+        const dur = block.duration
+          ? ` (${(block.duration / 1000).toFixed(1)}s)`
+          : "";
+        const statusColor = block.status === "error" ? "red" : "cyan";
+        result.push(
+          screenLine([
+            { text: `  ${block.status}${dur}`, style: { color: statusColor } },
+          ]),
+        );
+        break;
+      }
+      case "thinking": {
+        const lines = wrapText(block.text, panelWidth, {
+          firstLinePrefix: [{ text: "\uD83D\uDCAD ", style: { dim: true } }],
+          continuationIndent: 3,
+          style: { dim: true, italic: true },
+        });
+        result.push(...lines);
+        break;
+      }
+      case "tool-call": {
+        const icon =
+          block.status === "running"
+            ? "\u25B6"
+            : block.status === "success"
+              ? "\u2713"
+              : "\u2717";
+        const prefix =
+          block.status === "running"
+            ? ">>"
+            : block.status === "success"
+              ? "<<"
+              : "!!";
+        const summary = block.summary ? ` (${block.summary})` : "";
+        const elapsed =
+          block.status === "running" && block.elapsedMs
+            ? ` ${block.elapsedMs}ms`
+            : "";
+        const text = `${prefix} ${block.toolName}${summary}${elapsed}`;
+        result.push(
+          screenLine([
+            { text: truncate(text, panelWidth), style: { dim: true } },
+          ]),
+        );
+        break;
+      }
+      case "message": {
+        result.push(emptyLine(0));
+        const lines = wrapText(block.text, panelWidth, { style: {} });
+        result.push(...lines);
+        break;
+      }
+      case "warning": {
+        result.push(
+          screenLine([
+            {
+              text: truncate(`\u26A0 ${block.text}`, panelWidth),
+              style: { color: "yellow" },
+            },
+          ]),
+        );
+        break;
+      }
+      case "error": {
+        const lines = wrapText(block.text, panelWidth, {
+          firstLinePrefix: [
+            { text: "Error: ", style: { color: "red", bold: true } },
+          ],
+          continuationIndent: 7,
+          style: { color: "red", bold: true },
+        });
+        const limited = lines.slice(0, 3);
+        if (lines.length > 3) {
+          const last = limited[2];
+          const lastText = last.segments.map((s) => s.text).join("");
+          limited[2] = screenLine([
+            {
+              text: truncate(lastText, panelWidth),
+              style: { color: "red", bold: true },
+            },
+          ]);
+        }
+        result.push(...limited);
+        break;
+      }
+      case "separator": {
+        result.push(emptyLine(0));
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
+const BORDER_SEG: StyledSegment = { text: "\u2502", style: { dim: true } };
+
+function mergeSideBySide(
+  left: ScreenLine,
+  right: ScreenLine,
+  panelWidth: number,
+): ScreenLine {
+  const paddedLeft = padRight(left, panelWidth);
+  const paddedRight = padRight(right, panelWidth);
+  return {
+    segments: [
+      BORDER_SEG,
+      ...paddedLeft.segments,
+      BORDER_SEG,
+      ...paddedRight.segments,
+      BORDER_SEG,
+    ],
+    displayWidth: panelWidth * 2 + 3,
+  };
+}
+
+export function buildGlobalLineBuffer(
+  chunks: ContentChunk[],
+  contentWidth: number,
+): ScreenLine[] {
+  const result: ScreenLine[] = [];
+  const panelWidth = Math.floor((contentWidth - 3) / 2);
+
+  for (let ci = 0; ci < chunks.length; ci++) {
+    if (ci > 0) {
+      result.push(emptyLine(0));
+    }
+
+    const chunk = chunks[ci];
+
+    switch (chunk.type) {
+      case "round": {
+        if (chunk.collapsed) {
+          const summary = chunk.collapsedSummary ?? "";
+          result.push(
+            screenLine([
+              {
+                text: truncate(
+                  `\u25B8 Round ${chunk.roundNumber}: ${summary}`,
+                  contentWidth,
+                ),
+                style: { dim: true },
+              },
+            ]),
+          );
+        } else {
+          result.push(
+            screenLine([
+              {
+                text: `\u25BE Round ${chunk.roundNumber}`,
+                style: { bold: true },
+              },
+            ]),
+          );
+          for (let i = 0; i < chunk.height; i++) {
+            const left = chunk.leftLines[i] ?? emptyLine(panelWidth);
+            const right = chunk.rightLines[i] ?? emptyLine(panelWidth);
+            result.push(mergeSideBySide(left, right, panelWidth));
+          }
+        }
+        break;
+      }
+      case "judge": {
+        result.push(
+          screenLine([
+            {
+              text: `\u2550\u2550 Judge (Round ${chunk.roundNumber}) \u2550\u2550`,
+              style: { bold: true },
+            },
+          ]),
+        );
+        result.push(...chunk.lines);
+        break;
+      }
+      case "summary": {
+        result.push(
+          screenLine([
+            {
+              text: "\u2550\u2550 Final Summary \u2550\u2550",
+              style: { bold: true },
+            },
+          ]),
+        );
+        result.push(...chunk.lines);
+        break;
+      }
     }
   }
 
