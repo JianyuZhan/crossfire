@@ -1,5 +1,5 @@
 import type { AnyEvent } from "@crossfire/orchestrator-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TuiStore } from "../src/state/tui-store.js";
 
 const BASE = {
@@ -244,22 +244,29 @@ describe("TuiStore", () => {
   });
 
   it("fires subscriber callbacks on events", () => {
-    const store = new TuiStore();
-    let callCount = 0;
-    store.subscribe(() => {
-      callCount++;
-    });
-    store.handleEvent(
-      ev("debate.started", {
-        config: {
-          topic: "T",
-          maxRounds: 1,
-          judgeEveryNRounds: 0,
-          convergenceThreshold: 0.3,
-        },
-      }),
-    );
-    expect(callCount).toBe(1);
+    vi.useFakeTimers();
+    try {
+      const store = new TuiStore();
+      let callCount = 0;
+      store.subscribe(() => {
+        callCount++;
+      });
+      store.handleEvent(
+        ev("debate.started", {
+          config: {
+            topic: "T",
+            maxRounds: 1,
+            judgeEveryNRounds: 0,
+            convergenceThreshold: 0.3,
+          },
+        }),
+      );
+      // handleEvent now schedules a flush via setTimeout; advance timers to trigger it
+      vi.advanceTimersByTime(20);
+      expect(callCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows judge panel on judge.started", () => {

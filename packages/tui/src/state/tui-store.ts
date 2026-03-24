@@ -7,15 +7,21 @@ import type {
   AgentTurnSnapshot,
   AgentUsage,
   CommandState,
+  ContentChunk,
   JudgeRoundResult,
   JudgeStripState,
   LiveAgentPanelState,
   MetricsState,
+  RenderSnapshot,
+  ScreenLine,
   TuiRound,
   TuiState,
+  ViewportState,
 } from "./types.js";
 import { stripInternalToolBlocks } from "./strip-internal.js";
 export { stripInternalToolBlocks } from "./strip-internal.js";
+import { rebuildChunks, populateChunkLines } from "../render/chunk-builder.js";
+import { buildGlobalLineBuffer } from "../render/line-buffer.js";
 
 const MAX_THINKING_BYTES = 4096;
 
@@ -103,6 +109,19 @@ export class TuiStore {
   private readonly allEvents: AnyEvent[] = [];
   private activeSpeaker: "proposer" | "challenger" | undefined;
   private activeJudgeTurnId: string | undefined;
+  private viewport: ViewportState = {
+    scrollOffset: 0,
+    autoFollow: true,
+    viewportHeight: 24,
+    contentWidth: 80,
+    contentHeight: 0,
+  };
+  private globalLines: ScreenLine[] = [];
+  private chunks: ContentChunk[] = [];
+  private dirty = false;
+  private pendingFlush: ReturnType<typeof setTimeout> | null = null;
+  private readonly flushIntervalMs = 16;
+  private static readonly NEAR_BOTTOM_THRESHOLD = 2;
 
   // Only re-project full state on structural events (not high-frequency deltas)
   private static readonly STRUCTURAL_KINDS = new Set([
@@ -154,7 +173,8 @@ export class TuiStore {
       ),
     );
 
-    for (const cb of this.listeners) cb();
+    this.dirty = true;
+    this.scheduleFlush();
   }
 
   getState(): Readonly<TuiState> {
@@ -164,14 +184,165 @@ export class TuiStore {
   toggleRoundCollapse(roundNumber: number): void {
     const round = this.state.rounds.find((r) => r.roundNumber === roundNumber);
     if (round && round.proposer && round.challenger) {
-      round.collapsed = !round.collapsed;
-      for (const cb of this.listeners) cb();
+      round.userCollapsed = round.userCollapsed === true ? false : true;
+      this.forceFlush();
     }
   }
 
   subscribe(cb: () => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
+  }
+
+  getViewport(): Readonly<ViewportState> {
+    return this.viewport;
+  }
+
+  scroll(delta: number): void {
+    const contentHeight = this.globalLines.length;
+    const maxOffset = Math.max(0, contentHeight - this.viewport.viewportHeight);
+    if (delta < 0) {
+      this.viewport.scrollOffset = Math.min(
+        maxOffset,
+        this.viewport.scrollOffset - delta,
+      );
+      this.viewport.autoFollow = false;
+    } else {
+      this.viewport.scrollOffset = Math.max(
+        0,
+        this.viewport.scrollOffset - delta,
+      );
+      if (this.viewport.scrollOffset <= TuiStore.NEAR_BOTTOM_THRESHOLD) {
+        this.viewport.scrollOffset = 0;
+        this.viewport.autoFollow = true;
+      }
+    }
+    for (const cb of this.listeners) cb();
+  }
+
+  scrollToTop(): void {
+    const maxOffset = Math.max(
+      0,
+      this.globalLines.length - this.viewport.viewportHeight,
+    );
+    this.viewport.scrollOffset = maxOffset;
+    this.viewport.autoFollow = false;
+    for (const cb of this.listeners) cb();
+  }
+
+  scrollToBottom(): void {
+    this.viewport.scrollOffset = 0;
+    this.viewport.autoFollow = true;
+    for (const cb of this.listeners) cb();
+  }
+
+  jumpToRound(roundNumber: number): void {
+    const round = this.state.rounds.find((r) => r.roundNumber === roundNumber);
+    if (round) round.userCollapsed = false;
+    this.flush();
+    const chunk = this.chunks.find(
+      (c) => c.type === "round" && c.roundNumber === roundNumber,
+    );
+    if (chunk?.layoutMeta) {
+      const targetLine = chunk.layoutMeta.startLine;
+      const contentHeight = this.globalLines.length;
+      this.viewport.scrollOffset = Math.max(
+        0,
+        contentHeight - targetLine - this.viewport.viewportHeight,
+      );
+      this.viewport.autoFollow = false;
+    }
+    for (const cb of this.listeners) cb();
+  }
+
+  setViewportDimensions(height: number, width: number): void {
+    this.viewport.viewportHeight = Math.max(1, height);
+    this.viewport.contentWidth = Math.max(20, width);
+    const maxOffset = Math.max(
+      0,
+      this.globalLines.length - this.viewport.viewportHeight,
+    );
+    this.viewport.scrollOffset = Math.min(
+      this.viewport.scrollOffset,
+      maxOffset,
+    );
+    this.dirty = true;
+    this.scheduleFlush();
+  }
+
+  getVisibleLines(): ScreenLine[] {
+    const total = this.globalLines.length;
+    const vh = this.viewport.viewportHeight;
+    const offset = this.viewport.scrollOffset;
+    const end = total - offset;
+    const start = Math.max(0, end - vh);
+    return this.globalLines.slice(start, end);
+  }
+
+  getRenderSnapshot(): RenderSnapshot {
+    return {
+      state: this.state,
+      viewport: { ...this.viewport },
+      visibleLines: this.getVisibleLines(),
+    };
+  }
+
+  forceFlush(): void {
+    this.flush();
+    for (const cb of this.listeners) cb();
+  }
+
+  dispose(): void {
+    if (this.pendingFlush) {
+      clearTimeout(this.pendingFlush);
+      this.pendingFlush = null;
+    }
+  }
+
+  private scheduleFlush(): void {
+    if (this.pendingFlush !== null) return;
+    this.pendingFlush = setTimeout(() => {
+      this.pendingFlush = null;
+      if (this.dirty) {
+        this.flush();
+        for (const cb of this.listeners) cb();
+      }
+    }, this.flushIntervalMs);
+  }
+
+  private flush(): void {
+    this.dirty = false;
+    const panelWidth = Math.floor((this.viewport.contentWidth - 3) / 2);
+    this.chunks = rebuildChunks(this.state);
+    populateChunkLines(this.chunks, panelWidth);
+    this.globalLines = buildGlobalLineBuffer(
+      this.chunks,
+      this.viewport.contentWidth,
+    );
+    this.viewport.contentHeight = this.globalLines.length;
+    if (this.viewport.autoFollow) {
+      this.viewport.scrollOffset = 0;
+    }
+    const maxOffset = Math.max(
+      0,
+      this.globalLines.length - this.viewport.viewportHeight,
+    );
+    this.viewport.scrollOffset = Math.min(
+      this.viewport.scrollOffset,
+      maxOffset,
+    );
+    // Assign layoutMeta to chunks for jumpToRound
+    let lineIdx = 0;
+    for (const chunk of this.chunks) {
+      const startLine = lineIdx;
+      if (chunk.type === "round") {
+        lineIdx += chunk.collapsed ? 1 : 1 + chunk.height;
+      } else {
+        lineIdx += 1 + (chunk.lines?.length ?? 0);
+      }
+      if (lineIdx > startLine) lineIdx++; // separator
+      chunk.layoutMeta = { startLine, endLine: lineIdx - 1 };
+    }
   }
 
   private panel(): LiveAgentPanelState | undefined {
