@@ -24,8 +24,9 @@ const PAGE_DOWN = "\x1b[6~";
 const HOME_SEQS = ["\x1b[H", "\x1b[1~"];
 const END_SEQS = ["\x1b[F", "\x1b[4~"];
 
-function computeFixedAreaHeight(state: TuiState): number {
-  let h = headerBarHeight(); // header with border
+function computeFixedAreaHeight(state: TuiState, termWidth: number): number {
+  const topicLen = state.debateState.config.topic.length;
+  let h = headerBarHeight(topicLen, termWidth); // header with border
   h += 1; // MetricsBar
   h += 1; // CommandInput
   // CommandStatusLine only shows in approval/replay mode
@@ -62,7 +63,7 @@ export function App({
     const stdout = process.stdout;
     const onResize = () => {
       store.setViewportDimensions(
-        stdout.rows - computeFixedAreaHeight(store.getState()),
+        stdout.rows - computeFixedAreaHeight(store.getState(), stdout.columns),
         stdout.columns,
       );
     };
@@ -77,7 +78,7 @@ export function App({
   useEffect(() => {
     const stdout = process.stdout;
     store.setViewportDimensions(
-      stdout.rows - computeFixedAreaHeight(store.getState()),
+      stdout.rows - computeFixedAreaHeight(store.getState(), stdout.columns),
       stdout.columns,
     );
   }, [store, snapshot.state.command.mode, snapshot.state.judge.visible]);
