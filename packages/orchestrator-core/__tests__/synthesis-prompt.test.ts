@@ -129,8 +129,8 @@ describe("buildFullTextSynthesisPrompt", () => {
 		// Should include recommended sections in instructions
 		expect(prompt).toContain("Executive Summary");
 		expect(prompt).toContain("Consensus Action Items");
-		expect(prompt).toContain("Divergent Perspectives");
-		expect(prompt).toContain("Open Questions");
+		expect(prompt).toContain("Unresolved Disagreements");
+		expect(prompt).toContain("Evidence Registry");
 	});
 
 	it("includes topic in prompt", () => {
@@ -189,7 +189,7 @@ describe("buildFullTextSynthesisPrompt", () => {
 		expect(prompt).toContain("Verdict 4");
 
 		// Should NOT include all early rounds - check that some are missing
-		const roundsIncluded = [];
+		const roundsIncluded: number[] = [];
 		for (let i = 1; i <= 10; i++) {
 			if (prompt.includes(`### Round ${i}`)) {
 				roundsIncluded.push(i);

@@ -61,12 +61,8 @@ export function buildFullTextSynthesisPrompt(
 	config: SynthesisPromptConfig,
 	roundSummaries?: string[],
 ): string {
-	const isCjk = detectCjkMajority(state.config.topic);
-
-	// Build instructions
-	const instructions = isCjk
-		? buildInstructionsChinese()
-		: buildInstructionsEnglish();
+	// Instructions always in English per spec; output follows debate language
+	const instructions = buildInstructions();
 
 	// Build full prompt with all content
 	const fullPrompt = buildPromptContent(
@@ -94,69 +90,39 @@ export function buildFullTextSynthesisPrompt(
 	);
 }
 
-function buildInstructionsEnglish(): string {
+function buildInstructions(): string {
 	return `# Synthesis Task
 
 You are synthesizing a comprehensive action plan from a structured adversarial debate.
 
 Your goal is to produce a deeply actionable, well-organized report that captures:
 - Areas of consensus and concrete action items
-- Points of divergence and their underlying reasoning
-- Key risks, dependencies, and open questions
-- Clear next steps with owners and success criteria
+- Unresolved disagreements and their underlying reasoning
+- Key argument evolution through the debate
+- Risk matrix with specific mitigation strategies
+- Evidence registry tracking which side cited what
 
 ## Recommended Structure
 
-1. **Executive Summary** — high-level overview of the debate outcome and key decisions
-2. **Consensus Action Items** — concrete steps both sides agree on, with priority and ownership
-3. **Divergent Perspectives** — significant disagreements, why they matter, and options for resolution
-4. **Risk Assessment** — potential blockers, dependencies, and mitigation strategies
-5. **Open Questions** — unresolved issues that need further investigation
-6. **Success Criteria** — measurable outcomes to validate the plan
-7. **Next Steps** — immediate actions with timeline and DRI (Directly Responsible Individual)
+1. **Executive Summary** — 2-3 paragraphs: core conclusions, key value generated
+2. **Consensus Action Items** — items BOTH sides genuinely agree on, with concrete next steps
+3. **Unresolved Disagreements** — both positions, associated risks, suggested exploration
+4. **Key Argument Evolution** — 3-5 most important arguments and how they developed
+5. **Risk Matrix** — with SPECIFIC mitigation strategies, never "requires further analysis"
+6. **Evidence Registry** — mark which side cited it and whether it was contested
 
 ## Quality Standards
 
-- **Depth over breadth**: go deep on the most critical issues
+- **Quality over quantity**: 3 deep consensus items > 30 shallow bullet points
 - **Actionability**: every recommendation should be concrete and testable
 - **Completeness**: address all major points raised, even if briefly
 - **Balance**: fairly represent both sides' strongest arguments
 - **Clarity**: use clear language, avoid jargon unless necessary
+- Distinguish genuine bilateral consensus from one-sided concessions
+- For risks, provide actionable mitigation based on what was discussed in the debate
+- Prefer the listed section order; omit empty sections, but do not invent unrelated top-level sections
 
 Now, here is the debate transcript and judge feedback:
-`;
-}
-
-function buildInstructionsChinese(): string {
-	return `# 综合任务
-
-你正在从结构化对抗式辩论中综合一个全面的行动计划。
-
-你的目标是生成一份深度可操作、组织良好的报告，包含：
-- 共识领域和具体行动项
-- 分歧点及其背后的推理
-- 关键风险、依赖关系和未决问题
-- 明确的后续步骤，包括负责人和成功标准
-
-## 推荐结构
-
-1. **执行摘要** — 辩论结果和关键决策的高层概述
-2. **共识行动项** — 双方同意的具体步骤，包括优先级和负责人
-3. **分歧视角** — 重大分歧、其重要性以及解决方案选项
-4. **风险评估** — 潜在阻碍因素、依赖关系和缓解策略
-5. **未决问题** — 需要进一步调查的未解决事项
-6. **成功标准** — 验证计划的可衡量成果
-7. **后续步骤** — 带有时间线和直接责任人(DRI)的即时行动
-
-## 质量标准
-
-- **深度优于广度**：深入探讨最关键的议题
-- **可操作性**：每个建议都应具体且可测试
-- **完整性**：涉及所有主要观点，即使简要提及
-- **平衡性**：公平代表双方最有力的论点
-- **清晰性**：使用清晰语言，除非必要避免行话
-
-现在，这是辩论记录和评审反馈：
 `;
 }
 
