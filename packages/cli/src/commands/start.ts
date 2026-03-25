@@ -144,8 +144,8 @@ export const startCommand = new Command("start")
 				mkdirSync(outputDir, { recursive: true });
 			}
 
-			// Write meta.json with profile mapping
-			const meta = {
+			// Write initial index.json with profile mapping (EventStore merges runtime data on close)
+			const initialIndex = {
 				debateId,
 				config,
 				profiles: {
@@ -175,8 +175,8 @@ export const startCommand = new Command("start")
 				},
 			};
 			writeFileSync(
-				join(outputDir, "meta.json"),
-				JSON.stringify(meta, null, 2) + "\n",
+				join(outputDir, "index.json"),
+				JSON.stringify(initialIndex, null, 2) + "\n",
 			);
 
 			if (options.verbose) {
@@ -390,8 +390,9 @@ export const startCommand = new Command("start")
 				if (finalSummaryText) {
 					console.log(finalSummaryText);
 				}
-				await adapterBundle.closeAll();
+				// Write transcript + index BEFORE closing adapters (which may hang)
 				await busBundle.close();
+				await adapterBundle.closeAll();
 			}
 		} catch (error) {
 			console.error(

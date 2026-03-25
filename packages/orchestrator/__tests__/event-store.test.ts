@@ -75,7 +75,7 @@ describe("EventStore", () => {
 		await store.close();
 	});
 
-	it("writes meta.json on debate.started", async () => {
+	it("writes topic from debate.started into index.json", async () => {
 		const store = new EventStore(dir);
 		store.append(
 			makeEvent("debate.started", {
@@ -89,9 +89,8 @@ describe("EventStore", () => {
 		);
 		await store.close();
 
-		const meta = JSON.parse(await readFile(join(dir, "meta.json"), "utf-8"));
-		expect(meta.config.topic).toBe("Meta test");
-		expect(meta.versions.crossfire).toBe("0.1.0");
+		const index = JSON.parse(await readFile(join(dir, "index.json"), "utf-8"));
+		expect(index.topic).toBe("Meta test");
 	});
 
 	it("generates index.json on close with round offsets and metadata", async () => {

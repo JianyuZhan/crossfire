@@ -26,7 +26,6 @@ export class EventStore {
 	private startedAt?: number;
 	private totalRounds = 0;
 	private terminationReason?: string;
-	private config?: Record<string, unknown>;
 
 	constructor(outputDir: string, segmentFilename = "events.jsonl") {
 		this.dir = outputDir;
@@ -63,10 +62,8 @@ export class EventStore {
 		if (event.kind === "debate.started" && "config" in event) {
 			const e = event as { config: { topic: string } };
 			this.topic = e.config.topic;
-			this.config = e.config as unknown as Record<string, unknown>;
 			this.startedAt = event.timestamp;
 			this.debateId = `d-${new Date(event.timestamp).toISOString().replace(/[:.]/g, "").slice(0, 15)}`;
-			this.writeMeta();
 		}
 
 		if (event.kind === "round.started" && "roundNumber" in event) {
@@ -115,25 +112,17 @@ export class EventStore {
 		return len;
 	}
 
-	private writeMeta(): void {
-		const metaPath = join(this.dir, "meta.json");
-		let existing: Record<string, unknown> = {};
-		try {
-			existing = JSON.parse(readFileSync(metaPath, "utf-8"));
-		} catch {
-			// No existing meta.json, start fresh
-		}
-		const meta = {
-			...existing,
-			config: this.config ?? existing.config ?? {},
-			versions: { crossfire: "0.1.0", nodeVersion: process.version },
-		};
-		writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n");
-	}
-
 	private writeIndex(): void {
 		const lastEvent = this.totalEvents > 0 ? Date.now() : this.startedAt;
 		const indexPath = join(this.dir, "index.json");
+
+		// Read existing index.json (written by CLI with profiles/config/versions)
+		let existing: Record<string, unknown> = {};
+		try {
+			existing = JSON.parse(readFileSync(indexPath, "utf-8"));
+		} catch {
+			/* no existing index */
+		}
 
 		let segments: Array<{
 			file: string;
@@ -142,7 +131,7 @@ export class EventStore {
 		}>;
 
 		if (this.segmentFilename === "events.jsonl") {
-			// Initial segment: write fresh index with single segment
+			// Initial segment: single segment entry
 			segments = [
 				{
 					file: this.segmentFilename,
@@ -152,36 +141,33 @@ export class EventStore {
 			];
 		} else {
 			// Resume segment: append to existing segments array
-			try {
-				const existingIndex = JSON.parse(readFileSync(indexPath, "utf-8"));
-				segments = existingIndex.segments ?? [
-					{
-						file: "events.jsonl",
-						eventCount: existingIndex.totalEvents ?? 0,
-						startedAt: existingIndex.startedAt ?? 0,
-					},
-				];
-				segments.push({
-					file: this.segmentFilename,
-					eventCount: this.totalEvents,
-					startedAt: this.startedAt ?? Date.now(),
-				});
-			} catch {
-				// If no existing index, create one with just this segment
-				segments = [
-					{
-						file: this.segmentFilename,
-						eventCount: this.totalEvents,
-						startedAt: this.startedAt ?? Date.now(),
-					},
-				];
-			}
+			const existingSegments = existing.segments as
+				| Array<{
+						file: string;
+						eventCount: number;
+						startedAt: number;
+				  }>
+				| undefined;
+			segments = existingSegments ?? [
+				{
+					file: "events.jsonl",
+					eventCount: (existing.totalEvents as number) ?? 0,
+					startedAt: (existing.startedAt as number) ?? 0,
+				},
+			];
+			segments.push({
+				file: this.segmentFilename,
+				eventCount: this.totalEvents,
+				startedAt: this.startedAt ?? Date.now(),
+			});
 		}
 
+		// Merge: preserve CLI-written fields (profiles, config, versions) + add runtime data
 		const index = {
-			debateId: this.debateId ?? "unknown",
-			topic: this.topic ?? "",
-			startedAt: this.startedAt ?? 0,
+			...existing,
+			debateId: this.debateId ?? existing.debateId ?? "unknown",
+			topic: this.topic ?? existing.topic ?? "",
+			startedAt: this.startedAt ?? existing.startedAt ?? 0,
 			endedAt: lastEvent,
 			totalEvents: this.totalEvents,
 			totalRounds: this.totalRounds,

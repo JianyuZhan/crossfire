@@ -27,12 +27,12 @@ export const resumeCommand = new Command("resume")
 	.option("--headless", "Run without TUI", false)
 	.action(async (outputDir: string, options) => {
 		try {
-			// Read meta.json
-			const metaPath = join(outputDir, "meta.json");
-			const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+			// Read index.json (contains config, profiles, and runtime data)
+			const indexPath = join(outputDir, "index.json");
+			const meta = JSON.parse(readFileSync(indexPath, "utf-8"));
 
 			if (!meta.config) {
-				console.error("Error: meta.json missing config field");
+				console.error("Error: index.json missing config field");
 				process.exit(1);
 			}
 
@@ -50,7 +50,7 @@ export const resumeCommand = new Command("resume")
 				process.exit(0);
 			}
 
-			// Load profiles (CLI overrides or from meta.json)
+			// Load profiles (CLI overrides or from index.json)
 			const proposerProfile = options.proposer
 				? loadProfile(options.proposer)
 				: loadProfileFromMeta(meta.profiles.proposer);
@@ -172,8 +172,9 @@ export const resumeCommand = new Command("resume")
 					// Leave alternate screen
 					process.stdout.write("\x1b[?1049l");
 				}
-				await adapterBundle.closeAll();
+				// Write transcript + index BEFORE closing adapters (which may hang)
 				await busBundle.close();
+				await adapterBundle.closeAll();
 			}
 		} catch (error) {
 			console.error(
@@ -185,6 +186,6 @@ export const resumeCommand = new Command("resume")
 	});
 
 function loadProfileFromMeta(metaProfile: { name: string }): ProfileConfig {
-	// Load profile by name from meta.json
+	// Load profile by name from index.json
 	return loadProfile(metaProfile.name);
 }

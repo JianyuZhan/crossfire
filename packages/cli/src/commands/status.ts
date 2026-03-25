@@ -8,17 +8,13 @@ export const statusCommand = new Command("status")
 	.option("--json", "Output as JSON", false)
 	.action(async (outputDir: string, options) => {
 		try {
-			// Read index.json
+			// Read index.json (unified metadata + runtime data)
 			const indexPath = join(outputDir, "index.json");
 			const index = JSON.parse(readFileSync(indexPath, "utf-8"));
 
-			// Read meta.json
-			const metaPath = join(outputDir, "meta.json");
-			const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-
 			if (options.json) {
 				// JSON output
-				console.log(JSON.stringify({ index, meta }, null, 2));
+				console.log(JSON.stringify(index, null, 2));
 			} else {
 				// Formatted output
 				console.log("Debate Status");
@@ -50,40 +46,40 @@ export const statusCommand = new Command("status")
 				}
 
 				// Profiles
-				if (meta.profiles) {
+				if (index.profiles) {
 					console.log("Profiles:");
 					console.log(
-						`  Proposer: ${meta.profiles.proposer.name} (${meta.profiles.proposer.agent})`,
+						`  Proposer: ${index.profiles.proposer.name} (${index.profiles.proposer.agent})`,
 					);
-					if (meta.profiles.proposer.model) {
-						console.log(`    Model: ${meta.profiles.proposer.model}`);
+					if (index.profiles.proposer.model) {
+						console.log(`    Model: ${index.profiles.proposer.model}`);
 					}
 					console.log(
-						`  Challenger: ${meta.profiles.challenger.name} (${meta.profiles.challenger.agent})`,
+						`  Challenger: ${index.profiles.challenger.name} (${index.profiles.challenger.agent})`,
 					);
-					if (meta.profiles.challenger.model) {
-						console.log(`    Model: ${meta.profiles.challenger.model}`);
+					if (index.profiles.challenger.model) {
+						console.log(`    Model: ${index.profiles.challenger.model}`);
 					}
-					if (meta.profiles.judge) {
+					if (index.profiles.judge) {
 						console.log(
-							`  Judge: ${meta.profiles.judge.name} (${meta.profiles.judge.agent})`,
+							`  Judge: ${index.profiles.judge.name} (${index.profiles.judge.agent})`,
 						);
-						if (meta.profiles.judge.model) {
-							console.log(`    Model: ${meta.profiles.judge.model}`);
+						if (index.profiles.judge.model) {
+							console.log(`    Model: ${index.profiles.judge.model}`);
 						}
 					}
 					console.log();
 				}
 
 				// Config
-				if (meta.config) {
+				if (index.config) {
 					console.log("Configuration:");
-					console.log(`  Max Rounds: ${meta.config.maxRounds}`);
+					console.log(`  Max Rounds: ${index.config.maxRounds}`);
 					console.log(
-						`  Judge Every N Rounds: ${meta.config.judgeEveryNRounds}`,
+						`  Judge Every N Rounds: ${index.config.judgeEveryNRounds}`,
 					);
 					console.log(
-						`  Convergence Threshold: ${meta.config.convergenceThreshold}`,
+						`  Convergence Threshold: ${index.config.convergenceThreshold}`,
 					);
 				}
 			}
