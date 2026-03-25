@@ -9,3 +9,4 @@ export * from "./debate-memory.js";
 export * from "./evolving-plan.js";
 export * from "./draft-report.js";
 export * from "./report-renderer.js";
+export * from "./synthesis-prompt.js";
