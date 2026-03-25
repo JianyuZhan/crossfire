@@ -1,78 +1,78 @@
 import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type {
-  RenderBlock,
-  AgentTurnSnapshot,
-  LiveAgentPanelState,
-  LiveToolEntry,
+	AgentTurnSnapshot,
+	LiveAgentPanelState,
+	LiveToolEntry,
+	RenderBlock,
 } from "../state/types.js";
 
 type AgentRole = "proposer" | "challenger";
 
 function toolToBlock(t: LiveToolEntry): RenderBlock {
-  const status: "running" | "success" | "error" =
-    t.status === "running"
-      ? "running"
-      : t.status === "done"
-        ? "success"
-        : "error";
-  return {
-    kind: "tool-call",
-    toolName: t.toolName,
-    status,
-    summary: t.inputSummary,
-    elapsedMs: t.elapsedMs,
-  };
+	const status: "running" | "success" | "error" =
+		t.status === "running"
+			? "running"
+			: t.status === "done"
+				? "success"
+				: "error";
+	return {
+		kind: "tool-call",
+		toolName: t.toolName,
+		status,
+		summary: t.inputSummary,
+		elapsedMs: t.elapsedMs,
+	};
 }
 
 export function snapshotToBlocks(
-  snap: AgentTurnSnapshot,
-  role: AgentRole,
-  agentType?: string,
+	snap: AgentTurnSnapshot,
+	role: AgentRole,
+	agentType?: string,
 ): RenderBlock[] {
-  const blocks: RenderBlock[] = [
-    {
-      kind: "agent-header",
-      role,
-      agentType,
-      status: "done",
-      duration: snap.turnDurationMs,
-    },
-  ];
-  for (const t of snap.tools) blocks.push(toolToBlock(t));
-  for (const w of snap.warnings) blocks.push({ kind: "warning", text: w });
-  if (snap.error) blocks.push({ kind: "error", text: snap.error });
-  if (snap.messageText)
-    blocks.push({ kind: "message", text: snap.messageText, isFinal: true });
-  return blocks;
+	const blocks: RenderBlock[] = [
+		{
+			kind: "agent-header",
+			role,
+			agentType,
+			status: "done",
+			duration: snap.turnDurationMs,
+		},
+	];
+	for (const t of snap.tools) blocks.push(toolToBlock(t));
+	for (const w of snap.warnings) blocks.push({ kind: "warning", text: w });
+	if (snap.error) blocks.push({ kind: "error", text: snap.error });
+	if (snap.messageText)
+		blocks.push({ kind: "message", text: snap.messageText, isFinal: true });
+	return blocks;
 }
 
 export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
-  const blocks: RenderBlock[] = [
-    {
-      kind: "agent-header",
-      role: state.role,
-      agentType: state.agentType,
-      status: state.status,
-      duration: state.turnDurationMs,
-    },
-  ];
-  if (state.status === "thinking" && state.thinkingText) {
-    blocks.push({ kind: "thinking", text: state.thinkingText });
-  }
-  for (const t of state.tools) blocks.push(toolToBlock(t));
-  for (const w of state.warnings) blocks.push({ kind: "warning", text: w });
-  if (state.error) blocks.push({ kind: "error", text: state.error });
-  const displayText = stripInternalToolBlocks(state.currentMessageText);
-  if (displayText && (state.status === "speaking" || state.status === "done")) {
-    blocks.push({
-      kind: "message",
-      text: displayText,
-      isFinal: state.status === "done",
-    });
-  }
-  return blocks;
+	const blocks: RenderBlock[] = [
+		{
+			kind: "agent-header",
+			role: state.role,
+			agentType: state.agentType,
+			status: state.status,
+			duration: state.turnDurationMs,
+		},
+	];
+	if (state.status === "thinking" && state.thinkingText) {
+		blocks.push({ kind: "thinking", text: state.thinkingText });
+	}
+	for (const t of state.tools) blocks.push(toolToBlock(t));
+	for (const w of state.warnings) blocks.push({ kind: "warning", text: w });
+	if (state.error) blocks.push({ kind: "error", text: state.error });
+	const displayText = stripInternalToolBlocks(state.currentMessageText);
+	if (displayText && (state.status === "speaking" || state.status === "done")) {
+		blocks.push({
+			kind: "message",
+			text: displayText,
+			isFinal: state.status === "done",
+		});
+	}
+	return blocks;
 }
 
 export function idleBlocks(role: AgentRole, agentType?: string): RenderBlock[] {
-  return [{ kind: "agent-header", role, agentType, status: "idle" }];
+	return [{ kind: "agent-header", role, agentType, status: "idle" }];
 }

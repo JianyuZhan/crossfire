@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { runDebate } from "@crossfire/orchestrator";
 import type { DebateConfig } from "@crossfire/orchestrator-core";
 import { App } from "@crossfire/tui";
@@ -12,11 +12,6 @@ import { createAdapters } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
-
-function buildExitSummary(outputDir: string): string {
-	const dir = resolve(outputDir);
-	return `\nOutput: ${join(dir, "action-plan.html")} | ${join(dir, "transcript.html")}\n`;
-}
 
 export const startCommand = new Command("start")
 	.description("Start a new debate")
@@ -304,20 +299,11 @@ export const startCommand = new Command("start")
 					console.log(`Output saved to: ${outputDir}`);
 				}
 			} finally {
-				// Capture final state before cleanup (skip if interrupted)
-				const finalSummaryText =
-					tuiBundle && !abortController.signal.aborted
-						? buildExitSummary(outputDir)
-						: undefined;
 				// Cleanup
 				process.off("SIGINT", triggerShutdown);
 				tuiBundle?.store.dispose();
 				if (inkInstance) {
 					inkInstance.unmount();
-				}
-				// Print summary to main screen so user sees final state
-				if (finalSummaryText) {
-					console.log(finalSummaryText);
 				}
 				// Write transcript + index BEFORE closing adapters (which may hang)
 				await busBundle.close();
