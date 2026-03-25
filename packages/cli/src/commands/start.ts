@@ -27,13 +27,21 @@ export const startCommand = new Command("start")
 	)
 	.option(
 		"--judge <profile>",
-		"Judge agent profile (default: inferred from proposer; use 'none' to disable)",
+		"Judge agent profile (default: inferred from proposer)",
 	)
-	.option("--max-rounds <n>", "Maximum number of rounds", "10")
-	.option("--judge-every-n-rounds <n>", "Judge evaluation frequency", "3")
+	.option(
+		"--max-rounds <n>",
+		"Maximum debate rounds before forced termination",
+		"10",
+	)
+	.option(
+		"--judge-every-n-rounds <n>",
+		"Judge intervenes every N rounds (must be < max-rounds)",
+		"3",
+	)
 	.option(
 		"--convergence-threshold <n>",
-		"Convergence detection threshold",
+		"Stance distance (0-1) below which debate auto-converges",
 		"0.3",
 	)
 	.option("--output <dir>", "Output directory for debate logs")
@@ -57,6 +65,26 @@ export const startCommand = new Command("start")
 				process.exit(1);
 			}
 
+			// Validate numeric options
+			const maxRounds = Number.parseInt(options.maxRounds, 10);
+			if (!Number.isFinite(maxRounds) || maxRounds < 1) {
+				console.error("Error: --max-rounds must be a positive integer");
+				process.exit(1);
+			}
+			const convergenceThreshold = Number.parseFloat(
+				options.convergenceThreshold,
+			);
+			if (
+				!Number.isFinite(convergenceThreshold) ||
+				convergenceThreshold < 0 ||
+				convergenceThreshold > 1
+			) {
+				console.error(
+					"Error: --convergence-threshold must be a number between 0 and 1",
+				);
+				process.exit(1);
+			}
+
 			// Load topic
 			const topic =
 				options.topic ?? readFileSync(options.topicFile, "utf-8").trim();
@@ -65,16 +93,24 @@ export const startCommand = new Command("start")
 			const proposerProfile = loadProfile(options.proposer);
 			const challengerProfile = loadProfile(options.challenger);
 
-			// Resolve judge profile: infer from proposer adapter type if not specified
-			const judgeDisabled = options.judge === "none";
-			if (judgeDisabled && options.judgeModel) {
-				console.error("Error: --judge-model cannot be used with --judge none");
+			// Validate judge-every-n-rounds
+			const judgeEveryNRounds = Number.parseInt(options.judgeEveryNRounds, 10);
+			if (!Number.isFinite(judgeEveryNRounds) || judgeEveryNRounds < 1) {
+				console.error(
+					"Error: --judge-every-n-rounds must be a positive integer",
+				);
 				process.exit(1);
 			}
-			let judgeProfile: ReturnType<typeof loadProfile> | "none";
-			if (judgeDisabled) {
-				judgeProfile = "none";
-			} else if (options.judge) {
+			if (judgeEveryNRounds >= maxRounds) {
+				console.error(
+					`Error: --judge-every-n-rounds (${judgeEveryNRounds}) must be less than --max-rounds (${maxRounds})`,
+				);
+				process.exit(1);
+			}
+
+			// Resolve judge profile: infer from proposer adapter type if not specified
+			let judgeProfile: ReturnType<typeof loadProfile>;
+			if (options.judge) {
 				judgeProfile = loadProfile(options.judge);
 			} else {
 				// Infer from proposer's adapter type
@@ -98,23 +134,18 @@ export const startCommand = new Command("start")
 					profile: challengerProfile,
 					cliModel: options.challengerModel ?? options.model,
 				},
-				judge:
-					judgeProfile === "none"
-						? "none"
-						: {
-								profile: judgeProfile,
-								cliModel: options.judgeModel ?? options.model,
-							},
+				judge: {
+					profile: judgeProfile,
+					cliModel: options.judgeModel ?? options.model,
+				},
 			});
 
 			// Build debate config
 			const config: DebateConfig = {
 				topic,
-				maxRounds: Number.parseInt(options.maxRounds, 10),
-				judgeEveryNRounds: judgeDisabled
-					? 0
-					: Number.parseInt(options.judgeEveryNRounds, 10),
-				convergenceThreshold: Number.parseFloat(options.convergenceThreshold),
+				maxRounds,
+				judgeEveryNRounds,
+				convergenceThreshold,
 				proposerModel: roles.proposer.model,
 				challengerModel: roles.challenger.model,
 				judgeModel: roles.judge?.model,
@@ -141,7 +172,7 @@ export const startCommand = new Command("start")
 						agent: challengerProfile.agent,
 						model: roles.challenger.model,
 					},
-					...(roles.judge && judgeProfile !== "none"
+					...(roles.judge
 						? {
 								judge: {
 									name: judgeProfile.name,
@@ -170,7 +201,7 @@ export const startCommand = new Command("start")
 				console.log(
 					`  Challenger: ${challengerProfile.name} (${roles.challenger.adapterType})`,
 				);
-				if (roles.judge && judgeProfile !== "none") {
+				if (roles.judge) {
 					console.log(
 						`  Judge: ${judgeProfile.name} (${roles.judge.adapterType})`,
 					);
@@ -292,7 +323,8 @@ export const startCommand = new Command("start")
 					await new Promise<void>((resolve) => {
 						userQuitResolve = resolve;
 					});
-				} else if (!options.headless) {
+				} else {
+					// Non-TUI mode (headless or fallback): always print completion info
 					console.log("\nDebate completed!");
 					console.log(`Reason: ${finalState.terminationReason}`);
 					console.log(`Total rounds: ${finalState.currentRound}`);

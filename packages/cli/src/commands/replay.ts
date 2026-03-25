@@ -11,9 +11,20 @@ export const replayCommand = new Command("replay")
 		try {
 			const eventsPath = join(outputDir, "events.jsonl");
 			const speed = Number.parseFloat(options.speed);
+			if (!Number.isFinite(speed) || speed <= 0) {
+				console.error("Error: --speed must be a positive number");
+				process.exit(1);
+			}
 			const startFromRound = options.fromRound
 				? Number.parseInt(options.fromRound, 10)
 				: undefined;
+			if (
+				startFromRound !== undefined &&
+				(!Number.isFinite(startFromRound) || startFromRound < 1)
+			) {
+				console.error("Error: --from-round must be a positive integer");
+				process.exit(1);
+			}
 
 			console.log(`Replaying debate from ${outputDir}`);
 			if (startFromRound !== undefined) {

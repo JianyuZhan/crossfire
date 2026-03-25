@@ -134,11 +134,11 @@ export const resumeCommand = new Command("resume")
 					resumeFromState: currentState,
 				});
 
-				if (!options.headless) {
-					console.log("\nDebate completed!");
-					console.log(`Reason: ${finalState.terminationReason}`);
-					console.log(`Total rounds: ${finalState.currentRound}`);
-				}
+				// Always print completion info in non-TUI mode
+				console.log("\nDebate completed!");
+				console.log(`Reason: ${finalState.terminationReason}`);
+				console.log(`Total rounds: ${finalState.currentRound}`);
+				console.log(`Output saved to: ${outputDir}`);
 			} finally {
 				process.off("SIGINT", triggerShutdown);
 				tuiBundle?.store.dispose();

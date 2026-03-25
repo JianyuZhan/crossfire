@@ -98,14 +98,7 @@ crossfire start \
   --challenger codex/challenger \
   --judge gemini/judge
 
-# Read topic from file, no judge
-crossfire start \
-  --topic-file proposal.md \
-  --proposer claude/proposer \
-  --challenger claude/challenger \
-  --judge none
-
-# Headless mode (no TUI, events still persisted)
+# Headless mode (no TUI, completion info still printed to stdout)
 crossfire start \
   --topic "Quick brainstorm" \
   --proposer claude/proposer \
@@ -155,17 +148,19 @@ Start a new debate.
 | `--topic-file <path>`         | Read topic from file (mutually exclusive with `--topic`) | —                        |
 | `--proposer <profile>`        | Proposer profile                                         | _required_               |
 | `--challenger <profile>`      | Challenger profile                                       | _required_               |
-| `--judge <profile\|none>`     | Judge profile, or `none` to disable                      | Auto-inferred            |
-| `--max-rounds <n>`            | Maximum rounds                                           | `10`                     |
-| `--judge-every-n-rounds <n>`  | Judge evaluation interval                                | `3`                      |
-| `--convergence-threshold <n>` | Convergence sensitivity (0–1)                            | `0.3`                    |
+| `--judge <profile>`           | Judge profile (default: inferred from proposer)          | Auto-inferred            |
+| `--max-rounds <n>`            | Maximum debate rounds before forced termination          | `10`                     |
+| `--judge-every-n-rounds <n>`  | Judge intervenes every N rounds (must be < max-rounds)   | `3`                      |
+| `--convergence-threshold <n>` | Stance distance (0-1) below which debate auto-converges  | `0.3`                    |
 | `--model <model>`             | Model override for all roles                             | —                        |
 | `--proposer-model <model>`    | Model override for proposer                              | —                        |
 | `--challenger-model <model>`  | Model override for challenger                            | —                        |
 | `--judge-model <model>`       | Model override for judge                                 | —                        |
 | `--output <dir>`              | Output directory                                         | `run_output/debate-<ts>` |
-| `--headless`                  | Disable TUI                                              | `false`                  |
+| `--headless`                  | Disable TUI (completion info still printed to stdout)    | `false`                  |
 | `-v, --verbose`               | Verbose logging                                          | `false`                  |
+
+> **Validation rules:** `--judge-every-n-rounds` must be less than `--max-rounds`. `--convergence-threshold` must be between 0 and 1.
 
 **Model resolution:** `--proposer-model` > `--model` > profile `model` field > provider default.
 
@@ -265,7 +260,7 @@ Use the debate_meta tool to report your stance after each response.
 
 **Search paths:** `./profiles/` then `~/.config/crossfire/profiles/`
 
-**Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (e.g., `claude/proposer` defaults to `claude/judge`). Use `--judge none` to disable.
+**Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (e.g., `claude/proposer` defaults to `claude/judge`).
 
 Built-in profiles:
 

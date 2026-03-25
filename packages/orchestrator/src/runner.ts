@@ -201,12 +201,18 @@ export async function runDebate(
 
 			if (action.type === "end-debate") break;
 
-			// No judge available — convergence must end the debate directly
+			// No judge available — handle trigger-judge actions locally
 			if (action.type === "trigger-judge" && !adapters.judge) {
 				if (action.reason === "convergence") {
 					action = { type: "end-debate", reason: "convergence" };
 					break;
 				}
+				// Stagnation/degradation without judge: count as if judge intervened
+				// but couldn't help, so Director's stagnation-limit can eventually fire
+				if (action.reason === "stagnation" || action.reason === "degradation") {
+					director.recordJudgeIntervention();
+				}
+				// All other reasons (scheduled, agent-request): skip and continue
 			}
 
 			if (action.type === "trigger-judge" && adapters.judge) {

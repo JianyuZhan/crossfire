@@ -290,8 +290,8 @@ Shared `runContractTests()` matrix with provider-specific mock factories:
 interface DebateConfig {
   topic: string;
   maxRounds: number;
-  judgeEveryNRounds: number; // 0 = no judge
-  convergenceThreshold: number; // 0-1
+  judgeEveryNRounds: number; // >= 1, periodic judge intervention every N rounds; adaptive fallback when <= 0
+  convergenceThreshold: number; // stance distance (0-1) below which debate auto-converges
   proposerModel?: string;
   challengerModel?: string;
   judgeModel?: string;
@@ -481,11 +481,11 @@ type TriggerJudgeReason =
 
 #### Judge Trigger Strategy (7 Sources)
 
-Triggers are split across `judge-policy.ts` (scheduled, stagnation, degradation) and `debate-director.ts::evaluate()` (convergence, agent-request, user, final-review).
+Triggers are split across `judge-policy.ts` (scheduled, stagnation, degradation) and `debate-director.ts::evaluate()` (convergence, agent-request, user, final-review). The scheduled trigger checks `state.config.judgeEveryNRounds` first for periodic intervention; the adaptive algorithm is used only as a fallback when `everyN <= 0`.
 
 | Source                 | Condition                                                                                                      | Action                                      |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| **Adaptive scheduled** | After >= minRound, by total-round proportion (~30% first, ~25% subsequent); mandatory before penultimate round | `trigger-judge { reason: "scheduled" }`     |
+| **Periodic scheduled** | Every N rounds (`judgeEveryNRounds`); falls back to adaptive algorithm (~30% first, ~25% subsequent) when `everyN <= 0` | `trigger-judge { reason: "scheduled" }`     |
 | **Stagnation**         | Stance delta unchanged >= 2 rounds + one side wantsToConclude while other refuses                              | `trigger-judge { reason: "stagnation" }`    |
 | **Degradation**        | key_points overlap > 70% for 2+ rounds; first fires inject-guidance, then Judge                                | `trigger-judge { reason: "degradation" }`   |
 | **Convergence**        | `checkConvergence()` returns `converged = true`                                                                | `trigger-judge { reason: "convergence" }`   |
@@ -590,7 +590,7 @@ async function runDebate(
 interface AdapterMap {
   proposer: { adapter: AgentAdapter; session: SessionHandle };
   challenger: { adapter: AgentAdapter; session: SessionHandle };
-  judge?: { adapter: AgentAdapter; session: SessionHandle }; // optional for --judge none
+  judge: { adapter: AgentAdapter; session: SessionHandle }; // always provided by CLI (TypeScript type still allows `judge?` for programmatic use)
 }
 
 interface RunDebateOptions {
@@ -1095,7 +1095,7 @@ Output files:
   "profiles": {
     "proposer": "debate_proposer",
     "challenger": "debate_challenger",
-    "judge": "none"
+    "judge": "debate_judge"
   },
   "versions": { "crossfire": "0.1.0", "nodeVersion": "v24.11.1" }
 }
@@ -1189,23 +1189,23 @@ crossfire start
   --topic <text> | --topic-file <path>     (mutually exclusive, required)
   --proposer <profile>                      (required)
   --challenger <profile>                    (required)
-  --judge <profile|"none">                  (default: "none")
-  --max-rounds <n>                          (default: 10)
-  --judge-every-n-rounds <n>                (default: 3)
-  --convergence-threshold <n>               (default: 0.3)
+  --judge <profile>                          (default: auto-inferred from proposer's adapter type)
+  --max-rounds <n>                          (default: 10, >= 1)
+  --judge-every-n-rounds <n>                (default: 3, >= 1 && < max-rounds; periodic judge intervention, adaptive algorithm is fallback only)
+  --convergence-threshold <n>               (default: 0.3, ∈ [0,1]; stance distance below which debate auto-converges)
   --output <dir>                            (default: run_output/debate-{timestamp})
   --model <model>                           (global override)
   --proposer-model <model>                  (per-role override)
   --challenger-model <model>
   --judge-model <model>
-  --headless                                (skip TUI, default: false)
+  --headless                                (skip TUI; prints termination reason, round count, and output directory on completion)
   -v, --verbose
 ```
 
 **Execution flow:**
 
 1. Parse args, validate mutual exclusion (`--topic` vs `--topic-file`)
-2. If `--judge none`: force `judgeEveryNRounds = 0`, reject `--judge-model`
+2. Validate numeric constraints: `maxRounds >= 1`, `convergenceThreshold ∈ [0,1]`, `judgeEveryNRounds >= 1 && < maxRounds`
 3. Load profiles via `loadProfile()`, resolve models + adapter types
 4. Build `DebateConfig`
 5. `mkdirSync(outputDir)`, write `index.json` with config + profile mapping
@@ -1242,6 +1242,7 @@ crossfire resume <output-dir>
 
 ```
 crossfire replay <output-dir> [--speed <n>] [--from-round <n>]
+# Validation: --speed > 0, --from-round >= 1
 ```
 
 Loads events, creates `ScaledClock` + `ReplayEventSource`, starts TUI. No adapters needed.
@@ -1287,7 +1288,7 @@ interface TuiBundle {
   unmount: () => void;
 }
 function createTui(bus: DebateEventBus, headless: boolean): TuiBundle | null;
-// Returns null when headless
+// Returns null when headless; headless mode prints termination reason, round count, and output directory on completion
 ```
 
 ### Error Handling
@@ -1297,7 +1298,7 @@ function createTui(bus: DebateEventBus, headless: boolean): TuiBundle | null;
 | Profile not found                   | Throw with searched paths + available profiles list                     |
 | Profile validation fails            | Throw with file path + Zod error details                                |
 | `--topic` + `--topic-file` both set | Commander validation error                                              |
-| `--judge none` + `--judge-model`    | Print error, exit 1                                                     |
+| Numeric validation fails            | Print error with constraint details, exit 1                             |
 | Adapter `startSession` fails        | Close already-started adapters, exit 1                                  |
 | Adapter crash mid-debate            | `finally` block runs cleanup                                            |
 | Resume on completed debate          | Print suggestion to use replay, exit 0                                  |

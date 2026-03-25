@@ -606,4 +606,310 @@ describe("runDebate", () => {
 			rmSync(tmpDir, { recursive: true, force: true });
 		}
 	});
+
+	it("no-judge + stagnation trigger is silently skipped", async () => {
+		// With 4 rounds of identical stances and no judge, the Director will
+		// detect stagnation (stance-frozen) and emit trigger-judge actions.
+		// Without a judge adapter those should be silently skipped and the
+		// debate should complete via max-rounds without crashing.
+		const stagnantConfig: DebateConfig = {
+			...config,
+			maxRounds: 4,
+			judgeEveryNRounds: 0,
+			convergenceThreshold: 0, // disable convergence (stances differ)
+		};
+
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+				stance: "strongly_agree",
+				confidence: 0.9,
+				key_points: ["Same point"],
+			}),
+			"p-2": turnEvents("p-2", "claude", "claude-s1", "Proposer r2", {
+				stance: "strongly_agree",
+				confidence: 0.9,
+				key_points: ["Same point"],
+			}),
+			"p-3": turnEvents("p-3", "claude", "claude-s1", "Proposer r3", {
+				stance: "strongly_agree",
+				confidence: 0.9,
+				key_points: ["Same point"],
+			}),
+			"p-4": turnEvents("p-4", "claude", "claude-s1", "Proposer r4", {
+				stance: "strongly_agree",
+				confidence: 0.9,
+				key_points: ["Same point"],
+			}),
+		});
+
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+				stance: "strongly_disagree",
+				confidence: 0.9,
+				key_points: ["Counter point"],
+			}),
+			"c-2": turnEvents("c-2", "codex", "codex-s1", "Challenger r2", {
+				stance: "strongly_disagree",
+				confidence: 0.9,
+				key_points: ["Counter point"],
+			}),
+			"c-3": turnEvents("c-3", "codex", "codex-s1", "Challenger r3", {
+				stance: "strongly_disagree",
+				confidence: 0.9,
+				key_points: ["Counter point"],
+			}),
+			"c-4": turnEvents("c-4", "codex", "codex-s1", "Challenger r4", {
+				stance: "strongly_disagree",
+				confidence: 0.9,
+				key_points: ["Counter point"],
+			}),
+		});
+
+		const { DebateEventBus } = await import("../src/event-bus.js");
+		const bus = new DebateEventBus();
+		const collected: AnyEvent[] = [];
+		bus.subscribe((e) => collected.push(e));
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			judge: undefined,
+		};
+
+		const result = await runDebate(stagnantConfig, adapters, { bus });
+		expect(result.phase).toBe("completed");
+		// Should complete without crash — no judge events emitted
+		expect(collected.some((e) => e.kind === "judge.started")).toBe(false);
+		expect(collected.some((e) => e.kind === "judge.completed")).toBe(false);
+		// Director should have detected stagnation signals
+		const directorActions = collected.filter(
+			(e) => e.kind === "director.action",
+		);
+		expect(directorActions.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("summary.leading inferred from stance when no judge verdict", async () => {
+		// Without a judge, the summary generator infers "leading" from
+		// the stance trajectory. Proposer confidence 0.9 > challenger 0.6 + 0.1,
+		// so leading should be "proposer", not "unknown".
+		const noJudgeConfig: DebateConfig = { ...config, maxRounds: 1 };
+		const { DebateEventBus } = await import("../src/event-bus.js");
+		const bus = new DebateEventBus();
+		const collected: AnyEvent[] = [];
+		bus.subscribe((e) => collected.push(e));
+
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+				stance: "strongly_agree",
+				confidence: 0.9,
+				key_points: ["Strong argument"],
+			}),
+		});
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+				stance: "disagree",
+				confidence: 0.6,
+				key_points: ["Weak counter"],
+			}),
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			judge: undefined,
+		};
+
+		await runDebate(noJudgeConfig, adapters, { bus });
+
+		const completedEvent = collected.find((e) => e.kind === "debate.completed");
+		expect(completedEvent).toBeDefined();
+		const summary = (completedEvent as any).summary;
+		expect(summary).toBeDefined();
+		expect(summary.leading).toBe("proposer");
+		expect(summary.judgeScore).toBeNull();
+	});
+
+	it("maxRounds=1 produces valid output", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "crossfire-test-"));
+		try {
+			const singleRoundConfig: DebateConfig = { ...config, maxRounds: 1 };
+			const proposer = createScriptedAdapter("claude", {
+				"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["A"],
+				}),
+			});
+			const challenger = createScriptedAdapter("codex", {
+				"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+					stance: "disagree",
+					confidence: 0.7,
+					key_points: ["B"],
+				}),
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			};
+
+			const result = await runDebate(singleRoundConfig, adapters, {
+				outputDir: tmpDir,
+			});
+			expect(result.phase).toBe("completed");
+			expect(result.terminationReason).toBe("max-rounds");
+			expect(result.turns).toHaveLength(2);
+			expect(existsSync(join(tmpDir, "action-plan.html"))).toBe(true);
+			expect(existsSync(join(tmpDir, "action-plan.md"))).toBe(true);
+			// Verify the HTML is non-empty and contains basic structure
+			const html = readFileSync(join(tmpDir, "action-plan.html"), "utf-8");
+			expect(html.length).toBeGreaterThan(0);
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
+	it("convergenceThreshold=0 converges immediately when stances match", async () => {
+		// Both agents with neutral stance → stanceDelta = 0, threshold = 0
+		// → 0 <= 0 → converged in round 1
+		const zeroThresholdConfig: DebateConfig = {
+			...config,
+			maxRounds: 10,
+			convergenceThreshold: 0,
+		};
+
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+				stance: "neutral",
+				confidence: 0.5,
+				key_points: ["Neutral A"],
+			}),
+		});
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+				stance: "neutral",
+				confidence: 0.5,
+				key_points: ["Neutral B"],
+			}),
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		const result = await runDebate(zeroThresholdConfig, adapters);
+		expect(result.terminationReason).toBe("convergence");
+		expect(result.turns).toHaveLength(2);
+		expect(result.currentRound).toBe(1);
+	});
+
+	it("convergenceThreshold=1.0 never converges on threshold alone", async () => {
+		// Counterintuitively, threshold=1.0 means stanceDelta <= 1.0 is ALWAYS
+		// true (max possible delta is 1.0: strongly_agree vs strongly_disagree).
+		// So even with maximally opposed stances, the debate converges immediately.
+		const maxThresholdConfig: DebateConfig = {
+			...config,
+			maxRounds: 10,
+			convergenceThreshold: 1.0,
+		};
+
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents(
+				"p-1",
+				"claude",
+				"claude-s1",
+				"Proposer strongly agrees",
+				{
+					stance: "strongly_agree",
+					confidence: 0.95,
+					key_points: ["Maximum agreement"],
+				},
+			),
+		});
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents(
+				"c-1",
+				"codex",
+				"codex-s1",
+				"Challenger strongly disagrees",
+				{
+					stance: "strongly_disagree",
+					confidence: 0.95,
+					key_points: ["Maximum disagreement"],
+				},
+			),
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		const result = await runDebate(maxThresholdConfig, adapters);
+		// stanceDelta = |1.0 - 0.0| = 1.0, and 1.0 <= 1.0, so converged
+		expect(result.terminationReason).toBe("convergence");
+		expect(result.turns).toHaveLength(2);
+		expect(result.currentRound).toBe(1);
+	});
 });

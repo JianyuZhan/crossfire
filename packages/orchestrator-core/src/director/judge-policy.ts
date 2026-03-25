@@ -39,21 +39,29 @@ export function shouldTriggerJudge(
 		return { reason: "scheduled" };
 	}
 
-	// Adaptive scheduled: first at ~30%, then every ~25%
-	const firstTrigger = Math.max(
-		config.minJudgeRound,
-		Math.ceil(maxRounds * 0.3),
-	);
-	const interval = Math.max(1, Math.ceil(maxRounds * 0.25));
-
-	if (currentRound === firstTrigger) {
+	// Periodic: user-configured judgeEveryNRounds takes priority
+	const everyN = state.config.judgeEveryNRounds;
+	if (everyN > 0 && currentRound % everyN === 0) {
 		return { reason: "scheduled" };
 	}
-	if (
-		currentRound > firstTrigger &&
-		(currentRound - firstTrigger) % interval === 0
-	) {
-		return { reason: "scheduled" };
+
+	// Adaptive fallback: first at ~30%, then every ~25% (only when no periodic config)
+	if (everyN <= 0) {
+		const firstTrigger = Math.max(
+			config.minJudgeRound,
+			Math.ceil(maxRounds * 0.3),
+		);
+		const interval = Math.max(1, Math.ceil(maxRounds * 0.25));
+
+		if (currentRound === firstTrigger) {
+			return { reason: "scheduled" };
+		}
+		if (
+			currentRound > firstTrigger &&
+			(currentRound - firstTrigger) % interval === 0
+		) {
+			return { reason: "scheduled" };
+		}
 	}
 
 	return null;

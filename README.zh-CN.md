@@ -98,13 +98,6 @@ crossfire start \
   --challenger codex/challenger \
   --judge gemini/judge
 
-# 从文件读取议题，无裁判
-crossfire start \
-  --topic-file proposal.md \
-  --proposer claude/proposer \
-  --challenger claude/challenger \
-  --judge none
-
 # 无界面模式（事件仍会持久化）
 crossfire start \
   --topic "Quick brainstorm" \
@@ -155,19 +148,23 @@ crossfire start \
 | `--topic-file <path>`         | 从文件读取主题（与 `--topic` 互斥） | —                        |
 | `--proposer <profile>`        | 提议者配置文件                      | _必填_                   |
 | `--challenger <profile>`      | 挑战者配置文件                      | _必填_                   |
-| `--judge <profile\|none>`     | 裁判配置文件，`none` 禁用           | 自动推断                 |
-| `--max-rounds <n>`            | 最大轮数                            | `10`                     |
-| `--judge-every-n-rounds <n>`  | 裁判评估间隔                        | `3`                      |
-| `--convergence-threshold <n>` | 收敛灵敏度 (0–1)                    | `0.3`                    |
+| `--judge <profile>`           | 裁判 profile（默认从 proposer 推断）                  | 自动推断                 |
+| `--max-rounds <n>`            | 辩论最大轮数，达到后强制终止                          | `10`                     |
+| `--judge-every-n-rounds <n>`  | 裁判每 N 轮介入一次（必须小于 max-rounds）            | `3`                      |
+| `--convergence-threshold <n>` | 立场距离 (0-1)，低于此值自动收敛                      | `0.3`                    |
 | `--model <model>`             | 所有角色的模型覆盖                  | —                        |
 | `--proposer-model <model>`    | 提议者模型覆盖                      | —                        |
 | `--challenger-model <model>`  | 挑战者模型覆盖                      | —                        |
 | `--judge-model <model>`       | 裁判模型覆盖                        | —                        |
 | `--output <dir>`              | 输出目录                            | `run_output/debate-<ts>` |
-| `--headless`                  | 禁用终端 UI                         | `false`                  |
+| `--headless`                  | 禁用 TUI（完成信息仍输出到 stdout）                  | `false`                  |
 | `-v, --verbose`               | 详细日志                            | `false`                  |
 
 **模型优先级：** `--proposer-model` > `--model` > 配置文件 `model` 字段 > 模型提供商默认值。
+
+**参数校验规则：**
+- `--judge-every-n-rounds` 必须小于 `--max-rounds`，否则裁判永远不会介入。
+- `--convergence-threshold` 必须在 0 到 1 之间（含边界）。
 
 ### `crossfire resume <output-dir>`
 
@@ -265,7 +262,7 @@ Use the debate_meta tool to report your stance after each response.
 
 **搜索路径：** `./profiles/` → `~/.config/crossfire/profiles/`
 
-**裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（如 `claude/proposer` 默认使用 `claude/judge`）。用 `--judge none` 禁用裁判。
+**裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（如 `claude/proposer` 默认使用 `claude/judge`）。
 
 内置配置文件：
 
