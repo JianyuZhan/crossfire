@@ -134,10 +134,10 @@ export function renderMarkdownToHtml(
 	const sectionRegex = /^## (.+)$/gm;
 	const sections: Array<{ title: string; body: string }> = [];
 	const titles: Array<{ title: string; index: number }> = [];
-	let match: RegExpExecArray | null;
-
-	while ((match = sectionRegex.exec(escaped)) !== null) {
+	let match = sectionRegex.exec(escaped);
+	while (match !== null) {
 		titles.push({ title: match[1], index: match.index + match[0].length });
+		match = sectionRegex.exec(escaped);
 	}
 
 	for (let idx = 0; idx < titles.length; idx++) {
