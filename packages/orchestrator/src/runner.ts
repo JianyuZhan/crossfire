@@ -12,16 +12,26 @@ import {
 	type DebateState,
 	type DirectorAction,
 	type JudgeVerdict,
+	type ReportMeta,
 	type TerminationReason,
+	buildDraftReport,
 	buildJudgePrompt,
 	buildTurnPrompt,
-	generateActionPlanHtmlFallback,
-	generateActionPlanHtmlFromDeepSummary,
+	draftToAuditReport,
 	generateSummary,
+	renderActionPlanHtml,
+	renderActionPlanMarkdown,
 } from "@crossfire/orchestrator-core";
 import type { AnyEvent } from "@crossfire/orchestrator-core";
 import { DebateEventBus } from "./event-bus.js";
-import { runJudgeSummarization, runJudgeTurn } from "./judge.js";
+import { runJudgeTurn } from "./judge.js";
+import { PlanAccumulator } from "./plan-accumulator.js";
+import {
+	type SynthesizerConfig,
+	buildFinalSynthesisPrompt,
+	callSynthesizerLLM,
+	parseFinalSynthesisResponse,
+} from "./round-synthesizer.js";
 
 export interface AdapterMap {
 	proposer: { adapter: AgentAdapter; session: SessionHandle };
@@ -52,6 +62,18 @@ export async function runDebate(
 	if (adapters.judge) {
 		unsubs.push(adapters.judge.adapter.onEvent((e) => bus.push(e)));
 	}
+
+	// PlanAccumulator — accumulates evolving plan from debate events
+	const synthesizerConfig: SynthesizerConfig = {
+		apiKey: process.env.ANTHROPIC_API_KEY,
+		model:
+			process.env.CROSSFIRE_SYNTHESIZER_MODEL ?? "claude-haiku-4-5-20251001",
+		timeoutMs: 30000,
+		flushTimeoutMs: 15000,
+		enabled: process.env.CROSSFIRE_SYNTHESIZER !== "0",
+	};
+	const accumulator = new PlanAccumulator(synthesizerConfig);
+	const accUnsub = accumulator.subscribe(bus);
 
 	if (!isResume) {
 		bus.push({
@@ -351,43 +373,59 @@ export async function runDebate(
 			terminationReason,
 		);
 		if (options?.outputDir) {
-			// action-plan.html — try deep summary from judge, fallback to basic
 			try {
-				let actionPlanHtml: string;
-				if (adapters.judge) {
-					const sumPrompt = buildSummarizationPrompt(preCompleteState);
-					const deepSummary = await Promise.race([
-						runJudgeSummarization(
-							adapters.judge.adapter,
-							adapters.judge.session,
-							bus,
-							sumPrompt,
-						),
-						new Promise<undefined>((resolve) =>
-							setTimeout(() => resolve(undefined), 60_000),
-						),
-					]);
-					if (deepSummary) {
-						actionPlanHtml = generateActionPlanHtmlFromDeepSummary(
-							preCompleteState.config.topic,
-							deepSummary,
-							summary.roundsCompleted,
-						);
-					} else {
-						actionPlanHtml = generateActionPlanHtmlFallback(
-							preCompleteState.config.topic,
-							summary,
-						);
+				await accumulator.flush();
+				const plan = accumulator.snapshot();
+				const draft = buildDraftReport(plan);
+
+				let report:
+					| import("@crossfire/orchestrator-core").AuditReport
+					| undefined;
+				let usedLlmPolish = false;
+				try {
+					if (synthesizerConfig.enabled && synthesizerConfig.apiKey) {
+						const finalPrompt = buildFinalSynthesisPrompt(draft);
+						const response = await Promise.race([
+							callSynthesizerLLM(finalPrompt, synthesizerConfig),
+							new Promise<undefined>((r) =>
+								setTimeout(() => r(undefined), 60000),
+							),
+						]);
+						if (response) {
+							const parsed = parseFinalSynthesisResponse(response);
+							if (parsed) {
+								report = parsed;
+								usedLlmPolish = true;
+							}
+						}
 					}
-				} else {
-					actionPlanHtml = generateActionPlanHtmlFallback(
-						preCompleteState.config.topic,
-						summary,
-					);
+				} catch {
+					/* non-fatal */
 				}
+
+				if (!report) {
+					report = draftToAuditReport(draft);
+				}
+
+				const reportMeta: ReportMeta = {
+					topic: preCompleteState.config.topic,
+					roundsCompleted: summary.roundsCompleted,
+					date: new Date().toLocaleDateString(),
+					participants: {
+						proposer: adapters.proposer.adapter.id,
+						challenger: adapters.challenger.adapter.id,
+						judge: adapters.judge?.adapter.id,
+					},
+					generationQuality: usedLlmPolish ? "full" : draft.generationQuality,
+				};
+
 				writeFileSync(
 					join(options.outputDir, "action-plan.html"),
-					actionPlanHtml,
+					renderActionPlanHtml(report, reportMeta),
+				);
+				writeFileSync(
+					join(options.outputDir, "action-plan.md"),
+					renderActionPlanMarkdown(report, reportMeta),
 				);
 			} catch {
 				/* non-fatal */
@@ -406,42 +444,9 @@ export async function runDebate(
 		});
 		return bus.snapshot();
 	} finally {
+		accUnsub();
 		for (const unsub of unsubs) unsub();
 	}
-}
-
-function buildSummarizationPrompt(state: DebateState): string {
-	const transcript = state.turns
-		.map((t) => `[Round ${t.roundNumber} - ${t.role}]\n${t.content}`)
-		.join("\n\n");
-
-	return `You are synthesizing the results of a multi-round structured review into an actionable plan. Your job is to extract maximum practical value from the exchange — focus on what was established, what remains uncertain, and what to do next.
-
-Topic: ${state.config.topic}
-Rounds: ${state.currentRound}
-
-${transcript}
-
-Output the following sections in the same language as the topic:
-
-1. **Consensus — Detailed Action Plan**: For each point the review process established as sound:
-   - title: the agreed-upon conclusion
-   - detail: what was established and why it withstood scrutiny
-   - nextSteps: concrete next steps or implementation approach
-
-2. **Unresolved Issues & Risks**: For each point that needs further investigation or carries significant risk:
-   - title: the issue
-   - proposerPosition: how the proposer addressed it
-   - challengerPosition: why the challenger found it insufficient
-   - risk: potential consequences if not resolved before execution
-
-Format your response as JSON:
-\`\`\`json
-{
-  "consensus": [{ "title": "...", "detail": "...", "nextSteps": "..." }],
-  "unresolved": [{ "title": "...", "proposerPosition": "...", "challengerPosition": "...", "risk": "..." }]
-}
-\`\`\``;
 }
 
 function waitForTurnCompleted(

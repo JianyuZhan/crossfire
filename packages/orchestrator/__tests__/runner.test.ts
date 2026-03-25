@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
 	AgentAdapter,
 	NormalizedEvent,
@@ -509,5 +512,98 @@ describe("runDebate", () => {
 			(e) => e.kind === "director.action",
 		);
 		expect(directorEvents.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("writes action-plan.html and action-plan.md to outputDir", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "crossfire-test-"));
+		try {
+			const smallConfig: DebateConfig = { ...config, maxRounds: 1 };
+			const proposer = createScriptedAdapter("claude", {
+				"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["A"],
+				}),
+			});
+			const challenger = createScriptedAdapter("codex", {
+				"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+					stance: "disagree",
+					confidence: 0.7,
+					key_points: ["B"],
+				}),
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			};
+
+			await runDebate(smallConfig, adapters, { outputDir: tmpDir });
+			expect(existsSync(join(tmpDir, "action-plan.html"))).toBe(true);
+			expect(existsSync(join(tmpDir, "action-plan.md"))).toBe(true);
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
+	it("action-plan.html contains all 6 sections", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "crossfire-test-"));
+		try {
+			const smallConfig: DebateConfig = { ...config, maxRounds: 1 };
+			const proposer = createScriptedAdapter("claude", {
+				"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["A"],
+				}),
+			});
+			const challenger = createScriptedAdapter("codex", {
+				"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+					stance: "disagree",
+					confidence: 0.7,
+					key_points: ["B"],
+				}),
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			};
+
+			await runDebate(smallConfig, adapters, { outputDir: tmpDir });
+			const html = readFileSync(join(tmpDir, "action-plan.html"), "utf-8");
+			expect(html).toContain("Executive Summary");
+			expect(html).toContain("Consensus");
+			expect(html).toContain("Unresolved");
+			expect(html).toContain("Argument Evolution");
+			expect(html).toContain("Risk Matrix");
+			expect(html).toContain("Evidence Registry");
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
 	});
 });
