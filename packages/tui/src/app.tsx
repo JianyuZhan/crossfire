@@ -7,7 +7,7 @@ import {
 } from "./components/command-input.js";
 import { CommandStatusLine } from "./components/command-status-line.js";
 import { HeaderBar, headerBarHeight } from "./components/header-bar.js";
-import { MetricsBar } from "./components/metrics-bar.js";
+import { MetricsBar, metricsBarHeight } from "./components/metrics-bar.js";
 import { ScrollableContent } from "./components/scrollable-content.js";
 import type { EventSource } from "./replay/event-source.js";
 import type { TuiStore } from "./state/tui-store.js";
@@ -24,10 +24,9 @@ const PAGE_DOWN = "\x1b[6~";
 const HOME_SEQS = ["\x1b[H", "\x1b[1~"];
 const END_SEQS = ["\x1b[F", "\x1b[4~"];
 
-function computeFixedAreaHeight(state: TuiState, termWidth: number): number {
-  const topicLen = state.debateState.config.topic.length;
-  let h = headerBarHeight(topicLen, termWidth); // header with border
-  h += 1; // MetricsBar
+function computeFixedAreaHeight(state: TuiState): number {
+  let h = headerBarHeight(); // header with border (constant height)
+  h += metricsBarHeight() + 2; // MetricsBar content + border
   h += 1; // CommandInput
   // CommandStatusLine only shows in approval/replay mode
   if (
@@ -63,7 +62,7 @@ export function App({
     const stdout = process.stdout;
     const onResize = () => {
       store.setViewportDimensions(
-        stdout.rows - computeFixedAreaHeight(store.getState(), stdout.columns),
+        stdout.rows - computeFixedAreaHeight(store.getState()),
         stdout.columns,
       );
     };
@@ -78,7 +77,7 @@ export function App({
   useEffect(() => {
     const stdout = process.stdout;
     store.setViewportDimensions(
-      stdout.rows - computeFixedAreaHeight(store.getState(), stdout.columns),
+      stdout.rows - computeFixedAreaHeight(store.getState()),
       stdout.columns,
     );
   }, [store, snapshot.state.command.mode, snapshot.state.judge.visible]);

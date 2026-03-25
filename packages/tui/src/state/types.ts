@@ -96,7 +96,7 @@ export interface MetricsState {
 	challengerConfidence?: number;
 	mutualConcessions: number;
 	bothWantToConclude: boolean;
-	judgeScore?: { proposer: number; challenger: number };
+	judgeVerdict?: { shouldContinue: boolean; leading?: string };
 	totalTokens: number;
 	totalCostUsd?: number;
 	proposerUsage: AgentUsage;

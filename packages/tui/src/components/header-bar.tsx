@@ -27,21 +27,13 @@ function formatAgentInfo(info?: AgentInfo): string {
 }
 
 /**
- * Returns the number of terminal rows this header will occupy.
- * Accounts for topic text wrapping based on terminal width.
+ * Returns the constant number of terminal rows this header occupies.
+ * The topic Box uses a fixed height={MAX_TOPIC_LINES} with overflow="hidden",
+ * so this is always the same regardless of topic length or terminal width.
  */
-export function headerBarHeight(
-  topicLength: number,
-  termWidth: number,
-): number {
-  const availWidth = Math.max(10, termWidth - 4); // border(2) + paddingX(2)
-  const topicChars = 7 + Math.min(topicLength, MAX_TOPIC_CHARS); // "Topic: " prefix
-  const topicLines = Math.min(
-    MAX_TOPIC_LINES,
-    Math.max(1, Math.ceil(topicChars / availWidth)),
-  );
-  // border(2) + title(1) + round+phase(1) + proposer(1) + challenger(1) + topicLines
-  return 2 + 4 + topicLines;
+export function headerBarHeight(): number {
+  // border(2) + title(1) + round+phase(1) + proposer(1) + challenger(1) + topic(MAX_TOPIC_LINES)
+  return 2 + 4 + MAX_TOPIC_LINES;
 }
 
 export function HeaderBar({
@@ -63,10 +55,10 @@ export function HeaderBar({
 
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1}>
-      {/* Row 1: Branding + ID */}
-      <Box>
+      {/* Row 1: Branding + ID (centered) */}
+      <Box justifyContent="center">
         <Text bold color="cyan">
-          {"\u2694"} Crossfire
+          {"\u2694\uFE0F  C R O S S F I R E"}
         </Text>
         {debateId && (
           <Text dimColor>
@@ -102,8 +94,8 @@ export function HeaderBar({
         </Text>
         <Text dimColor>{formatAgentInfo(challengerInfo)}</Text>
       </Box>
-      {/* Row 5+: Topic (capped height) */}
-      <Box height={MAX_TOPIC_LINES}>
+      {/* Row 5+: Topic (fixed height, clipped) */}
+      <Box height={MAX_TOPIC_LINES} overflow="hidden">
         <Text color="magenta" bold>
           Topic:{" "}
         </Text>

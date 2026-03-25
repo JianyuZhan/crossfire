@@ -1,7 +1,7 @@
 import { render } from "ink-testing-library";
 import React from "react";
 import { describe, expect, it } from "vitest";
-import { MetricsBar } from "../src/components/metrics-bar.js";
+import { MetricsBar, metricsBarHeight } from "../src/components/metrics-bar.js";
 import type { MetricsState } from "../src/state/types.js";
 
 function makeMetrics(overrides: Partial<MetricsState> = {}): MetricsState {
@@ -20,27 +20,33 @@ function makeMetrics(overrides: Partial<MetricsState> = {}): MetricsState {
 }
 
 describe("MetricsBar", () => {
-	it("renders per-agent token info", () => {
+	it("renders per-agent token info and convergence", () => {
 		const metrics = makeMetrics({
 			convergencePercent: 35,
 			proposerUsage: { tokens: 6200, costUsd: 0 },
 			challengerUsage: { tokens: 3100, costUsd: 0 },
-			judgeScore: { proposer: 7, challenger: 5 },
+			judgeVerdict: { shouldContinue: true, leading: "proposer" },
 		});
 		const { lastFrame } = render(<MetricsBar state={metrics} />);
 		const output = lastFrame();
 		expect(output).toContain("Proposer");
-		expect(output).toContain("6.2k");
+		expect(output).toContain("6.2k tokens");
 		expect(output).toContain("Challenger");
-		expect(output).toContain("3.1k");
-		expect(output).toContain("35");
-		expect(output).not.toContain("$");
+		expect(output).toContain("3.1k tokens");
+		expect(output).toContain("35%");
+		expect(output).toContain("Continue");
+		expect(output).toContain("proposer leads");
 	});
 
 	it("shows zero tokens when no usage", () => {
 		const metrics = makeMetrics();
 		const { lastFrame } = render(<MetricsBar state={metrics} />);
-		expect(lastFrame()).toContain("0 tokens");
-		expect(lastFrame()).not.toContain("$");
+		const output = lastFrame();
+		expect(output).toContain("0 tokens");
+		expect(output).toContain("Convergence");
+	});
+
+	it("metricsBarHeight returns 3", () => {
+		expect(metricsBarHeight()).toBe(3);
 	});
 });

@@ -718,7 +718,11 @@ export class TuiStore {
 				this.state.judge.judgeStatus = "done";
 				this.state.judge.visible = true;
 				this.state.judge.verdict = e.verdict;
-				if (e.verdict) this.state.metrics.judgeScore = e.verdict.score;
+				if (e.verdict)
+					this.state.metrics.judgeVerdict = {
+						shouldContinue: e.verdict.shouldContinue,
+						leading: e.verdict.leading,
+					};
 				// Update the last evaluating judgeResult (handles multiple judges per round)
 				const jr = this.activeJudgeResult();
 				if (jr) {
