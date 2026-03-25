@@ -41,6 +41,7 @@ export const resumeCommand = new Command("resume")
 				console.log("Debate already completed.");
 				console.log(`Reason: ${currentState.terminationReason}`);
 				console.log(`Total rounds: ${currentState.currentRound}`);
+				console.log("Use `crossfire replay` to review the debate.");
 				process.exit(0);
 			}
 
@@ -92,7 +93,7 @@ export const resumeCommand = new Command("resume")
 				bus.push(event);
 			}
 
-			const segmentFilename = `events-resume-${Date.now()}.jsonl`;
+			const segmentFilename = `events-resumed-${Date.now()}.jsonl`;
 			const busBundle = createBus({
 				outputDir,
 				segmentFilename,

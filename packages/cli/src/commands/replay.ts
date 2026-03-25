@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { replayDebate } from "@crossfire/tui";
 import { Command } from "commander";
 
@@ -9,22 +8,24 @@ export const replayCommand = new Command("replay")
 	.option("--from-round <n>", "Start replay from specific round")
 	.action(async (outputDir: string, options) => {
 		try {
-			const eventsPath = join(outputDir, "events.jsonl");
 			const speed = Number.parseFloat(options.speed);
 			if (!Number.isFinite(speed) || speed <= 0) {
 				console.error("Error: --speed must be a positive number");
-				process.exit(1);
+				return process.exit(1);
 			}
-			const startFromRound = options.fromRound
-				? Number.parseInt(options.fromRound, 10)
+			const fromRoundRaw = options.fromRound
+				? Number.parseFloat(options.fromRound)
 				: undefined;
 			if (
-				startFromRound !== undefined &&
-				(!Number.isFinite(startFromRound) || startFromRound < 1)
+				fromRoundRaw !== undefined &&
+				(!Number.isFinite(fromRoundRaw) ||
+					fromRoundRaw < 1 ||
+					!Number.isInteger(fromRoundRaw))
 			) {
 				console.error("Error: --from-round must be a positive integer");
-				process.exit(1);
+				return process.exit(1);
 			}
+			const startFromRound = fromRoundRaw;
 
 			console.log(`Replaying debate from ${outputDir}`);
 			if (startFromRound !== undefined) {
@@ -32,16 +33,13 @@ export const replayCommand = new Command("replay")
 			}
 			console.log(`Playback speed: ${speed}x\n`);
 
-			// Use replayDebate from TUI
-			const store = await replayDebate({
-				eventsPath,
+			// Use replayDebate from TUI — reads index.json segments for multi-segment support
+			await replayDebate({
+				outputDir,
 				speed,
 				startFromRound,
 			});
 
-			// Note: replayDebate already runs the full replay and returns when complete
-			// The TUI rendering is handled internally by replayDebate
-			// For now, we just acknowledge completion
 			console.log("\nReplay completed!");
 		} catch (error) {
 			console.error(

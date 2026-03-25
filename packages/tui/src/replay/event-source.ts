@@ -38,14 +38,21 @@ export class LiveEventSource implements EventSource {
 export class ReplayEventSource implements EventSource {
 	private readonly listeners: Set<(event: AnyEvent) => void> = new Set();
 	private stopped = false;
-	private startFromIndex: number;
+	private readonly startFromIndex: number;
+	private readonly events: AnyEvent[];
 
 	constructor(
-		private readonly eventsPath: string,
+		eventsPathOrEvents: string | AnyEvent[],
 		private readonly clock: PlaybackClock,
 		options?: { startFromIndex?: number },
 	) {
 		this.startFromIndex = options?.startFromIndex ?? 0;
+		if (typeof eventsPathOrEvents === "string") {
+			const content = readFileSync(eventsPathOrEvents, "utf-8");
+			this.events = parseJsonlEvents(content);
+		} else {
+			this.events = eventsPathOrEvents;
+		}
 	}
 
 	subscribe(cb: (event: AnyEvent) => void): () => void {
@@ -54,13 +61,10 @@ export class ReplayEventSource implements EventSource {
 	}
 
 	async start(): Promise<void> {
-		const content = readFileSync(this.eventsPath, "utf-8");
-		const events = parseJsonlEvents(content);
-
 		let prevTimestamp: number | undefined;
 
-		for (let i = this.startFromIndex; i < events.length; i++) {
-			const event = events[i];
+		for (let i = this.startFromIndex; i < this.events.length; i++) {
+			const event = this.events[i];
 			if (this.stopped) break;
 			if (prevTimestamp !== undefined) {
 				const delta = event.timestamp - prevTimestamp;

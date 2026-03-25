@@ -1093,9 +1093,9 @@ Output files:
   ],
   "config": { "topic": "...", "maxRounds": 10, "...": "..." },
   "profiles": {
-    "proposer": "debate_proposer",
-    "challenger": "debate_challenger",
-    "judge": "debate_judge"
+    "proposer": { "name": "claude/proposer", "agent": "claude_code", "model": "claude-sonnet-4-20250514" },
+    "challenger": { "name": "codex/challenger", "agent": "codex" },
+    "judge": { "name": "claude/judge", "agent": "claude_code", "model": "claude-sonnet-4-20250514" }
   },
   "versions": { "crossfire": "0.1.0", "nodeVersion": "v24.11.1" }
 }
@@ -1253,7 +1253,14 @@ Loads events, creates `ScaledClock` + `ReplayEventSource`, starts TUI. No adapte
 crossfire status <output-dir> [--json]
 ```
 
-Reads [`index.json`](#persistence-eventstore) (unified). Displays debate ID, topic, rounds completed/total, event count, duration, termination reason, segment count. `--json` for raw output.
+Reads [`index.json`](#persistence-eventstore) (unified). Displays:
+
+- **Basic info:** debate ID, topic, started/ended timestamps (ISO), duration, total rounds, total events, termination reason (or "in-progress")
+- **Segments:** full listing with filename and event count per segment (shown only when 2+ segments exist)
+- **Profiles:** proposer/challenger/judge name, agent type, and optional model (objects with `{ name, agent, model? }`)
+- **Configuration:** maxRounds, judgeEveryNRounds, convergenceThreshold
+
+`--json` outputs the raw `index.json` content as pretty-printed JSON.
 
 ### Wiring Modules
 
