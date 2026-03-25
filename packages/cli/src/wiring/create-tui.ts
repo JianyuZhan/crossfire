@@ -4,7 +4,6 @@ import { LiveEventSource, TuiStore } from "@crossfire/tui";
 export interface TuiBundle {
 	store: TuiStore;
 	source: LiveEventSource;
-	unmount: () => void;
 }
 
 export function createTui(
@@ -19,7 +18,5 @@ export function createTui(
 		store.handleEvent(event);
 	});
 
-	// Ink render will be called from the command handler
-	// This factory returns the store+source; caller handles rendering
-	return { store, source, unmount: () => {} };
+	return { store, source };
 }

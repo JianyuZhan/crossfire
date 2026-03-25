@@ -1,9 +1,6 @@
 import { join } from "node:path";
 import { replayDebate } from "@crossfire/tui";
-import { App } from "@crossfire/tui";
 import { Command } from "commander";
-import { render } from "ink";
-import React from "react";
 
 export const replayCommand = new Command("replay")
 	.description("Replay a completed debate")

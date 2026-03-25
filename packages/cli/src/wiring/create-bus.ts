@@ -13,17 +13,20 @@ export interface BusBundle {
 export function createBus(options: {
 	outputDir?: string;
 	segmentFilename?: string;
+	existingBus?: DebateEventBus;
 }): BusBundle {
-	const bus = new DebateEventBus();
+	const bus = options.existingBus ?? new DebateEventBus();
 	let eventStore: EventStore | undefined;
 	let transcriptWriter: TranscriptWriter | undefined;
 
 	if (options.outputDir) {
-		eventStore = new EventStore(options.outputDir, options.segmentFilename);
-		transcriptWriter = new TranscriptWriter(options.outputDir);
+		const store = new EventStore(options.outputDir, options.segmentFilename);
+		const writer = new TranscriptWriter(options.outputDir);
+		eventStore = store;
+		transcriptWriter = writer;
 		bus.subscribe((event) => {
-			eventStore!.append(event);
-			transcriptWriter!.handleEvent(event);
+			store.append(event);
+			writer.handleEvent(event);
 		});
 	}
 

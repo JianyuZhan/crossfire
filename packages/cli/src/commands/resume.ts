@@ -1,10 +1,6 @@
-import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ClaudeAdapter } from "@crossfire/adapter-claude";
-import { CodexAdapter } from "@crossfire/adapter-codex";
-import { GeminiAdapter } from "@crossfire/adapter-gemini";
-import { EventStore, runDebate } from "@crossfire/orchestrator";
+import { DebateEventBus, EventStore, runDebate } from "@crossfire/orchestrator";
 import { projectState } from "@crossfire/orchestrator-core";
 import { App } from "@crossfire/tui";
 import { Command } from "commander";
@@ -12,10 +8,9 @@ import { render } from "ink";
 import React from "react";
 import { loadProfile } from "../profile/loader.js";
 import { resolveRoles } from "../profile/resolver.js";
-import type { ProfileConfig } from "../profile/schema.js";
 import { createAdapters } from "../wiring/create-adapters.js";
-import type { AdapterFactoryMap } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
+import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
 
 export const resumeCommand = new Command("resume")
@@ -27,7 +22,6 @@ export const resumeCommand = new Command("resume")
 	.option("--headless", "Run without TUI", false)
 	.action(async (outputDir: string, options) => {
 		try {
-			// Read index.json (contains config, profiles, and runtime data)
 			const indexPath = join(outputDir, "index.json");
 			const meta = JSON.parse(readFileSync(indexPath, "utf-8"));
 
@@ -37,12 +31,12 @@ export const resumeCommand = new Command("resume")
 			}
 
 			const config = meta.config;
+			const debateId = meta.debateId;
 
 			// Load existing events
 			const events = EventStore.loadSegments(outputDir);
 			const currentState = projectState(events);
 
-			// Check if debate is already completed
 			if (currentState.phase === "completed") {
 				console.log("Debate already completed.");
 				console.log(`Reason: ${currentState.terminationReason}`);
@@ -53,17 +47,16 @@ export const resumeCommand = new Command("resume")
 			// Load profiles (CLI overrides or from index.json)
 			const proposerProfile = options.proposer
 				? loadProfile(options.proposer)
-				: loadProfileFromMeta(meta.profiles.proposer);
+				: loadProfile(meta.profiles.proposer.name);
 			const challengerProfile = options.challenger
 				? loadProfile(options.challenger)
-				: loadProfileFromMeta(meta.profiles.challenger);
+				: loadProfile(meta.profiles.challenger.name);
 			const judgeProfile = meta.profiles.judge
 				? options.judge
 					? loadProfile(options.judge)
-					: loadProfileFromMeta(meta.profiles.judge)
+					: loadProfile(meta.profiles.judge.name)
 				: "none";
 
-			// Resolve roles
 			const roles = resolveRoles({
 				proposer: {
 					profile: proposerProfile,
@@ -87,49 +80,29 @@ export const resumeCommand = new Command("resume")
 			);
 			console.log(`Topic: ${config.topic}`);
 
-			// Create adapter factories
-			const factories: AdapterFactoryMap = {
-				claude: () =>
-					new ClaudeAdapter({
-						queryFn: (opts) => {
-							throw new Error("Claude SDK integration not yet implemented");
-						},
-					}),
-				codex: () =>
-					new CodexAdapter({
-						spawnFn: () => {
-							const proc = spawn("codex", ["app-server", "--stdio"], {
-								stdio: ["pipe", "pipe", "inherit"],
-							});
-							return {
-								stdin: proc.stdin,
-								stdout: proc.stdout,
-							};
-						},
-					}),
-				gemini: () => new GeminiAdapter(),
-			};
+			const adapterBundle = await createAdapters(
+				roles,
+				createDefaultFactories(),
+			);
 
-			// Create adapters
-			const adapterBundle = await createAdapters(roles, factories);
-
-			// Create bus with new segment
-			const segmentFilename = `events-resume-${Date.now()}.jsonl`;
-			const busBundle = createBus({ outputDir, segmentFilename });
-
-			// Feed existing events to bus
+			// Hydrate bus with old events BEFORE attaching persistence,
+			// so old events populate allEvents for snapshot() but don't get re-written
+			const bus = new DebateEventBus();
 			for (const event of events) {
-				busBundle.bus.push(event);
+				bus.push(event);
 			}
 
-			// Create TUI
+			const segmentFilename = `events-resume-${Date.now()}.jsonl`;
+			const busBundle = createBus({
+				outputDir,
+				segmentFilename,
+				existingBus: bus,
+			});
+
 			const tuiBundle = createTui(busBundle.bus, options.headless);
 
-			// Render TUI if not headless
 			let inkInstance: { clear: () => void; unmount: () => void } | undefined;
 			if (tuiBundle) {
-				// Enter alternate screen for fullscreen viewport
-				process.stdout.write("\x1b[?1049h");
 				inkInstance = render(
 					React.createElement(App, {
 						store: tuiBundle.store,
@@ -139,22 +112,25 @@ export const resumeCommand = new Command("resume")
 			}
 
 			// SIGINT handler
-			let interrupted = false;
-			const handleInterrupt = () => {
-				if (interrupted) return;
-				interrupted = true;
+			const abortController = new AbortController();
+			const triggerShutdown = () => {
+				if (abortController.signal.aborted) {
+					process.exit(1);
+				}
+				abortController.abort();
 				busBundle.bus.push({
 					kind: "debate.completed",
 					reason: "user-interrupt",
 					timestamp: Date.now(),
 				});
 			};
-			process.on("SIGINT", handleInterrupt);
+			process.on("SIGINT", triggerShutdown);
 
-			// Run debate with resume
 			try {
 				const finalState = await runDebate(config, adapterBundle.adapters, {
 					bus: busBundle.bus,
+					debateId,
+					outputDir,
 					resumeFromState: currentState,
 				});
 
@@ -164,15 +140,11 @@ export const resumeCommand = new Command("resume")
 					console.log(`Total rounds: ${finalState.currentRound}`);
 				}
 			} finally {
-				// Cleanup
-				process.off("SIGINT", handleInterrupt);
+				process.off("SIGINT", triggerShutdown);
 				tuiBundle?.store.dispose();
 				if (inkInstance) {
 					inkInstance.unmount();
-					// Leave alternate screen
-					process.stdout.write("\x1b[?1049l");
 				}
-				// Write transcript + index BEFORE closing adapters (which may hang)
 				await busBundle.close();
 				await adapterBundle.closeAll();
 			}
@@ -184,8 +156,3 @@ export const resumeCommand = new Command("resume")
 			process.exit(1);
 		}
 	});
-
-function loadProfileFromMeta(metaProfile: { name: string }): ProfileConfig {
-	// Load profile by name from index.json
-	return loadProfile(metaProfile.name);
-}

@@ -41,9 +41,11 @@ export async function createAdapters(
 	}
 
 	try {
-		const proposer = await startRole(roles.proposer);
-		const challenger = await startRole(roles.challenger);
-		const judge = roles.judge ? await startRole(roles.judge) : undefined;
+		const [proposer, challenger, judge] = await Promise.all([
+			startRole(roles.proposer),
+			startRole(roles.challenger),
+			roles.judge ? startRole(roles.judge) : undefined,
+		]);
 
 		const adapters: AdapterMap = {
 			proposer,

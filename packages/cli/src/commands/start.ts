@@ -1,10 +1,5 @@
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { ClaudeAdapter } from "@crossfire/adapter-claude";
-import type { QueryFn, QueryResult } from "@crossfire/adapter-claude";
-import { CODEX_TOOLS_DIR, CodexAdapter } from "@crossfire/adapter-codex";
-import { GeminiAdapter } from "@crossfire/adapter-gemini";
 import { runDebate } from "@crossfire/orchestrator";
 import type { DebateConfig } from "@crossfire/orchestrator-core";
 import { App } from "@crossfire/tui";
@@ -14,19 +9,13 @@ import React from "react";
 import { loadProfile } from "../profile/loader.js";
 import { resolveAdapterType, resolveRoles } from "../profile/resolver.js";
 import { createAdapters } from "../wiring/create-adapters.js";
-import type { AdapterFactoryMap } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
+import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
 
 function buildExitSummary(outputDir: string): string {
 	const dir = resolve(outputDir);
-	const lines: string[] = [];
-	lines.push("");
-	lines.push(
-		`Output: ${join(dir, "action-plan.html")} | ${join(dir, "transcript.html")}`,
-	);
-	lines.push("");
-	return lines.join("\n");
+	return `\nOutput: ${join(dir, "action-plan.html")} | ${join(dir, "transcript.html")}\n`;
 }
 
 export const startCommand = new Command("start")
@@ -140,9 +129,7 @@ export const startCommand = new Command("start")
 			const now = new Date();
 			const debateId = `d-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
 			const outputDir = options.output ?? `run_output/${debateId}`;
-			if (!existsSync(outputDir)) {
-				mkdirSync(outputDir, { recursive: true });
-			}
+			mkdirSync(outputDir, { recursive: true });
 
 			// Write initial index.json with profile mapping (EventStore merges runtime data on close)
 			const initialIndex = {
@@ -176,7 +163,7 @@ export const startCommand = new Command("start")
 			};
 			writeFileSync(
 				join(outputDir, "index.json"),
-				JSON.stringify(initialIndex, null, 2) + "\n",
+				`${JSON.stringify(initialIndex, null, 2)}\n`,
 			);
 
 			if (options.verbose) {
@@ -196,70 +183,11 @@ export const startCommand = new Command("start")
 				console.log(`  Output: ${outputDir}`);
 			}
 
-			// Create adapter factories
-			const factories: AdapterFactoryMap = {
-				claude: () => {
-					// Lazy-load SDK — resolved on first queryFn call
-					const sdkPromise = import("@anthropic-ai/claude-agent-sdk");
-					let sdkQuery: typeof import("@anthropic-ai/claude-agent-sdk").query;
-
-					const queryFn: QueryFn = (opts) => {
-						// Create an async generator that awaits SDK before yielding
-						async function* gen() {
-							if (!sdkQuery) {
-								const sdk = await sdkPromise;
-								sdkQuery = sdk.query;
-							}
-							const q = sdkQuery({
-								prompt: opts.prompt,
-								options: {
-									resume: opts.resume,
-									model: opts.model,
-									canUseTool: opts.canUseTool as never,
-									hooks: opts.hooks as never,
-									includePartialMessages: true,
-								},
-							});
-							currentQuery = q;
-							yield* q as AsyncGenerator<
-								{ type: string; [key: string]: unknown },
-								void,
-								unknown
-							>;
-						}
-
-						let currentQuery: { interrupt: () => void } | undefined;
-						return {
-							messages: gen(),
-							interrupt: () => {
-								currentQuery?.interrupt();
-							},
-						};
-					};
-
-					return new ClaudeAdapter({ queryFn });
-				},
-				codex: () =>
-					new CodexAdapter({
-						spawnFn: () => {
-							const proc = spawn("codex", ["app-server"], {
-								stdio: ["pipe", "pipe", "inherit"],
-								env: {
-									...process.env,
-									PATH: `${CODEX_TOOLS_DIR}:${process.env.PATH}`,
-								},
-							});
-							return {
-								stdin: proc.stdin,
-								stdout: proc.stdout,
-							};
-						},
-					}),
-				gemini: () => new GeminiAdapter(),
-			};
-
 			// Create adapters
-			const adapterBundle = await createAdapters(roles, factories);
+			const adapterBundle = await createAdapters(
+				roles,
+				createDefaultFactories(),
+			);
 
 			// Create bus
 			const busBundle = createBus({ outputDir });
