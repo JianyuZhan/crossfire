@@ -424,7 +424,7 @@ describe("renderTurnPrompt via buildTurnPromptFromState", () => {
 		});
 		expect(prompt).toContain("[TOPIC]");
 		expect(prompt).toContain("[ROLE]");
-		expect(prompt).toContain("[LONG-TERM DEBATE MEMORY]");
+		expect(prompt).toContain("[REVIEW PROGRESS]");
 		expect(prompt).toContain("[LOCAL WORKING CONTEXT]");
 		expect(prompt).toContain("[THIS TURN'S OBJECTIVE]");
 		expect(prompt).toContain("[OUTPUT INSTRUCTIONS]");
@@ -436,7 +436,7 @@ describe("renderTurnPrompt via buildTurnPromptFromState", () => {
 	it("renders challenger-specific content", () => {
 		const prompt = buildTurnPromptFromState(makeState(), "challenger");
 		expect(prompt).toContain("challenger");
-		expect(prompt).toContain("weaknesses");
+		expect(prompt).toContain("stress-test");
 	});
 
 	it("includes user injection normal in layer 2", () => {
@@ -551,7 +551,7 @@ describe("buildJudgePrompt (new format)", () => {
 			],
 		});
 		const prompt = buildJudgePrompt(state);
-		expect(prompt).toContain("[DEBATE SUMMARY]");
+		expect(prompt).toContain("[REVIEW SUMMARY]");
 		expect(prompt).toContain("[RECENT ROUND CONTENT]");
 		expect(prompt).toContain("judge_verdict");
 		expect(prompt).toContain("Round 3 Pro");

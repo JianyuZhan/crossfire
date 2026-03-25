@@ -175,9 +175,9 @@ Resume an interrupted debate. State is reconstructed from persisted events.
 
 | Option                   | Description                 | Default          |
 | ------------------------ | --------------------------- | ---------------- |
-| `--proposer <profile>`   | Override proposer profile   | from `meta.json` |
-| `--challenger <profile>` | Override challenger profile | from `meta.json` |
-| `--judge <profile>`      | Override judge profile      | from `meta.json` |
+| `--proposer <profile>`   | Override proposer profile   | from `index.json` |
+| `--challenger <profile>` | Override challenger profile | from `index.json` |
+| `--judge <profile>`      | Override judge profile      | from `index.json` |
 | `--headless`             | Disable TUI                 | `false`          |
 
 ### `crossfire replay <output-dir>`
@@ -280,12 +280,12 @@ profiles/
 
 Each debate produces files in its output directory:
 
-| File            | Description                                              |
-| --------------- | -------------------------------------------------------- |
-| `events.jsonl`  | Complete event log (one JSON per line) — source of truth |
-| `index.json`    | Metadata, byte offsets, segment manifest                 |
-| `meta.json`     | Debate config, profile mapping, versions                 |
-| `transcript.md` | Human-readable Markdown transcript                       |
+| File               | Description                                              |
+| ------------------ | -------------------------------------------------------- |
+| `action-plan.html` | Final synthesized action plan (generated after debate)   |
+| `transcript.html`  | Full debate transcript in HTML format                    |
+| `events.jsonl`     | Complete event log (one JSON per line) — source of truth |
+| `index.json`       | Metadata, byte offsets, segment manifest, debate config  |
 
 On resume, a new segment file is created (e.g., `events-resumed-<ts>.jsonl`) and tracked in `index.json`.
 

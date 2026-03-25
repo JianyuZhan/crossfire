@@ -1,5 +1,7 @@
 # Crossfire
 
+> **THE NORTH STAR: Every feature, optimization, and architectural decision in this project exists for one purpose — to produce deeper, more comprehensive, and more actionable action plans. The debate is a MEANS, not an end. We do not optimize for who "wins"; we optimize for the quality of insight that emerges from structured adversarial reasoning.**
+
 ## Language Policy
 
 - All code, comments, variable names, commit messages, and documentation MUST be in English.
@@ -14,7 +16,8 @@ TypeScript pnpm monorepo (8 packages). See `docs/architecture.md` for full desig
 - Biome for lint/format, Vitest for testing, Turborepo for builds
 - TDD: write failing test first, then implement, then verify
 - Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, etc.)
-- Every commit must include `Signed-off-by` (use `git config user.name`/`user.email`)
+- Every code change MUST include corresponding tests. No untested code ships.
+- If a change affects the end-user experience (CLI behavior, TUI display, output format, new features), update BOTH `README.md` and `README_zh.md`.
 
 ## Critical Contracts
 
@@ -56,3 +59,7 @@ RUN_INTEGRATION=1 pnpm --filter @crossfire/cli exec vitest run __tests__/smoke.i
 # Add HAVE_CODEX=1 CODEX_MODEL=gpt-5.1-codex-mini for Codex combos
 # Add HAVE_GEMINI=1 for full 9-combo matrix
 ```
+
+---
+
+> **REMEMBER: The goal is NOT a better debate. The goal is a better action plan. Every round of argument, every judge intervention, every convergence signal — all of it serves the final deliverable: `action-plan.html`. If a change doesn't ultimately improve the depth, completeness, or actionability of that output, question whether it belongs.**

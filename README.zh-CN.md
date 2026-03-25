@@ -175,9 +175,9 @@ crossfire start \
 
 | 选项                     | 说明           | 默认值           |
 | ------------------------ | -------------- | ---------------- |
-| `--proposer <profile>`   | 覆盖提议者配置 | 来自 `meta.json` |
-| `--challenger <profile>` | 覆盖挑战者配置 | 来自 `meta.json` |
-| `--judge <profile>`      | 覆盖裁判配置   | 来自 `meta.json` |
+| `--proposer <profile>`   | 覆盖提议者配置 | 来自 `index.json` |
+| `--challenger <profile>` | 覆盖挑战者配置 | 来自 `index.json` |
+| `--judge <profile>`      | 覆盖裁判配置   | 来自 `index.json` |
 | `--headless`             | 禁用终端 UI    | `false`          |
 
 ### `crossfire replay <output-dir>`
@@ -280,12 +280,12 @@ profiles/
 
 每次辩论在输出目录下产生以下文件：
 
-| 文件            | 说明                                        |
-| --------------- | ------------------------------------------- |
-| `events.jsonl`  | 完整事件日志（每行一条 JSON）— 唯一事实来源 |
-| `index.json`    | 元数据、字节偏移、段清单                    |
-| `meta.json`     | 辩论配置、配置文件映射、版本信息            |
-| `transcript.md` | 人类可读的 Markdown 辩论记录                |
+| 文件                 | 说明                                        |
+| -------------------- | ------------------------------------------- |
+| `action-plan.html`   | 最终综合行动计划（辩论结束后生成）          |
+| `transcript.html`    | HTML 格式的完整辩论记录                     |
+| `events.jsonl`       | 完整事件日志（每行一条 JSON）— 唯一事实来源 |
+| `index.json`         | 元数据、字节偏移、段清单、辩论配置          |
 
 恢复时会创建新的段文件（如 `events-resumed-<ts>.jsonl`），并在 `index.json` 中追踪。
 
