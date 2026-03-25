@@ -59,7 +59,10 @@ export class PlanAccumulator {
 		if (event.kind === "round.completed") {
 			const e = event as { roundNumber: number; speaker: string };
 			if (e.speaker === "challenger") {
-				this.processRound(e.roundNumber);
+				// Defer heavy work (projectState replay + LLM call) to avoid blocking the event loop
+				queueMicrotask(() => {
+					if (!this.frozen) this.processRound(e.roundNumber);
+				});
 			}
 		}
 

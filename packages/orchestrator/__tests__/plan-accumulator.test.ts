@@ -3,6 +3,9 @@ import { DebateEventBus } from "../src/event-bus.js";
 import { PlanAccumulator } from "../src/plan-accumulator.js";
 import type { SynthesizerConfig } from "../src/round-synthesizer.js";
 
+/** Wait for queued microtasks (processRound is deferred via queueMicrotask) */
+const tick = () => new Promise<void>((r) => queueMicrotask(r));
+
 const disabledConfig: SynthesizerConfig = {
 	enabled: false,
 	timeoutMs: 5000,
@@ -103,7 +106,7 @@ function pushRound(bus: DebateEventBus, round: number): void {
 }
 
 describe("PlanAccumulator", () => {
-	it("builds EvolvingPlan from debate_meta on round.completed", () => {
+	it("builds EvolvingPlan from debate_meta on round.completed", async () => {
 		const bus = new DebateEventBus();
 		const acc = new PlanAccumulator(disabledConfig);
 		const unsub = acc.subscribe(bus);
@@ -119,6 +122,7 @@ describe("PlanAccumulator", () => {
 			timestamp: Date.now(),
 		});
 		pushRound(bus, 1);
+		await tick();
 
 		const plan = acc.snapshot();
 		expect(Object.keys(plan.arguments).length).toBeGreaterThan(0);
@@ -209,7 +213,7 @@ describe("PlanAccumulator", () => {
 		unsub();
 	});
 
-	it("tracks degraded rounds when synthesizer is disabled", () => {
+	it("tracks degraded rounds when synthesizer is disabled", async () => {
 		const bus = new DebateEventBus();
 		const acc = new PlanAccumulator(disabledConfig);
 		const unsub = acc.subscribe(bus);
@@ -225,6 +229,7 @@ describe("PlanAccumulator", () => {
 			timestamp: Date.now(),
 		});
 		pushRound(bus, 1);
+		await tick();
 
 		const plan = acc.snapshot();
 		expect(plan.degradedRounds).toContain(1);

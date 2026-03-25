@@ -89,8 +89,9 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
 		);
 		if (jr) {
 			const stripped = stripInternalToolBlocks(jr.messageText);
-			const judgeLines = stripped
-				? [screenLine([{ text: stripped, style: {} }])]
+			const displayText = stripped || jr.verdict?.reasoning || "";
+			const judgeLines = displayText
+				? [screenLine([{ text: displayText, style: {} }])]
 				: [];
 			chunks.push({
 				type: "judge",
@@ -145,8 +146,10 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
 	) {
 		const isDone = state.judge.judgeStatus === "done";
 		const stripped = stripInternalToolBlocks(state.judge.judgeMessageText);
-		const judgeLines = stripped
-			? [screenLine([{ text: stripped, style: {} }])]
+		const displayText =
+			stripped || (isDone ? state.judge.verdict?.reasoning : "") || "";
+		const judgeLines = displayText
+			? [screenLine([{ text: displayText, style: {} }])]
 			: !isDone
 				? [
 						screenLine([
