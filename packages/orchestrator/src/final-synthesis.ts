@@ -39,21 +39,16 @@ export async function runFinalSynthesis(
 		// duplication when runner.ts already wires adapter→bus.
 		eventUnsub = adapter.onEvent((event: NormalizedEvent) => {
 			if (event.adapterSessionId !== sessionId) return;
-			if (
-				!("turnId" in event) ||
-				(event as { turnId?: string }).turnId !== turnId
-			)
-				return;
+			if (event.turnId !== turnId) return;
 
 			if (event.kind === "message.delta") {
-				deltaBuffer += (event as { text?: string }).text ?? "";
+				deltaBuffer += event.text;
 			}
 			if (event.kind === "message.final") {
-				const text = (event as { text?: string }).text ?? "";
 				// Keep the longest message.final — LLM may emit multiple
 				// (e.g., thinking, tool use, then final answer)
-				if (!longestFinal || text.length > longestFinal.length) {
-					longestFinal = text;
+				if (!longestFinal || event.text.length > longestFinal.length) {
+					longestFinal = event.text;
 				}
 			}
 			if (event.kind === "turn.completed") {
@@ -61,21 +56,24 @@ export async function runFinalSynthesis(
 			}
 		});
 
-		// sendTurn resolves when streaming BEGINS, not ends
-		await adapter.sendTurn(session, {
-			turnId,
-			prompt,
-		});
+		await adapter.sendTurn(session, { turnId, prompt });
 
-		// Wait for turn.completed (authoritative signal) or timeout
-		await Promise.race([
-			completionPromise,
-			new Promise<void>((_, reject) =>
-				setTimeout(() => reject(new Error("synthesis timeout")), timeoutMs),
-			),
-		]);
+		// Wait for turn.completed or timeout
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				completionPromise,
+				new Promise<void>((_, reject) => {
+					timeoutId = setTimeout(
+						() => reject(new Error("synthesis timeout")),
+						timeoutMs,
+					);
+				}),
+			]);
+		} finally {
+			if (timeoutId) clearTimeout(timeoutId);
+		}
 
-		// Prefer message.final, fall back to accumulated deltas
 		return longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined);
 	} catch {
 		return undefined;
