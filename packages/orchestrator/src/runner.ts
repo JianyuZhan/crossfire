@@ -389,7 +389,6 @@ export async function runDebate(
 						);
 						markdownResult = await runFinalSynthesis(
 							synthesisAdapter,
-							bus,
 							prompt,
 							180_000,
 						);
