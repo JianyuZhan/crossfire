@@ -19,6 +19,13 @@ TypeScript pnpm monorepo (8 packages). See `docs/architecture.md` for full desig
 - Every code change MUST include corresponding tests. No untested code ships.
 - If a change affects the end-user experience (CLI behavior, TUI display, output format, new features), update BOTH `README.md` and `README_zh.md`.
 
+## Architecture Documentation
+
+- `docs/architecture.md` is the single source of truth for system design. It has a [Table of Contents](docs/architecture.md#table-of-contents) with anchor links for fast navigation.
+- **Any code change that alters types, interfaces, event kinds, component structure, CLI options, or data flow MUST include a corresponding update to `docs/architecture.md`.**
+- Use the TOC to locate the relevant section. Cross-references (internal `[text](#anchor)` links) connect related sections — update them if you rename or move headings.
+- When adding new subsections, add an entry to the TOC as well.
+
 ## Critical Contracts
 
 - `sendTurn()` resolves when streaming BEGINS, not ends. Wait for `turn.completed` event.

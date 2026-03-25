@@ -2,6 +2,85 @@
 
 > AI agent adversarial debate orchestrator — a pure TypeScript pnpm monorepo.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Package Dependency Graph](#package-dependency-graph)
+- [Layer 1: Adapter Layer](#layer-1-adapter-layer)
+  - [AgentAdapter Interface](#agentadapter-interface)
+  - [NormalizedEvent](#normalizedevent)
+  - [AdapterCapabilities](#adaptercapabilities)
+  - [SessionHandle](#sessionhandle)
+  - [StartSessionInput](#startsessioninput)
+  - [Adapter Internals](#adapter-internals)
+    - [Claude Adapter](#claude-adapter)
+    - [Codex Adapter](#codex-adapter)
+    - [Gemini Adapter](#gemini-adapter)
+  - [Contract Tests](#contract-tests)
+- [Layer 2: Orchestrator](#layer-2-orchestrator)
+  - [Core Types](#core-types)
+    - [DebateConfig](#debateconfig)
+    - [OrchestratorEvent (14 types)](#orchestratorevent-14-types)
+    - [DebateState](#debatestate)
+    - [DebateTurn](#debateturn)
+    - [DebateMeta](#debatemeta-from-debate_meta-tool)
+    - [JudgeVerdict](#judgeverdict-from-judge_verdict-tool)
+    - [ConvergenceResult](#convergenceresult)
+  - [Projection](#projection)
+  - [DebateDirector](#debatedirector)
+    - [DirectorAction](#directoraction)
+    - [Judge Trigger Strategy (7 Sources)](#judge-trigger-strategy-7-sources)
+    - [Convergence Rules (Enhanced)](#convergence-rules-enhanced)
+    - [Repetition Degradation Treatment (2 Layers)](#repetition-degradation-treatment-2-layers)
+    - [Clarification Flow](#clarification-flow)
+    - [`/inject` Command System](#inject-command-system)
+    - [Debate End Flow (Final Outcome)](#debate-end-flow-final-outcome)
+    - [Director File Layout](#director-file-layout)
+  - [DebateEventBus](#debateeventbus)
+  - [Runner](#runner)
+  - [Context Builder (Bounded Session Memory)](#context-builder-bounded-session-memory)
+    - [4-Layer Prompt Structure](#4-layer-prompt-structure)
+    - [Two-Stage Pipeline](#two-stage-pipeline)
+    - [PromptContext](#promptcontext)
+    - [JudgePromptContext](#judgepromptcontext)
+    - [Utility Functions](#utility-functions)
+    - [Shared Utility: debate-memory.ts](#shared-utility-debate-memoryts)
+    - [Length Budget](#length-budget)
+    - [Provider Strategy](#provider-strategy)
+    - [TurnPromptOptions](#turnpromptoptions-compatibility)
+  - [Judge Turn](#judge-turn)
+  - [Action Plan Synthesis](#action-plan-synthesis)
+    - [Pipeline Overview](#pipeline-overview)
+    - [Three Quality Tiers](#three-quality-tiers)
+    - [Component Responsibilities](#component-responsibilities)
+    - [Runner Integration](#runner-integration)
+- [Layer 3: TUI](#layer-3-tui)
+  - [EventSource + PlaybackClock](#unification-eventsource--playbackclock)
+  - [TuiStore](#tuistore)
+    - [LiveAgentPanelState](#liveagentpanelstate)
+    - [Other State Slices](#other-state-slices)
+    - [Buffer Management Rules](#buffer-management-rules)
+  - [Component Tree](#component-tree)
+  - [CommandInput Modes](#commandinput-modes)
+  - [Persistence (EventStore)](#persistence-eventstore)
+  - [Replay](#replay)
+- [Layer 4: CLI](#layer-4-cli)
+  - [Profile System](#profile-system)
+  - [Commands](#commands)
+    - [`crossfire start`](#crossfire-start)
+    - [`crossfire resume`](#crossfire-resume)
+    - [`crossfire replay`](#crossfire-replay)
+    - [`crossfire status`](#crossfire-status)
+  - [Wiring Modules](#wiring-modules)
+  - [Error Handling](#error-handling)
+  - [EventStore Resume Support](#eventstore-resume-support)
+- [Event Flow (End-to-End)](#event-flow-end-to-end)
+- [Key Design Decisions](#key-design-decisions)
+- [File Layout](#file-layout)
+- [Testing Strategy](#testing-strategy)
+
+---
+
 ## Overview
 
 Crossfire pits multiple AI agents (Claude, Codex, Gemini) against each other in structured debates. One agent proposes, another challenges, and an optional judge evaluates convergence. The entire system is **event-sourced**: all state is derived from an ordered event stream, enabling deterministic replay, persistence, and resume.
@@ -43,7 +122,7 @@ Key principle: **pure logic in `-core` packages, side effects in outer packages*
 
 ## Layer 1: Adapter Layer
 
-**Purpose:** Normalize three vastly different AI agent protocols into a single `NormalizedEvent` stream.
+**Purpose:** Normalize three vastly different AI agent protocols into a single [`NormalizedEvent`](#normalizedevent) stream.
 
 **Packages:** `adapter-core` (types + Zod + contract framework), `adapter-claude`, `adapter-codex`, `adapter-gemini`
 
@@ -81,22 +160,21 @@ interface BaseEvent {
   adapterId: "claude" | "codex" | "gemini";
   adapterSessionId: string; // adapter-assigned
   turnId?: string;
-  providerSessionId?: string; // provider-native, initially undefined
 }
 ```
 
-| Category       | Kinds                                       | Notable Fields                                                |
-| -------------- | ------------------------------------------- | ------------------------------------------------------------- |
-| Session        | `session.started`                           | `providerSessionId` (always set at emission)                  |
-| Text           | `message.delta`, `message.final`            | `text`, `stopReason?` (on final)                              |
-| Thinking       | `thinking.delta`                            | `text`, `thinkingType: "raw-thinking" \| "reasoning-summary"` |
-| Plan           | `plan.updated`                              | `steps` (Codex-specific)                                      |
-| Tools          | `tool.call`, `tool.progress`, `tool.result` | `toolUseId`, `toolName`, `input`/`output`                     |
-| Approvals      | `approval.request`, `approval.resolved`     | `suggestion?: "allow" \| "deny"`                              |
-| Subagents      | `subagent.started`, `subagent.completed`    | subagent lifecycle                                            |
-| Metrics        | `usage.updated`                             | `inputTokens`, `outputTokens`, `totalCostUsd?`                |
-| Turn lifecycle | `turn.completed`                            | `status`, `durationMs`, `usage?`                              |
-| Errors         | `run.error`, `run.warning`                  | `message`                                                     |
+| Category       | Kinds                                       | Notable Fields                                                                       |
+| -------------- | ------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Session        | `session.started`                           | `providerSessionId` (always set), `capabilities: AdapterCapabilities`                |
+| Text           | `message.delta`, `message.final`            | `text`, `stopReason?` (on final)                                                     |
+| Thinking       | `thinking.delta`                            | `text`, `thinkingType: "raw-thinking" \| "reasoning-summary"`                        |
+| Plan           | `plan.updated`                              | `steps` (Codex-specific)                                                             |
+| Tools          | `tool.call`, `tool.progress`, `tool.result` | `toolUseId`, `toolName`, `input`/`output`; `tool.progress` adds `elapsedSeconds`     |
+| Approvals      | `approval.request`, `approval.resolved`     | `requestId`, `approvalType`, `title`, `payload`, `suggestion?: "allow" \| "deny"`    |
+| Subagents      | `subagent.started`, `subagent.completed`    | subagent lifecycle                                                                   |
+| Metrics        | `usage.updated`                             | `inputTokens`, `outputTokens`, `totalCostUsd?`                                      |
+| Turn lifecycle | `turn.completed`                            | `status`, `durationMs`, `usage?`                                                     |
+| Errors         | `run.error`, `run.warning`                  | `message`; `run.error` adds `recoverable: boolean`                                   |
 
 `turn.completed.status`: `"completed" | "interrupted" | "failed" | "timeout"`
 
@@ -105,7 +183,7 @@ interface BaseEvent {
 11-field capability detection:
 
 - Resume: `resumeMode` (`"protocol-native" | "native-cli" | "stateless"`), `resumeStability`
-- `supportsExternalHistory`, `supportsRawThinking`, `supportsReasoningSummary`
+- `supportsExternalHistoryInjection`, `supportsRawThinking`, `supportsReasoningSummary`
 - `supportsPlan`, `supportsApproval`, `supportsInterrupt`, `supportsSubagents`
 - `supportsStreamingDelta`
 
@@ -200,7 +278,7 @@ Shared `runContractTests()` matrix with provider-specific mock factories:
 
 ## Layer 2: Orchestrator
 
-**Purpose:** Event-sourced debate loop — emit events, project state, make decisions.
+**Purpose:** Event-sourced debate loop — emit events, project state, make decisions. Consumes [`NormalizedEvent`](#normalizedevent) from [Layer 1](#layer-1-adapter-layer), drives the debate via [`DebateDirector`](#debatedirector), and publishes [`OrchestratorEvent`](#orchestratorevent-14-types) through the [`DebateEventBus`](#debateeventbus).
 
 **Packages:** `orchestrator-core` (pure logic + DebateDirector), `orchestrator` (side effects)
 
@@ -220,22 +298,24 @@ interface DebateConfig {
 }
 ```
 
-#### OrchestratorEvent (12 types)
+#### OrchestratorEvent (14 types)
 
-| Kind                      | Key Fields                                            |
-| ------------------------- | ----------------------------------------------------- |
-| `debate.started`          | `config: DebateConfig`                                |
-| `debate.resumed`          | `fromRound: number`                                   |
-| `round.started`           | `roundNumber`, `speaker: "proposer" \| "challenger"`  |
-| `round.completed`         | `roundNumber`, `speaker`                              |
-| `judge.started`           | `roundNumber`                                         |
-| `judge.completed`         | `roundNumber`, `verdict: JudgeVerdict`                |
-| `debate.completed`        | `reason: TerminationReason`                           |
-| `prompt.stats`            | `roundNumber`, `speaker`, `promptChars`               |
-| `user.inject`             | `target`, `text`, `priority: "normal" \| "high"`      |
-| `clarification.requested` | `source`, `question`, `judgeComment?`                 |
-| `clarification.provided`  | `answer`, `answeredBy: "user" \| "judge"`             |
-| `director.action`         | `action: DirectorAction`, `signals: DirectorSignal[]` |
+| Kind                      | Key Fields                                                            |
+| ------------------------- | --------------------------------------------------------------------- |
+| `debate.started`          | `config: DebateConfig`, `debateId?`, `roles?`                         |
+| `debate.resumed`          | `fromRound: number`                                                   |
+| `round.started`           | `roundNumber`, `speaker: "proposer" \| "challenger"`                  |
+| `round.completed`         | `roundNumber`, `speaker`                                              |
+| `judge.started`           | `roundNumber`                                                         |
+| `judge.completed`         | `roundNumber`, `verdict: JudgeVerdict`                                |
+| `debate.completed`        | `reason: TerminationReason`, `summary?`, `outputDir?`                 |
+| `prompt.stats`            | `roundNumber`, `speaker: "proposer" \| "challenger" \| "judge"`, `promptChars` |
+| `user.inject`             | `target: "proposer" \| "challenger" \| "both" \| "judge"`, `text`, `priority` |
+| `clarification.requested` | `source`, `question`, `judgeComment?`                                 |
+| `clarification.provided`  | `answer`, `answeredBy: "user" \| "judge"`                             |
+| `director.action`         | `action: DirectorAction`, `signals: DirectorSignal[]`                 |
+| `synthesis.started`       | `timestamp`                                                           |
+| `synthesis.completed`     | `quality: "llm-full" \| "local-structured" \| "local-degraded"` |
 
 The last 5 events (`user.inject` through `director.action`) are informational for audit/replay. State changes are driven by the actions they describe (e.g., `round.started`, `judge.started`). `director.action` is **mandatory and persisted** to JSONL — it enables meaningful replay explaining why Judge was triggered, why debate ended, or why guidance was injected.
 
@@ -279,10 +359,15 @@ interface DebateMeta {
   keyPoints: string[];
   concessions?: string[];
   wantsToConclude?: boolean;
-  requestIntervention?: {          // NEW: agent requests clarification/arbitration
+  requestIntervention?: {          // agent requests clarification/arbitration
     type: "clarification" | "arbitration";
     question: string;
   };
+  // Phase 1 enrichment fields (opportunistic, not mandatory):
+  rebuttals?: Array<{ target: string; response: string }>;
+  evidence?: Array<{ claim: string; source: string }>;
+  riskFlags?: Array<{ risk: string; severity: "low" | "medium" | "high" }>;
+  positionShifts?: Array<{ from: string; to: string; reason: string }>;
 }
 ```
 
@@ -328,7 +413,7 @@ interface ConvergenceResult {
 }
 ```
 
-`checkConvergence(state)` computes: stance delta (mapped to 0-4 scale) + mutual concessions count + both `wantsToConclude` flags → percentage that the runner compares against `convergenceThreshold`. Enhanced with single-party convergence detection: when one side has `wantsToConclude` for 2+ rounds with confidence >= 0.9, this signals Director to trigger Judge arbitration (NOT direct termination).
+`checkConvergence(state)` computes: stance delta (mapped to 0-4 scale) + mutual concessions count + both `wantsToConclude` flags → percentage that the [Runner](#runner) compares against `convergenceThreshold`. Enhanced with single-party convergence detection: when one side has `wantsToConclude` for 2+ rounds with confidence >= 0.9, this signals [Director](#debatedirector) to trigger Judge arbitration (NOT direct termination). See [Convergence Rules](#convergence-rules-enhanced) for the full decision table.
 
 ### Projection
 
@@ -337,11 +422,11 @@ function projectState(events: AnyEvent[]): DebateState;
 // AnyEvent = NormalizedEvent | OrchestratorEvent
 ```
 
-Pure reducer: processes events in order, deterministic replay guarantee. Unknown event kinds ignored (forward compatibility). `message.final` → turn content, `tool.call` with debate_meta/judge_verdict → structured extraction.
+Pure reducer: processes events in order, deterministic replay guarantee. Unknown event kinds ignored (forward compatibility). `message.final` → turn content, `tool.call` with [`debate_meta`](#debatemeta-from-debate_meta-tool)/[`judge_verdict`](#judgeverdict-from-judge_verdict-tool) → structured extraction.
 
 ### DebateDirector
 
-Pure-logic layer in `orchestrator-core` that manages all "when to do what" decisions. Extracts decision logic from `runner.ts` so the runner becomes a pure executor.
+Pure-logic layer in `orchestrator-core` that manages all "when to do what" decisions. Extracts decision logic from `runner.ts` so the [Runner](#runner) becomes a pure executor.
 
 ```
 DebateDirector (orchestrator-core, pure logic, zero I/O)
@@ -386,6 +471,7 @@ type TriggerJudgeReason =
   | "scheduled"
   | "stagnation"
   | "degradation"
+  | "convergence"
   | "agent-request"
   | "user"
   | "final-review";
@@ -393,32 +479,35 @@ type TriggerJudgeReason =
 
 **Action priority** (highest wins when multiple signals fire): `end-debate > await-user > trigger-judge > inject-guidance > continue`
 
-#### Judge Trigger Strategy (6 Sources)
+#### Judge Trigger Strategy (7 Sources)
+
+Triggers are split across `judge-policy.ts` (scheduled, stagnation, degradation) and `debate-director.ts::evaluate()` (convergence, agent-request, user, final-review).
 
 | Source                 | Condition                                                                                                      | Action                                      |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | **Adaptive scheduled** | After >= minRound, by total-round proportion (~30% first, ~25% subsequent); mandatory before penultimate round | `trigger-judge { reason: "scheduled" }`     |
 | **Stagnation**         | Stance delta unchanged >= 2 rounds + one side wantsToConclude while other refuses                              | `trigger-judge { reason: "stagnation" }`    |
 | **Degradation**        | key_points overlap > 70% for 2+ rounds; first fires inject-guidance, then Judge                                | `trigger-judge { reason: "degradation" }`   |
+| **Convergence**        | `checkConvergence()` returns `converged = true`                                                                | `trigger-judge { reason: "convergence" }`   |
 | **Agent request**      | `debate_meta.request_intervention` → ClarificationPolicy filters                                               | `trigger-judge { reason: "agent-request" }` |
 | **User**               | `/inject judge <instruction>` — triggers Judge immediately                                                     | `trigger-judge { reason: "user" }`          |
 | **Final review**       | Debate ending (any reason), before `debate.completed`                                                          | `trigger-judge { reason: "final-review" }`  |
 
 #### Convergence Rules (Enhanced)
 
-| Signal                                                         | Effect                                        |
-| -------------------------------------------------------------- | --------------------------------------------- |
-| `bothWantToConclude` = true                                    | → `end-debate { reason: "convergence" }`      |
-| `stanceDelta <= threshold`                                     | → `end-debate { reason: "convergence" }`      |
-| Single-party `wantsToConclude` >= 2 rounds + confidence >= 0.9 | → `trigger-judge` (NOT end-debate)            |
-| Judge verdict `shouldContinue: false`                          | → `end-debate { reason: "judge-decision" }`   |
-| Stagnation >= 3 rounds AND Judge intervened >= 2 times         | → `end-debate { reason: "stagnation-limit" }` |
+| Signal                                                         | Effect                                                  |
+| -------------------------------------------------------------- | ------------------------------------------------------- |
+| `converged` = true (stanceDelta or mutual concessions)         | → `trigger-judge { reason: "convergence" }` (NOT immediate end) |
+| `bothWantToConclude` = true                                    | → `end-debate { reason: "convergence" }`                |
+| `stanceDelta <= threshold`                                     | → `end-debate { reason: "convergence" }`                |
+| Single-party `wantsToConclude` >= 2 rounds + confidence >= 0.9 | → `trigger-judge` (NOT end-debate)                      |
+| Judge verdict `shouldContinue: false`                          | → `end-debate { reason: "judge-decision" }`             |
+| Stagnation >= 3 rounds AND Judge intervened >= 2 times         | → `end-debate { reason: "stagnation-limit" }`           |
 
-#### Repetition Degradation Treatment (3 Layers)
+#### Repetition Degradation Treatment (2 Layers)
 
 | Layer              | Trigger                                       | Behavior                                                                      |
 | ------------------ | --------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Prompt layer**   | key_points overlap > 50%                      | Static anti-repetition reminder in prompt                                     |
 | **Director layer** | DegradationDetector: overlap > 70%, 2+ rounds | Active `inject-guidance` with specific instructions to shift argument         |
 | **Judge layer**    | Guidance issued but still degraded            | `trigger-judge { reason: "degradation" }`, verdict includes `repetitionScore` |
 
@@ -434,7 +523,7 @@ Agent meta: request_intervention { type, question }
         → clarification.provided { answeredBy: "user" } → injected into both agents' next prompt
 ```
 
-**Critical rule**: Director NEVER directly emits `await-user`. All agent clarification requests go through Judge first. (v1: `await-user` is only produced by the Runner when Judge relays a clarification. The type is retained in `DirectorAction` for future extensibility.)
+**Critical rule**: Director NEVER directly emits `await-user`. All agent clarification requests go through Judge first. (v1: `await-user` is only produced by the [Runner](#runner) when Judge relays a clarification. The type is retained in [`DirectorAction`](#directoraction) for future extensibility.)
 
 #### `/inject` Command System
 
@@ -455,11 +544,12 @@ All injections are **one-shot** — consumed when the target role's next `round.
 1. Main loop exits (max-rounds / convergence / judge-decision / stagnation-limit)
 2. trigger-judge { reason: "final-review" }  — Judge final verdict (if available)
 3. SummaryGenerator produces structured summary
-4. Final Outcome block written to transcript tail + summary.json to output dir
-5. debate.completed event pushed  — TRUE TERMINAL EVENT
+4. Final Outcome block written to transcript tail
+5. synthesis.started → Action Plan Synthesis pipeline → synthesis.completed
+6. debate.completed event pushed  — TRUE TERMINAL EVENT
 ```
 
-`debate.completed` is pushed LAST, after all wrap-up. Final Outcome block is always generated — `summary.json` has a consistent schema: if the final-review Judge returns a verdict, SummaryGenerator incorporates it (leading side, score, reasoning); if Judge is unavailable or fails, Judge-sourced fields are set to `null`.
+`debate.completed` is pushed LAST, after all wrap-up. Final Outcome block is always generated — if the final-review Judge returns a verdict, SummaryGenerator incorporates it (leading side, score, reasoning); if Judge is unavailable or fails, Judge-sourced fields are set to `null`. The structured summary is carried in the `debate.completed` event's `summary` field.
 
 #### Director File Layout
 
@@ -486,7 +576,7 @@ class DebateEventBus {
 }
 ```
 
-Merges both `NormalizedEvent` and `OrchestratorEvent` streams. All consumers (TUI, EventStore, TranscriptWriter, Runner) subscribe here.
+Merges both [`NormalizedEvent`](#normalizedevent) and [`OrchestratorEvent`](#orchestratorevent-14-types) streams. All consumers ([TUI](#layer-3-tui), [EventStore](#persistence-eventstore), TranscriptWriter, [Runner](#runner)) subscribe here. See [Event Flow](#event-flow-end-to-end) for the full data flow diagram.
 
 ### Runner
 
@@ -506,10 +596,12 @@ interface AdapterMap {
 interface RunDebateOptions {
   bus?: DebateEventBus; // injectable, otherwise created internally
   resumeFromState?: DebateState; // skip completed rounds on resume
+  outputDir?: string; // where to write action-plan, transcript, etc.
+  debateId?: string; // carried into debate.started event
 }
 ```
 
-**Main loop** (Director-driven):
+**Main loop** ([Director](#debatedirector)-driven):
 
 1. Wire adapter `onEvent` callbacks into `bus.push()`
 2. Create `DebateDirector` instance with `DirectorConfig`
@@ -519,13 +611,13 @@ interface RunDebateOptions {
    - **Challenger turn:** same pattern (also emits `prompt.stats`)
    - **Director evaluates:** `director.evaluate(bus.snapshot())` → push `director.action` event
    - **Execute action:** `end-debate` → break to Final Outcome; `trigger-judge` → run Judge turn; `inject-guidance` → store for next turn; `await-user` → block for clarification; `continue` → next round
-5. **Final Outcome flow:** optional `trigger-judge { reason: "final-review" }` → `SummaryGenerator` → write Final Outcome to transcript + `summary.json` → emit `debate.completed` as **last** event
+5. **Final Outcome flow:** optional `trigger-judge { reason: "final-review" }` → `SummaryGenerator` → write Final Outcome to transcript → emit `debate.completed` (with `summary` field) as **last** event
 
 `waitForTurnCompleted()` listens on bus (not directly on adapters), matching by `turnId`.
 
 ### Context Builder (Bounded Session Memory)
 
-The prompt system uses a **4-layer architecture** with bounded token usage, eliminating O(n²) growth in provider threads. Core principle: **provider context = short-term working memory; DebateState = long-term fact memory.**
+The prompt system uses a **4-layer architecture** with bounded token usage, eliminating O(n²) growth in provider threads. Core principle: **provider context = short-term working memory; [`DebateState`](#debatestate) = long-term fact memory.**
 
 #### 4-Layer Prompt Structure
 
@@ -617,7 +709,7 @@ interface JudgePromptContext {
 }
 ```
 
-Key difference from old design: Judge prompt uses **structured summary + latest round content only**, NOT full transcript. Prompt size is roughly constant regardless of round count.
+Key difference from old design: Judge prompt uses **structured summary + latest round content only**, NOT full transcript. Prompt size is roughly constant regardless of round count. See [Length Budget](#length-budget) for size estimates.
 
 #### Utility Functions
 
@@ -664,10 +756,11 @@ All providers receive the same structured prompt. Semantic contract: **model han
 
 ```typescript
 interface TurnPromptOptions {
-  guidance?: string; // from DebateDirector.getGuidance(), string → [string] internally
+  guidance?: string[];  // from DebateDirector.getGuidance()
   userInjection?: { text: string; priority: "normal" | "high" };
   shouldTryToConclude?: boolean;
   repetitionWarnings?: string[];
+  maxOpponentChars?: number; // override truncation limit for opponent's last turn
 }
 ```
 
@@ -677,17 +770,124 @@ The old `clarifications` field is removed — superseded by `directorGuidance` a
 
 `runJudgeTurn()` — verdict extraction with graceful degradation. If judge doesn't call the `judge_verdict` tool, the runner continues without a verdict rather than crashing.
 
+### Action Plan Synthesis
+
+**Purpose:** Generate a high-quality action plan (`action-plan.html` + `action-plan.md`) as the primary deliverable of every debate. Uses a [three-tier quality pipeline](#three-quality-tiers): LLM full synthesis → local structured fallback → local degraded fallback. Triggered during the [Debate End Flow](#debate-end-flow-final-outcome).
+
+**Key files:** `orchestrator-core/src/synthesis-prompt.ts`, `orchestrator-core/src/markdown-renderer.ts`, `orchestrator/src/final-synthesis.ts`
+
+#### Pipeline Overview
+
+```
+Debate ends
+  → PlanAccumulator.flush()          (local data collection, no LLM)
+  → buildFullTextSynthesisPrompt()   (pure function, orchestrator-core)
+  → runFinalSynthesis()              (new isolated adapter session)
+  → adapter.sendTurn()               (single self-contained prompt)
+  → wait for turn.completed          (authoritative completion signal)
+  → extract text from message.final  (or accumulated message.delta)
+  → renderMarkdownToHtml()           (pure function, orchestrator-core)
+  → fallback: improved local draftToAuditReport() template fill
+```
+
+The runner emits `synthesis.started` before and `synthesis.completed` (with quality tier) after the pipeline completes. TUI maps `synthesis.started` to its `summaryGenerating` display state.
+
+#### Three Quality Tiers
+
+| Tier | Condition | Output |
+|------|-----------|--------|
+| **llm-full** | LLM synthesis succeeds | LLM-generated markdown → HTML with section cards |
+| **local-structured** | LLM fails, but ≥ 3 structured items extracted from debate metadata | Fixed template fill from `draftToAuditReport()` |
+| **local-degraded** | LLM fails, < 3 items extracted | Minimal template with degradation notice |
+
+Quality tier is carried in the `synthesis.completed` event and displayed as a banner in the HTML/MD output (no banner for `llm-full`; warning for `local-structured`; strong warning for `local-degraded`).
+
+#### Component Responsibilities
+
+**PlanAccumulator** (orchestrator, local-only data collector)
+- Subscribes to `DebateEventBus`, collects events during debate
+- On `round.completed` (challenger): runs `buildFallbackRoundAnalysis()` locally (no LLM)
+- On `judge.completed`: records judge verdict via `updatePlanWithJudge()`
+- `flush()`: drains microtask queue, freezes snapshot
+- `snapshot()`: returns `EvolvingPlan` for both prompt building and fallback rendering
+- All rounds are marked as "degraded" (local-only mode — per-round LLM synthesis was removed)
+
+**buildFullTextSynthesisPrompt()** (orchestrator-core, pure)
+- Signature: `(state: DebateState, judgeNotes: JudgeNote[], config: SynthesisPromptConfig, roundSummaries?: string[]) → string`
+- Assembles full debate transcript + judge verdicts into a single synthesis prompt
+- Token estimation: conservative `chars × 0.5` (handles CJK safely)
+- Context budget: `contextTokenLimit × 0.6` (reserve 40% for output, default 128K)
+- If over budget: always include all judge verdicts + last 2 rounds in full; earlier rounds replaced with `roundSummaries` from PlanAccumulator
+- CJK detection (`detectCjkMajority()`): adds localized truncation note when rounds are summarized
+- Prompt instructs LLM to output markdown with 6 recommended sections: Executive Summary, Consensus Action Items, Unresolved Disagreements, Key Argument Evolution, Risk Matrix, Evidence Registry
+
+**runFinalSynthesis()** (orchestrator, effectful)
+- Creates a **new isolated adapter session** (does NOT reuse debate session — prevents context pollution)
+- Selects adapter: `judge ?? proposer`
+- Sends one turn with `turnId: "synthesis-final"`
+- Subscribes directly to adapter events (not through bus) — tracks `message.delta`, `message.final`, `turn.completed`
+- If multiple `message.final` events arrive, keeps the longest
+- Prefers `message.final`; falls back to accumulated `message.delta` buffer
+- 180s timeout via `Promise.race`
+- Always calls `adapter.close()` in `finally` block — synthesis session must not leak
+
+**renderMarkdownToHtml()** (orchestrator-core, pure)
+- Signature: `(markdown: string, meta: MarkdownReportMeta) → string`
+- Security-first: HTML-escape ALL input first (`<` → `&lt;`), THEN apply markdown substitutions
+- Splits markdown by `## ` headings into card-based HTML sections
+- Inline markdown: `**bold**`, `*italic*`, `` `code` ``, `[text](url)`, `- list items`, `| tables |`
+- URL safety: only `http:`, `https:`, `mailto:` schemes allowed in links
+- Includes CSS styling for cards, notices, tables, responsive layout
+
+**draftToAuditReport()** (orchestrator-core, fallback path)
+- Template quality improvements over original:
+  - `nextSteps`: extracts action verb from argument text, or "See consensus detail above." (not "Define concrete implementation steps.")
+  - `mitigation`: "Not discussed in debate." (not "Requires further analysis.")
+  - `usedBy`: "unknown" (not generic "debate participant")
+  - `unresolvedIssues`: populated from both sides' key points when both disagree
+
+**buildFallbackRoundAnalysis()** (orchestrator-core, pure)
+- Divergence detection: when both sides have `disagree`/`strongly_disagree` stance, key points become divergence items
+- Consensus classification: only mutual concessions count as consensus (first-20-char normalized match); single-side concessions are listed separately
+
+#### Runner Integration
+
+```typescript
+// In runner.ts — after debate loop exits, before debate.completed
+bus.push({ kind: "synthesis.started", timestamp: Date.now() });
+
+// 1. Flush local accumulator
+await accumulator.flush();
+const plan = accumulator.snapshot();
+const draft = buildDraftReport(plan);
+
+// 2. Primary path: LLM final synthesis
+if (synthesisEnabled) {
+  const adapter = adapters.judge?.adapter ?? adapters.proposer.adapter;
+  const prompt = buildFullTextSynthesisPrompt(state, plan.judgeNotes, { contextTokenLimit: 128_000 });
+  const markdown = await runFinalSynthesis(adapter, prompt, 180_000);
+  if (markdown) → write action-plan.md + action-plan.html via renderMarkdownToHtml()
+}
+
+// 3. Fallback: improved local template
+if (!markdown) → draftToAuditReport(draft) → renderActionPlanHtml/Markdown()
+
+bus.push({ kind: "synthesis.completed", quality, timestamp: Date.now() });
+```
+
+Synthesis is controlled by `CROSSFIRE_SYNTHESIZER` env var (`!== "0"` to enable, enabled by default).
+
 ---
 
 ## Layer 3: TUI
 
-**Purpose:** Event-driven terminal UI for live rendering and replay, powered by Ink (React for CLI).
+**Purpose:** Event-driven terminal UI for live rendering and replay, powered by Ink (React for CLI). Subscribes to [`DebateEventBus`](#debateeventbus) and projects events into render-ready state via [`TuiStore`](#tuistore). Shares the same [`DebateState`](#debatestate) projection as the orchestrator.
 
 **Package:** `tui` (depends on adapter-core, orchestrator-core, ink, react)
 
 ### Unification: EventSource + PlaybackClock
 
-The TUI doesn't know if it's live or replay — it consumes events from an `EventSource`:
+The TUI doesn't know if it's live or replay — it consumes events from an `EventSource` (see [Key Design Decision #4](#key-design-decisions)):
 
 ```typescript
 interface EventSource {
@@ -712,16 +912,20 @@ interface PlaybackClock {
 
 ### TuiStore
 
-Lightweight projection from raw events into render-ready state. Prevents excessive re-renders from high-frequency `thinking.delta`/`message.delta`.
+Lightweight projection from raw events into render-ready state. Prevents excessive re-renders from high-frequency [`thinking.delta`/`message.delta`](#normalizedevent).
 
 ```typescript
 interface TuiState {
   proposer: LiveAgentPanelState;
   challenger: LiveAgentPanelState;
+  rounds: TuiRound[];              // historical round snapshots for scroll/replay
+  judgeResults: JudgeRoundResult[]; // per-round judge verdicts
   judge: JudgeStripState;
   metrics: MetricsState;
   command: CommandState;
-  debateState: DebateState; // full projected state
+  debateState: DebateState;        // full projected state
+  summaryGenerating?: boolean;     // true between synthesis.started and debate.completed
+  summary?: DebateSummaryView;     // structured debate summary for display
 }
 ```
 
@@ -800,15 +1004,17 @@ interface PendingApproval {
 
 ```
 <App>
-  <StatusBar />              -- debate title + phase
-  <SplitPanel>
-    <AgentPanel role="proposer" />
-    <AgentPanel role="challenger" />
-  </SplitPanel>
-  <JudgePanel />             -- visible during judge phase
-  <MetricsBar />             -- round/convergence/stance/tokens
-  <CommandStatusLine />      -- mode + pending approval count
-  <CommandInput />           -- user commands
+  <HeaderBar />                -- debate title + phase + agents + topic
+  <ScrollableContent>          -- manages round layout, collapsible rounds, scrolling
+    <SplitPanel>
+      <AgentPanel role="proposer" />
+      <AgentPanel role="challenger" />
+    </SplitPanel>
+    <JudgePanel />             -- visible during/after judge phase
+  </ScrollableContent>
+  <MetricsBar />               -- per-agent tokens/cost + convergence + judge verdict (3-row box)
+  <CommandStatusLine />        -- mode + pending approval count
+  <CommandInput />             -- user commands
 </App>
 ```
 
@@ -821,8 +1027,10 @@ interface PendingApproval {
 - On done: duration + status icon
 - On error: red banner. Warnings: yellow.
 
-**MetricsBar format:**
-`Round 2/10 | Conv: [====------] 35% | P[agree 0.8] <-> C[disagree 0.7] d=0.45 | Concessions: 2 | Judge: P7:C5 | Tokens: 12.4k | $0.23`
+**MetricsBar format** (3-row box):
+- Row 1: `Proposer {tokens}({cost}) | Challenger {tokens}({cost}) | Total: {cost}`
+- Row 2: `Convergence: [====------] 35% | Judge: {decision} ({leading} leads)`
+- Row 3: Status (LIVE/SCROLLED) + scroll position
 
 ### CommandInput Modes
 
@@ -835,6 +1043,8 @@ interface PendingApproval {
 - `/extend <N>` — increase max rounds
 - `/pause` / `/resume` — debate flow control
 - `/stop` — emit `debate.completed(user-interrupt)`
+- `/expand` / `/collapse` — toggle round detail display
+- `/top` / `/bottom` — scroll to top/bottom of output
 
 **Approval mode** (auto-activated when approvals pending):
 
@@ -853,10 +1063,10 @@ interface PendingApproval {
 Output files:
 
 - `events.jsonl` — all events, one JSON per line
-- `index.json` — metadata + byte offsets + segments manifest
-- `meta.json` — config + profile mapping + versions
-- `transcript.md` — human-readable Markdown (via TranscriptWriter)
-- `summary.json` — structured debate summary (generated by SummaryGenerator at debate end)
+- `index.json` — unified metadata: byte offsets, segments manifest, config, profiles, versions (no separate `meta.json`). See [EventStore Resume Support](#eventstore-resume-support) for schema.
+- `transcript.html` — human-readable HTML (via TranscriptWriter, strips [`debate_meta`](#debatemeta-from-debate_meta-tool)/[`judge_verdict`](#judgeverdict-from-judge_verdict-tool) tool blocks)
+- `action-plan.html` — primary deliverable: formatted debate action plan ([Action Plan Synthesis](#action-plan-synthesis))
+- `action-plan.md` — markdown version of the action plan
 
 **Batch flush strategy:**
 
@@ -864,7 +1074,7 @@ Output files:
 - Force sync flush on `turn.completed` or `debate.completed` events
 - Final flush on `close()`
 
-**index.json schema:**
+**index.json schema** (unified — includes both index data and metadata):
 
 ```json
 {
@@ -880,16 +1090,7 @@ Output files:
   "segments": [
     { "file": "events.jsonl", "eventCount": 42 },
     { "file": "events-resumed-1711001000.jsonl", "eventCount": 18 }
-  ]
-}
-```
-
-Byte offsets enable fast seeking for replay jump. Segments manifest tracks multiple JSONL files across resume sessions.
-
-**meta.json schema:**
-
-```json
-{
+  ],
   "config": { "topic": "...", "maxRounds": 10, "...": "..." },
   "profiles": {
     "proposer": "debate_proposer",
@@ -900,6 +1101,8 @@ Byte offsets enable fast seeking for replay jump. Segments manifest tracks multi
 }
 ```
 
+Byte offsets enable fast seeking for replay jump. Segments manifest tracks multiple JSONL files across resume sessions. Resume command reads `config` and `profiles` from `index.json` directly.
+
 ### Replay
 
 ```typescript
@@ -907,10 +1110,10 @@ async function replayDebate(options: {
   eventsPath: string;
   speed?: number; // default 1
   startFromRound?: number; // instant seek via index
-}): Promise<void>;
+}): Promise<TuiStore>;
 ```
 
-Loads events → creates `ScaledClock` + `ReplayEventSource` → starts same `<App>` component. TUI code is identical for live and replay.
+Loads events → creates `ScaledClock` + `ReplayEventSource` → starts same [`<App>` component](#component-tree). TUI code is identical for live and replay.
 
 **Replay timing rules:**
 
@@ -931,7 +1134,7 @@ Loads events → creates `ScaledClock` + `ReplayEventSource` → starts same `<A
 
 ## Layer 4: CLI
 
-**Purpose:** Thin wiring shell — no business logic, just assembly.
+**Purpose:** Thin wiring shell — no business logic, just assembly. Connects [adapters](#layer-1-adapter-layer), [orchestrator](#layer-2-orchestrator), and [TUI](#layer-3-tui) via three factory functions ([Wiring Modules](#wiring-modules)).
 
 **Package:** `cli` (depends on all other packages, Commander.js ^13, gray-matter ^4, Zod ^3.24)
 
@@ -1005,7 +1208,7 @@ crossfire start
 2. If `--judge none`: force `judgeEveryNRounds = 0`, reject `--judge-model`
 3. Load profiles via `loadProfile()`, resolve models + adapter types
 4. Build `DebateConfig`
-5. `mkdirSync(outputDir)`, write `meta.json` with config + profile mapping
+5. `mkdirSync(outputDir)`, write `index.json` with config + profile mapping
 6. `createAdapters(roles, factories)` → `AdapterBundle`
 7. `createBus({ outputDir })` → `BusBundle`
 8. `createTui(bus, headless)` → `TuiBundle | null`
@@ -1017,7 +1220,7 @@ crossfire start
 
 ```
 crossfire resume <output-dir>
-  [--proposer <profile>]     (override, default from meta.json)
+  [--proposer <profile>]     (override, default from index.json)
   [--challenger <profile>]
   [--judge <profile>]
   [--headless]
@@ -1025,11 +1228,11 @@ crossfire resume <output-dir>
 
 **Execution flow:**
 
-1. Read `meta.json` → get config + original role-to-profile mapping
+1. Read `index.json` → get config + original role-to-profile mapping
 2. `EventStore.loadSegments(outputDir)` → concatenate all segment files in order
 3. `projectState(events)` → rebuild `DebateState`
 4. If phase === `"completed"` → print suggestion to use `crossfire replay`, exit 0
-5. Resolve profiles (meta.json base, CLI overrides)
+5. Resolve profiles (index.json base, CLI overrides)
 6. Create new bus + EventStore with `segmentFilename: "events-resumed-{timestamp}.jsonl"`
 7. Feed existing events into bus (for TUI subscribers to catch up)
 8. `runDebate(config, adapters, { bus, resumeFromState: state })`
@@ -1049,7 +1252,7 @@ Loads events, creates `ScaledClock` + `ReplayEventSource`, starts TUI. No adapte
 crossfire status <output-dir> [--json]
 ```
 
-Reads `index.json` + `meta.json`. Displays debate ID, topic, rounds completed/total, event count, duration, termination reason, segment count. `--json` for raw output.
+Reads [`index.json`](#persistence-eventstore) (unified). Displays debate ID, topic, rounds completed/total, event count, duration, termination reason, segment count. `--json` for raw output.
 
 ### Wiring Modules
 
@@ -1105,7 +1308,7 @@ function createTui(bus: DebateEventBus, headless: boolean): TuiBundle | null;
 - **Segment convention:** Each resume creates a new JSONL file (e.g., `events-resumed-1711001000.jsonl`) instead of appending to the original.
 - **`EventStore` constructor** accepts `segmentFilename` param (default: `"events.jsonl"`).
 - **`writeIndex()`** branches by filename: initial write creates fresh `index.json`; resume appends new entry to existing `segments` array.
-- **`writeMeta()`** merges with existing `meta.json` if present (preserves profiles mapping written by CLI).
+- **`writeIndex()`** merges metadata (config, profiles, versions) into `index.json` alongside byte offsets and segments.
 - **`EventStore.loadSegments(dir)`** reads `index.json`, gets `segments` array, loads and concatenates events from all files in order.
 
 ---
@@ -1121,28 +1324,32 @@ DebateEventBus
   │ notifies all subscribers
   ├──▶ TuiStore.handleEvent() → re-render UI
   ├──▶ EventStore.append() → batch flush to JSONL
-  ├──▶ TranscriptWriter.handleEvent() → append to transcript.md
+  ├──▶ TranscriptWriter.handleEvent() → append to transcript.html
+  ├──▶ PlanAccumulator.handleEvent() → local metadata extraction for fallback
   └──▶ Runner reads via bus.snapshot() → DebateDirector.evaluate(state) → DirectorAction
          │ emits OrchestratorEvent (director.action, round.started, judge.started, ...)
          ▼
        (loops back into DebateEventBus)
+
+Post-debate: Runner → synthesis.started → runFinalSynthesis() (isolated session)
+  → action-plan.html + action-plan.md → synthesis.completed
 ```
 
 ---
 
 ## Key Design Decisions
 
-1. **Event sourcing over imperative state** — All state is `projectState(events[])`. No mutable accumulation. Enables replay, resume, and debugging by inspecting the event log.
+1. **Event sourcing over imperative state** — All state is [`projectState(events[])`](#projection). No mutable accumulation. Enables [replay](#replay), [resume](#crossfire-resume), and debugging by inspecting the event log.
 
 2. **Pure core / effectful shell** — `-core` packages have zero I/O. All file/network/process operations live in outer packages. This makes core logic trivially testable.
 
 3. **Capability-gated interfaces** — `approve?` and `interrupt?` are undefined when unsupported, not no-op stubs. TypeScript enforces checking before calling. Contract tests verify capability consistency.
 
-4. **EventSource abstraction** — TUI components don't know live vs replay. Same `<App>` renders both. The clock and source are injected.
+4. **EventSource abstraction** — TUI components don't know live vs replay. Same [`<App>`](#component-tree) renders both. The [clock and source](#unification-eventsource--playbackclock) are injected.
 
-5. **Segment-based resume** — Each resume creates a new JSONL file instead of appending to the original. The index.json `segments` array tracks all files. `loadSegments()` concatenates them in order.
+5. **Segment-based resume** — Each resume creates a new JSONL file instead of appending to the original. The [`index.json`](#persistence-eventstore) `segments` array tracks all files. [`loadSegments()`](#eventstore-resume-support) concatenates them in order.
 
-6. **No facade layer** — CLI directly wires adapters + orchestrator + TUI. Three small factory functions replace what would be a complex DI container.
+6. **No facade layer** — CLI directly wires adapters + orchestrator + TUI. Three small [factory functions](#wiring-modules) replace what would be a complex DI container.
 
 7. **Sequential turn-taking** — One agent speaks at a time. The runner awaits `turn.completed` before proceeding. Simpler than parallel execution, matches debate semantics.
 
@@ -1150,11 +1357,13 @@ DebateEventBus
 
 9. **Graceful degradation** — Judge verdict extraction doesn't crash if the judge skips the tool call. Gemini A→B fallback recovers from resume failures. `closeAll()` uses `Promise.allSettled` to swallow individual cleanup errors.
 
-10. **DebateDirector as pure-logic decision layer** — All "when to do what" logic lives in `DebateDirector` (orchestrator-core), making it testable with crafted state snapshots. Runner is a pure executor. Director evaluates `DebateState → DirectorAction`, with zero I/O. Stagnation detection, degradation treatment (3-layer escalation), adaptive Judge scheduling, and clarification flow are all Director responsibilities.
+10. **DebateDirector as pure-logic decision layer** — All "when to do what" logic lives in [`DebateDirector`](#debatedirector) (orchestrator-core), making it testable with crafted state snapshots. [Runner](#runner) is a pure executor. Director evaluates [`DebateState`](#debatestate) → [`DirectorAction`](#directoraction), with zero I/O. [Stagnation detection](#judge-trigger-strategy-7-sources), [degradation treatment](#repetition-degradation-treatment-2-layers), adaptive Judge scheduling, and [clarification flow](#clarification-flow) are all Director responsibilities.
 
 11. **Mandatory `director.action` events** — Every Director evaluation is persisted as a `director.action` event in JSONL. This provides an audit trail and enables meaningful replay — without it, replay cannot explain why Judge was triggered or why debate ended early.
 
-12. **Bounded session memory (4-layer prompts)** — Prompts are structured into 4 layers with bounded size (~3–5.5K chars), not O(n) full-transcript inclusion. Long-term debate memory is extracted from `DebateState` (structured data), not from raw conversation history. This prevents O(n²) token growth in providers with persistent threads (Codex) and keeps prompt size roughly constant across rounds.
+12. **Bounded session memory ([4-layer prompts](#4-layer-prompt-structure))** — Prompts are structured into 4 layers with bounded size (~3–5.5K chars), not O(n) full-transcript inclusion. Long-term debate memory is extracted from [`DebateState`](#debatestate) (structured data), not from raw conversation history. This prevents O(n²) token growth in providers with persistent threads (Codex) and keeps prompt size roughly constant across rounds. See [Context Builder](#context-builder-bounded-session-memory) for details.
+
+13. **Action plan synthesis via isolated session** — The primary deliverable (`action-plan.html`) is generated by creating a new, isolated adapter session (not reusing the debate session) and sending a single comprehensive prompt with the full debate transcript + judge verdicts. See [Action Plan Synthesis](#action-plan-synthesis) for the full pipeline. This avoids context pollution from the debate thread and keeps the synthesis task self-contained. The adapter is reused (judge or proposer), so synthesis works with Bedrock/Gemini/direct API without extra configuration. [Three-tier quality fallback](#three-quality-tiers) (LLM-full → local-structured → local-degraded) ensures output is always produced. Per-round LLM synthesis was removed in favor of concentrating the LLM budget on one high-quality final call.
 
 ---
 
@@ -1167,8 +1376,8 @@ crossfire/
 │   ├── adapter-claude/      # Claude Agent SDK wrapper
 │   ├── adapter-codex/       # Codex JSON-RPC stdio wrapper
 │   ├── adapter-gemini/      # Gemini subprocess + resume manager
-│   ├── orchestrator-core/   # Pure: types, projection, convergence, meta-tool, context-builder, debate-memory, director/
-│   ├── orchestrator/        # Effects: runner, judge, event-bus, event-store, transcript-writer
+│   ├── orchestrator-core/   # Pure: types, projection, convergence, meta-tool, context-builder, debate-memory, director/, synthesis-prompt, markdown-renderer
+│   ├── orchestrator/        # Effects: runner, judge, event-bus, event-store, transcript-writer, final-synthesis, plan-accumulator
 │   ├── tui/                 # Ink components, TuiStore, EventSource, PlaybackClock, replay
 │   └── cli/                 # Commander.js entry, profile system, wiring factories
 ├── profiles/                # YAML frontmatter debate role profiles
@@ -1187,8 +1396,9 @@ crossfire/
 | Unit        | Pure functions (projection, convergence, event mappers, Zod schemas, prompt builders)                       | Direct assertions, no mocks                                            | Always              |
 | Contract    | Adapter interface compliance (9 categories)                                                                 | Shared `runContractTests()` + `MockAdapterFactory` + `ScenarioFixture` | Always              |
 | Director    | DebateDirector, JudgePolicy, StagnationDetector, DegradationDetector, ClarificationPolicy, SummaryGenerator | Crafted DebateState snapshots, signal detection assertions             | Always              |
+| Synthesis   | Token estimation, prompt building, context overflow, markdown→HTML rendering, fallback template quality      | Direct assertions on pure functions; mock adapter for `runFinalSynthesis` | Always            |
 | TUI         | Store projection, buffer management, component rendering                                                    | Scripted events + `ink-testing-library`                                | Always              |
 | Wiring      | CLI factories (createAdapters, createBus, createTui)                                                        | Mock adapters                                                          | Always              |
 | Integration | Real adapter + orchestrator + Director round-trips                                                          | 9-combo matrix (claude x codex x gemini), headless                     | `RUN_INTEGRATION=1` |
 
-Total: ~336 unit/contract tests + Director tests + 9 integration tests (skipped by default).
+Total: ~567 unit/contract tests + Director tests + integration tests (skipped by default without `RUN_INTEGRATION=1`).
