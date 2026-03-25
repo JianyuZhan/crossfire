@@ -148,3 +148,53 @@ describe("draftToAuditReport", () => {
 		}
 	});
 });
+
+describe("draftToAuditReport — template quality", () => {
+	it("does not use generic 'Define concrete implementation steps' for nextSteps", () => {
+		const plan = emptyPlan();
+		plan.consensus = ["implement caching layer"];
+		plan.arguments["r1-p-0"] = {
+			id: "r1-p-0",
+			text: "implement caching layer",
+			side: "proposer",
+			firstRound: 1,
+			status: "reinforced",
+			challenges: [],
+			relatedIds: [],
+		};
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		for (const item of report.consensusItems) {
+			expect(item.nextSteps).not.toBe("Define concrete implementation steps.");
+		}
+	});
+
+	it("does not use 'Requires further analysis' for risk mitigation", () => {
+		const plan = emptyPlan();
+		plan.risks = [{ risk: "Security risk", severity: "high", round: 1 }];
+		plan.arguments["r1-p-0"] = {
+			id: "r1-p-0",
+			text: "X",
+			side: "proposer",
+			firstRound: 1,
+			status: "active",
+			challenges: [],
+			relatedIds: [],
+		};
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		for (const r of report.riskMatrix) {
+			expect(r.mitigation).not.toBe("Requires further analysis.");
+		}
+	});
+
+	it("does not use generic 'debate participant' for evidence usedBy", () => {
+		const plan = emptyPlan();
+		plan.evidence = [{ claim: "Test", source: "paper.pdf", round: 1 }];
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		for (const ev of report.evidenceRegistry) {
+			expect(ev.usedBy).not.toBe("debate participant");
+		}
+	});
+});

@@ -184,8 +184,10 @@ export function draftToAuditReport(draft: DraftReport): AuditReport {
 		detail:
 			c.challengesSurvived.length > 0
 				? `Survived ${c.challengesSurvived.length} challenge(s): ${c.challengesSurvived.join("; ")}`
-				: "Agreed upon without significant challenge.",
-		nextSteps: "Define concrete implementation steps.",
+				: c.supportingRounds.length > 0
+					? `Discussed in round(s) ${c.supportingRounds.join(", ")}.`
+					: "Agreed upon without significant challenge.",
+		nextSteps: extractActionStep(c.title),
 		supportingEvidence: c.evidence,
 	}));
 
@@ -208,14 +210,15 @@ export function draftToAuditReport(draft: DraftReport): AuditReport {
 	const riskMatrix = draft.risks.map((r) => ({
 		risk: r.risk,
 		severity: r.severity,
-		likelihood: "medium",
-		mitigation: "Requires further analysis.",
+		likelihood:
+			r.severity === "high" ? "high" : r.severity === "low" ? "low" : "medium",
+		mitigation: "Not discussed in debate.",
 	}));
 
 	const evidenceRegistry = draft.evidence.map((e) => ({
 		claim: e.claim,
 		source: e.source,
-		usedBy: "debate participant",
+		usedBy: "unknown",
 		contested: false,
 	}));
 
@@ -227,4 +230,15 @@ export function draftToAuditReport(draft: DraftReport): AuditReport {
 		riskMatrix,
 		evidenceRegistry,
 	};
+}
+
+/** Extract a brief action step from argument text, or return an honest label. */
+function extractActionStep(text: string): string {
+	const verbMatch = text.match(
+		/^(implement|add|create|build|define|remove|migrate|update|refactor|test|deploy|configure|integrate|optimize)/i,
+	);
+	if (verbMatch) {
+		return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+	}
+	return "See consensus detail above.";
 }
