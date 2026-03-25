@@ -5,6 +5,7 @@ export type TriggerJudgeReason =
   | "scheduled"
   | "stagnation"
   | "degradation"
+  | "convergence"
   | "agent-request"
   | "user"
   | "final-review";

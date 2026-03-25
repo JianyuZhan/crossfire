@@ -15,7 +15,6 @@ import {
 	type TerminationReason,
 	buildJudgePrompt,
 	buildTurnPrompt,
-	formatFinalOutcome,
 	generateActionPlanHtmlFallback,
 	generateActionPlanHtmlFromDeepSummary,
 	generateSummary,
@@ -186,6 +185,14 @@ export async function runDebate(
 			});
 
 			if (action.type === "end-debate") break;
+
+			// No judge available — convergence must end the debate directly
+			if (action.type === "trigger-judge" && !adapters.judge) {
+				if (action.reason === "convergence") {
+					action = { type: "end-debate", reason: "convergence" };
+					break;
+				}
+			}
 
 			if (action.type === "trigger-judge" && adapters.judge) {
 				director.recordJudgeIntervention();

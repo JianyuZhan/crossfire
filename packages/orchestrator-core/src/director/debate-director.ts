@@ -27,9 +27,9 @@ export class DebateDirector {
     this.signals = [];
     const candidates: DirectorAction[] = [];
 
-    // 1. Check convergence (highest priority exit)
+    // 1. Check convergence — trigger judge first; only end if judge agrees (or no judge)
     if (state.convergence.converged) {
-      candidates.push({ type: "end-debate", reason: "convergence" });
+      candidates.push({ type: "trigger-judge", reason: "convergence" });
     }
 
     // 2. Detect stagnation
