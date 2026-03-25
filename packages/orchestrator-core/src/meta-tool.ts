@@ -18,6 +18,30 @@ export const DebateMetaSchema = z.object({
 			question: z.string(),
 		})
 		.optional(),
+	// New optional enrichment fields (opportunistic — LLMs may not provide)
+	rebuttals: z
+		.array(z.object({ target: z.string(), response: z.string() }))
+		.optional(),
+	evidence: z
+		.array(z.object({ claim: z.string(), source: z.string() }))
+		.optional(),
+	risk_flags: z
+		.array(
+			z.object({
+				risk: z.string(),
+				severity: z.enum(["low", "medium", "high"]),
+			}),
+		)
+		.optional(),
+	position_shifts: z
+		.array(
+			z.object({
+				from: z.string(),
+				to: z.string(),
+				reason: z.string(),
+			}),
+		)
+		.optional(),
 });
 
 export type DebateMetaInput = z.infer<typeof DebateMetaSchema>;

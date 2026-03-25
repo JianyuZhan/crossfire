@@ -139,6 +139,10 @@ export function projectState(events: AnyEvent[]): DebateState {
 									concessions: parsed.data.concessions,
 									wantsToConclude: parsed.data.wants_to_conclude,
 									requestIntervention: parsed.data.request_intervention,
+									rebuttals: parsed.data.rebuttals,
+									evidence: parsed.data.evidence,
+									riskFlags: parsed.data.risk_flags,
+									positionShifts: parsed.data.position_shifts,
 								};
 							}
 						}
@@ -160,6 +164,10 @@ export function projectState(events: AnyEvent[]): DebateState {
 							concessions: parsed.data.concessions,
 							wantsToConclude: parsed.data.wants_to_conclude,
 							requestIntervention: parsed.data.request_intervention,
+							rebuttals: parsed.data.rebuttals,
+							evidence: parsed.data.evidence,
+							riskFlags: parsed.data.risk_flags,
+							positionShifts: parsed.data.position_shifts,
 						};
 					}
 				}

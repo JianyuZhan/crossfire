@@ -136,3 +136,72 @@ describe("JudgeVerdictSchema extensions", () => {
 		expect(result.data!.clarification_response!.answered).toBe(false);
 	});
 });
+
+describe("DebateMetaSchema extended fields", () => {
+	it("accepts meta with rebuttals", () => {
+		const input = {
+			stance: "agree",
+			confidence: 0.7,
+			key_points: ["p1"],
+			rebuttals: [{ target: "opponent said X", response: "but actually Y" }],
+		};
+		const result = DebateMetaSchema.safeParse(input);
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts meta with evidence", () => {
+		const input = {
+			stance: "agree",
+			confidence: 0.7,
+			key_points: ["p1"],
+			evidence: [{ claim: "X is true", source: "benchmark data" }],
+		};
+		const result = DebateMetaSchema.safeParse(input);
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts meta with risk_flags", () => {
+		const input = {
+			stance: "disagree",
+			confidence: 0.6,
+			key_points: ["p1"],
+			risk_flags: [{ risk: "scalability concern", severity: "high" }],
+		};
+		const result = DebateMetaSchema.safeParse(input);
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts meta with position_shifts", () => {
+		const input = {
+			stance: "neutral",
+			confidence: 0.5,
+			key_points: ["p1"],
+			position_shifts: [
+				{ from: "strongly agree", to: "agree", reason: "valid counterpoint" },
+			],
+		};
+		const result = DebateMetaSchema.safeParse(input);
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts meta without any new fields (backward compat)", () => {
+		const input = {
+			stance: "agree",
+			confidence: 0.8,
+			key_points: ["p1"],
+		};
+		const result = DebateMetaSchema.safeParse(input);
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects invalid severity in risk_flags", () => {
+		const input = {
+			stance: "agree",
+			confidence: 0.7,
+			key_points: ["p1"],
+			risk_flags: [{ risk: "x", severity: "critical" }],
+		};
+		const result = DebateMetaSchema.safeParse(input);
+		expect(result.success).toBe(false);
+	});
+});
