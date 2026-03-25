@@ -130,7 +130,8 @@ export class TuiStore {
 		"judge.started",
 		"judge.completed",
 		"debate.completed",
-		"summary.generating",
+		"synthesis.started",
+		"synthesis.completed",
 		"message.final",
 		"tool.call",
 		"turn.completed",
@@ -773,8 +774,12 @@ export class TuiStore {
 				}
 				break;
 			}
-			case "summary.generating": {
+			case "synthesis.started": {
 				this.state.summaryGenerating = true;
+				break;
+			}
+			case "synthesis.completed": {
+				// summaryGenerating cleared by debate.completed handler
 				break;
 			}
 			case "debate.completed": {

@@ -102,8 +102,14 @@ export interface PromptStatsEvent {
 	timestamp: number;
 }
 
-export interface SummaryGeneratingEvent {
-	kind: "summary.generating";
+export interface SynthesisStartedEvent {
+	kind: "synthesis.started";
+	timestamp: number;
+}
+
+export interface SynthesisCompletedEvent {
+	kind: "synthesis.completed";
+	quality: "llm-full" | "local-structured" | "local-degraded";
 	timestamp: number;
 }
 
@@ -120,4 +126,5 @@ export type OrchestratorEvent =
 	| ClarificationProvidedEvent
 	| DirectorActionEvent
 	| PromptStatsEvent
-	| SummaryGeneratingEvent;
+	| SynthesisStartedEvent
+	| SynthesisCompletedEvent;

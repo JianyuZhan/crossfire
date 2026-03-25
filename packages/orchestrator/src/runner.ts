@@ -359,9 +359,9 @@ export async function runDebate(
 			}
 		}
 
-		// Signal TUI that summary generation is starting (may take ~60s for deep summary)
+		// Signal TUI that synthesis is starting
 		bus.push({
-			kind: "summary.generating",
+			kind: "synthesis.started",
 			timestamp: Date.now(),
 		});
 
