@@ -572,3 +572,14 @@ describe("buildTurnPrompt backward compat", () => {
 		expect(prompt).toContain("debate_meta");
 	});
 });
+
+describe("buildTurnPrompt output instructions", () => {
+	it("includes new enrichment fields in output instructions", () => {
+		const state = makeState({ currentRound: 1 });
+		const prompt = buildTurnPrompt(state, "proposer");
+		expect(prompt).toContain("rebuttals");
+		expect(prompt).toContain("evidence");
+		expect(prompt).toContain("risk_flags");
+		expect(prompt).toContain("position_shifts");
+	});
+});
