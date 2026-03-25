@@ -18,85 +18,14 @@ import type { AdapterFactoryMap } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
 import { createTui } from "../wiring/create-tui.js";
 
-function buildExitSummary(
-	state: {
-		metrics: { currentRound: number; maxRounds: number; debateId?: string };
-		debateState: { phase: string; terminationReason?: string };
-		summary?: {
-			terminationReason: string;
-			roundsCompleted: number;
-			recommendedAction: string | null;
-			outputDir?: string;
-		};
-		judgeResults: Array<{
-			roundNumber: number;
-			verdict?: { shouldContinue: boolean; reasoning: string };
-		}>;
-	},
-	outputDir: string,
-): string {
-	const w = 60;
+function buildExitSummary(outputDir: string): string {
+	const dir = resolve(outputDir);
 	const lines: string[] = [];
 	lines.push("");
-	lines.push(`\u2694  Crossfire — Debate Complete`);
-	lines.push("\u2550".repeat(w));
-
-	// Basic info
-	if (state.metrics.debateId) {
-		lines.push(`  ID:         ${state.metrics.debateId}`);
-	}
 	lines.push(
-		`  Rounds:     ${state.metrics.currentRound}/${state.metrics.maxRounds}`,
+		`Output: ${join(dir, "action-plan.html")} | ${join(dir, "transcript.html")}`,
 	);
-	if (state.summary) {
-		lines.push(`  Terminated: ${state.summary.terminationReason}`);
-	} else {
-		lines.push(`  Phase:      ${state.debateState.phase}`);
-		if (state.debateState.terminationReason) {
-			lines.push(`  Reason:     ${state.debateState.terminationReason}`);
-		}
-	}
-
-	// Last judge decision
-	const lastJudge = [...state.judgeResults].reverse().find((j) => j.verdict);
-	if (lastJudge?.verdict) {
-		const action = lastJudge.verdict.shouldContinue
-			? "Continue debate"
-			: "End debate";
-		lines.push(`  Judge:      ${action} (Round ${lastJudge.roundNumber})`);
-	}
-
-	// Judge reasoning / recommended action
-	if (state.summary?.recommendedAction) {
-		lines.push("");
-		lines.push("  Decision:");
-		// Word-wrap the recommendation at ~w chars with indent
-		const words = state.summary.recommendedAction.split(/\s+/);
-		let line = "    ";
-		for (const word of words) {
-			if (line.length + word.length + 1 > w && line.trim()) {
-				lines.push(line);
-				line = "    " + word;
-			} else {
-				line += (line.trim() ? " " : "") + word;
-			}
-		}
-		if (line.trim()) lines.push(line);
-	}
-
 	lines.push("");
-	lines.push("\u2550".repeat(w));
-
-	// Output files — the main deliverable
-	const dir = resolve(outputDir);
-	lines.push("  Output files:");
-	lines.push(
-		`    \u2022 Action Plan:  file://${join(dir, "action-plan.html")}`,
-	);
-	lines.push(`    \u2022 Transcript:   file://${join(dir, "transcript.html")}`);
-	lines.push(`    \u2022 Full log:     ${dir}`);
-	lines.push("");
-
 	return lines.join("\n");
 }
 
@@ -449,7 +378,7 @@ export const startCommand = new Command("start")
 			} finally {
 				// Capture final state before cleanup
 				const finalSummaryText = tuiBundle
-					? buildExitSummary(tuiBundle.store.getState(), outputDir)
+					? buildExitSummary(outputDir)
 					: undefined;
 				// Cleanup
 				process.off("SIGINT", triggerShutdown);
