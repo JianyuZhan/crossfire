@@ -134,7 +134,7 @@ describe("buildFallbackRoundAnalysis", () => {
 			stance: "agree",
 			confidence: 0.8,
 			keyPoints: ["point A", "point B"],
-			concessions: ["concede C"],
+			concessions: ["concede C for clarity"],
 			riskFlags: [{ risk: "cost risk", severity: "medium" }],
 		};
 		const challengerMeta: DebateMeta = {
@@ -142,6 +142,7 @@ describe("buildFallbackRoundAnalysis", () => {
 			confidence: 0.7,
 			keyPoints: ["counter X"],
 			evidence: [{ claim: "data shows Y", source: "study" }],
+			concessions: ["concede C for clarity as well"],
 		};
 
 		const analysis = buildFallbackRoundAnalysis(
@@ -153,7 +154,7 @@ describe("buildFallbackRoundAnalysis", () => {
 		expect(analysis.newArguments).toHaveLength(3); // 2 proposer + 1 challenger
 		expect(analysis.risksIdentified).toHaveLength(1);
 		expect(analysis.evidenceCited).toHaveLength(1);
-		expect(analysis.newConsensus).toContain("concede C");
+		expect(analysis.newConsensus.length).toBeGreaterThan(0);
 	});
 
 	it("handles missing optional fields gracefully", () => {
@@ -199,5 +200,95 @@ describe("replayPlan", () => {
 		// Reverse order (simulating out-of-order async arrival)
 		const planB = replayPlan([r2, r1]);
 		expect(planA).toEqual(planB);
+	});
+});
+
+describe("buildFallbackRoundAnalysis — divergence", () => {
+	it("produces newDivergence when both sides disagree", () => {
+		const proposerMeta: DebateMeta = {
+			stance: "disagree",
+			confidence: 0.8,
+			keyPoints: ["proposer argues X"],
+			concessions: [],
+		};
+		const challengerMeta: DebateMeta = {
+			stance: "strongly_disagree",
+			confidence: 0.9,
+			keyPoints: ["challenger argues Y"],
+			concessions: [],
+		};
+		const analysis = buildFallbackRoundAnalysis(
+			1,
+			proposerMeta,
+			challengerMeta,
+		);
+		expect(analysis.newDivergence.length).toBeGreaterThan(0);
+	});
+
+	it("produces no divergence when one side agrees", () => {
+		const proposerMeta: DebateMeta = {
+			stance: "agree",
+			confidence: 0.8,
+			keyPoints: ["proposer agrees with X"],
+			concessions: [],
+		};
+		const challengerMeta: DebateMeta = {
+			stance: "disagree",
+			confidence: 0.7,
+			keyPoints: ["challenger disagrees on Y"],
+			concessions: [],
+		};
+		const analysis = buildFallbackRoundAnalysis(
+			1,
+			proposerMeta,
+			challengerMeta,
+		);
+		expect(analysis.newDivergence).toHaveLength(0);
+	});
+
+	it("only counts mutual concessions as consensus (first-20-char match)", () => {
+		const proposerMeta: DebateMeta = {
+			stance: "agree",
+			confidence: 0.8,
+			keyPoints: [],
+			concessions: ["we should use TypeScript for the backend implementation"],
+		};
+		const challengerMeta: DebateMeta = {
+			stance: "agree",
+			confidence: 0.7,
+			keyPoints: [],
+			concessions: [
+				"we should use TypeScript for the backend implementation indeed",
+			],
+		};
+		const analysis = buildFallbackRoundAnalysis(
+			1,
+			proposerMeta,
+			challengerMeta,
+		);
+		expect(analysis.newConsensus.length).toBeGreaterThan(0);
+	});
+
+	it("treats single-side concessions as separate, not consensus", () => {
+		const proposerMeta: DebateMeta = {
+			stance: "agree",
+			confidence: 0.8,
+			keyPoints: [],
+			concessions: ["I concede point A about testing"],
+		};
+		const challengerMeta: DebateMeta = {
+			stance: "disagree",
+			confidence: 0.7,
+			keyPoints: [],
+			concessions: [],
+		};
+		const analysis = buildFallbackRoundAnalysis(
+			1,
+			proposerMeta,
+			challengerMeta,
+		);
+		expect(analysis.newConsensus).not.toContain(
+			"I concede point A about testing",
+		);
 	});
 });

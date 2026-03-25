@@ -210,7 +210,6 @@ export function buildFallbackRoundAnalysis(
 	const newArguments: RoundAnalysis["newArguments"] = [];
 	const risksIdentified: RoundAnalysis["risksIdentified"] = [];
 	const evidenceCited: RoundAnalysis["evidenceCited"] = [];
-	const newConsensus: string[] = [];
 
 	if (proposerMeta) {
 		for (const kp of proposerMeta.keyPoints) {
@@ -225,9 +224,6 @@ export function buildFallbackRoundAnalysis(
 		}
 		for (const e of proposerMeta.evidence ?? []) {
 			evidenceCited.push({ ...e, side: "proposer" });
-		}
-		for (const c of proposerMeta.concessions ?? []) {
-			newConsensus.push(c);
 		}
 	}
 
@@ -245,8 +241,53 @@ export function buildFallbackRoundAnalysis(
 		for (const e of challengerMeta.evidence ?? []) {
 			evidenceCited.push({ ...e, side: "challenger" });
 		}
-		for (const c of challengerMeta.concessions ?? []) {
-			newConsensus.push(c);
+	}
+
+	// Consensus: only mutual concessions (both sides concede overlapping points)
+	const proposerConcessions = proposerMeta?.concessions ?? [];
+	const challengerConcessions = challengerMeta?.concessions ?? [];
+	const newConsensus: string[] = [];
+
+	const normalize = (s: string) => s.toLowerCase().trim().slice(0, 20);
+	const challengerNorms = challengerConcessions.map(normalize);
+	const proposerNorms = proposerConcessions.map(normalize);
+
+	for (const pc of proposerConcessions) {
+		if (challengerNorms.some((cn) => cn === normalize(pc))) {
+			newConsensus.push(pc);
+		}
+	}
+	for (const cc of challengerConcessions) {
+		if (
+			proposerNorms.some((pn) => pn === normalize(cc)) &&
+			!newConsensus.some((c) => normalize(c) === normalize(cc))
+		) {
+			newConsensus.push(cc);
+		}
+	}
+
+	// Divergence: when both sides have disagree/strongly_disagree stance
+	const disagreeStances = new Set(["disagree", "strongly_disagree"]);
+	const newDivergence: string[] = [];
+	if (
+		proposerMeta &&
+		challengerMeta &&
+		disagreeStances.has(proposerMeta.stance) &&
+		disagreeStances.has(challengerMeta.stance)
+	) {
+		const consensusNorms = new Set(newConsensus.map(normalize));
+		for (const kp of proposerMeta.keyPoints) {
+			if (!consensusNorms.has(normalize(kp))) {
+				newDivergence.push(kp);
+			}
+		}
+		for (const kp of challengerMeta.keyPoints) {
+			if (
+				!consensusNorms.has(normalize(kp)) &&
+				!newDivergence.some((d) => normalize(d) === normalize(kp))
+			) {
+				newDivergence.push(kp);
+			}
 		}
 	}
 
@@ -272,7 +313,7 @@ export function buildFallbackRoundAnalysis(
 		risksIdentified,
 		evidenceCited,
 		newConsensus: dedup(newConsensus),
-		newDivergence: [],
+		newDivergence: dedup(newDivergence),
 		roundSummary,
 	};
 }
