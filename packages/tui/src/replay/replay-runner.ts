@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { AnyEvent } from "@crossfire/orchestrator-core";
 import { TuiStore } from "../state/tui-store.js";
 import { ReplayEventSource } from "./event-source.js";
+import { parseJsonlEvents } from "./parse-events.js";
 import { ScaledClock } from "./playback-clock.js";
 
 export interface ReplayOptions {
@@ -29,11 +29,7 @@ export async function replayDebate(options: ReplayOptions): Promise<TuiStore> {
 
 		if (replayStartIndex > 0) {
 			const content = readFileSync(eventsPath, "utf-8");
-			const allEvents: AnyEvent[] = content
-				.trim()
-				.split("\n")
-				.filter((l) => l.length > 0)
-				.map((l) => JSON.parse(l) as AnyEvent);
+			const allEvents = parseJsonlEvents(content);
 			for (let i = 0; i < replayStartIndex && i < allEvents.length; i++) {
 				store.handleEvent(allEvents[i]);
 			}

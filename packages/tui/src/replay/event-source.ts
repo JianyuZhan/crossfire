@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { AnyEvent } from "@crossfire/orchestrator-core";
+import { parseJsonlEvents } from "./parse-events.js";
 import type { PlaybackClock } from "./playback-clock.js";
 
 export interface EventSource {
@@ -54,11 +55,7 @@ export class ReplayEventSource implements EventSource {
 
 	async start(): Promise<void> {
 		const content = readFileSync(this.eventsPath, "utf-8");
-		const events: AnyEvent[] = content
-			.trim()
-			.split("\n")
-			.filter((l) => l.length > 0)
-			.map((l) => JSON.parse(l) as AnyEvent);
+		const events = parseJsonlEvents(content);
 
 		let prevTimestamp: number | undefined;
 

@@ -11,27 +11,7 @@ import type { AdapterCapabilities } from "@crossfire/adapter-core";
 import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
 import { mapSdkMessage } from "./event-mapper.js";
 import { buildHooks } from "./hooks.js";
-
-/** Loose type for SDK messages — we only parse fields we need */
-export interface SdkMessage {
-	type: string;
-	[key: string]: unknown;
-}
-
-/** Result returned by the query function */
-export interface QueryResult {
-	messages: AsyncGenerator<SdkMessage, void, unknown>;
-	interrupt: () => void;
-}
-
-/** Dependency-injected query function signature */
-export type QueryFn = (options: {
-	prompt: string;
-	resume?: string;
-	model?: string;
-	canUseTool?: (tool: unknown) => Promise<unknown>;
-	hooks?: unknown;
-}) => QueryResult;
+import type { QueryFn, QueryResult, SdkMessage } from "./types.js";
 
 /** Options for constructing a ClaudeAdapter */
 export interface ClaudeAdapterOptions {

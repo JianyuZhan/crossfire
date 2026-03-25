@@ -3,7 +3,10 @@ import type {
 	NormalizedEvent,
 	SessionHandle,
 } from "@crossfire/adapter-core";
-import { JudgeVerdictSchema } from "@crossfire/orchestrator-core";
+import {
+	JudgeVerdictSchema,
+	extractFencedJson,
+} from "@crossfire/orchestrator-core";
 import type {
 	AnyEvent,
 	DeepSummary,
@@ -15,23 +18,6 @@ export interface JudgeTurnInput {
 	turnId: string;
 	prompt: string;
 	roundNumber: number;
-}
-
-/**
- * Extract JSON from a fenced code block with a specific label.
- * Supports ```label\n{...}\n``` pattern.
- */
-function extractFencedJson(text: string, label: string): unknown | undefined {
-	const pattern = new RegExp("```" + label + "\\s*\\n([\\s\\S]*?)\\n\\s*```");
-	const match = text.match(pattern);
-	if (match) {
-		try {
-			return JSON.parse(match[1].trim());
-		} catch {
-			return undefined;
-		}
-	}
-	return undefined;
 }
 
 /**

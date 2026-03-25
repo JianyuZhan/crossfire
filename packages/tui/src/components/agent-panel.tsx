@@ -1,6 +1,12 @@
 import { Box, Text } from "ink";
 import type React from "react";
-import { stripInternalToolBlocks } from "../state/tui-store.js";
+import {
+	ROLE_COLORS,
+	STATUS_ICONS,
+	formatDuration,
+	roleLabel,
+} from "../constants.js";
+import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type {
 	AgentTurnSnapshot,
 	LiveAgentPanelState,
@@ -34,33 +40,8 @@ export type AgentPanelProps =
 	| SnapshotPanelProps
 	| IdlePanelProps;
 
-function roleLabel(role: AgentRole): string {
-	return role === "proposer" ? "Proposer" : "Challenger";
-}
-
-function roleColor(role: AgentRole): string {
-	return role === "proposer" ? "green" : "red";
-}
-
 function agentSuffix(agentType?: string): string {
 	return agentType ? ` [${agentType}]` : "";
-}
-
-function statusIcon(status: LiveAgentPanelState["status"]): string {
-	switch (status) {
-		case "idle":
-			return "○";
-		case "thinking":
-			return "◐";
-		case "tool":
-			return "⚙";
-		case "speaking":
-			return "◉";
-		case "done":
-			return "✓";
-		case "error":
-			return "✗";
-	}
 }
 
 function statusText(state: LiveAgentPanelState): string {
@@ -77,7 +58,7 @@ function statusText(state: LiveAgentPanelState): string {
 			return "Responding...";
 		case "done":
 			return state.turnDurationMs !== undefined
-				? `Done (${(state.turnDurationMs / 1000).toFixed(1)}s)`
+				? `Done (${formatDuration(state.turnDurationMs)})`
 				: "Done";
 		case "error":
 			return "Error";
@@ -110,7 +91,7 @@ function ToolList({ tools }: { tools: LiveToolEntry[] }): React.ReactElement {
 
 export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 	const label = roleLabel(props.role);
-	const color = roleColor(props.role);
+	const color = ROLE_COLORS[props.role] ?? "white";
 	const agent = agentSuffix(props.agentType);
 
 	if (props.mode === "idle") {
@@ -128,7 +109,7 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 	if (props.mode === "snapshot") {
 		const { snapshot } = props;
 		const duration = snapshot.turnDurationMs
-			? ` (${(snapshot.turnDurationMs / 1000).toFixed(1)}s)`
+			? ` (${formatDuration(snapshot.turnDurationMs)})`
 			: "";
 		return (
 			<Box flexDirection="column" paddingX={1}>
@@ -167,7 +148,7 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 		<Box flexDirection="column" paddingX={1}>
 			<Box>
 				<Text bold color={color}>
-					{statusIcon(state.status)} {label}
+					{STATUS_ICONS[state.status] ?? "○"} {label}
 					<Text dimColor>{agent}</Text>
 				</Text>
 				<Text> </Text>

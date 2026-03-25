@@ -7,11 +7,7 @@ interface MapContext {
 	turnId: string;
 }
 
-// Loose type for SDK messages — we only parse fields we need
-interface SdkMessage {
-	type: string;
-	[key: string]: unknown;
-}
+import type { SdkMessage } from "./types.js";
 
 /**
  * Extract text content from an assistant message.

@@ -3,6 +3,8 @@ import {
 	type DebateState,
 	projectState,
 } from "@crossfire/orchestrator-core";
+import { populateChunkLines, rebuildChunks } from "../render/chunk-builder.js";
+import { buildGlobalLineBuffer } from "../render/line-buffer.js";
 import { stripInternalToolBlocks } from "./strip-internal.js";
 import type {
 	AgentTurnSnapshot,
@@ -19,9 +21,6 @@ import type {
 	TuiState,
 	ViewportState,
 } from "./types.js";
-export { stripInternalToolBlocks } from "./strip-internal.js";
-import { populateChunkLines, rebuildChunks } from "../render/chunk-builder.js";
-import { buildGlobalLineBuffer } from "../render/line-buffer.js";
 
 const MAX_THINKING_BYTES = 4096;
 

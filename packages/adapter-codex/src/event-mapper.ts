@@ -9,10 +9,6 @@ export interface MapContext {
 /** Known meta-tool names that map to structured tool calls */
 const META_TOOLS = new Set(["debate_meta", "judge_verdict"]);
 
-/**
- * Detect if a shell command is actually a meta-tool invocation.
- * Returns the tool name if found, null otherwise.
- */
 function detectMetaTool(command: string): string | null {
 	for (const tool of META_TOOLS) {
 		if (command.includes(tool)) return tool;
