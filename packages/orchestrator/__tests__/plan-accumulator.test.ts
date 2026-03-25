@@ -1,16 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { DebateEventBus } from "../src/event-bus.js";
 import { PlanAccumulator } from "../src/plan-accumulator.js";
-import type { SynthesizerConfig } from "../src/round-synthesizer.js";
 
 /** Wait for queued microtasks (processRound is deferred via queueMicrotask) */
 const tick = () => new Promise<void>((r) => queueMicrotask(r));
-
-const disabledConfig: SynthesizerConfig = {
-	enabled: false,
-	timeoutMs: 5000,
-	flushTimeoutMs: 5000,
-};
 
 function pushRound(bus: DebateEventBus, round: number): void {
 	bus.push({
@@ -108,7 +101,7 @@ function pushRound(bus: DebateEventBus, round: number): void {
 describe("PlanAccumulator", () => {
 	it("builds EvolvingPlan from debate_meta on round.completed", async () => {
 		const bus = new DebateEventBus();
-		const acc = new PlanAccumulator(disabledConfig);
+		const acc = new PlanAccumulator();
 		const unsub = acc.subscribe(bus);
 
 		bus.push({
@@ -132,7 +125,7 @@ describe("PlanAccumulator", () => {
 
 	it("incorporates judge verdicts", () => {
 		const bus = new DebateEventBus();
-		const acc = new PlanAccumulator(disabledConfig);
+		const acc = new PlanAccumulator();
 		const unsub = acc.subscribe(bus);
 
 		bus.push({
@@ -166,7 +159,7 @@ describe("PlanAccumulator", () => {
 
 	it("flush resolves immediately when no async tasks", async () => {
 		const bus = new DebateEventBus();
-		const acc = new PlanAccumulator(disabledConfig);
+		const acc = new PlanAccumulator();
 		const unsub = acc.subscribe(bus);
 
 		bus.push({
@@ -187,7 +180,7 @@ describe("PlanAccumulator", () => {
 
 	it("freezes plan after flush — subsequent updates ignored", async () => {
 		const bus = new DebateEventBus();
-		const acc = new PlanAccumulator(disabledConfig);
+		const acc = new PlanAccumulator();
 		const unsub = acc.subscribe(bus);
 
 		bus.push({
@@ -213,9 +206,9 @@ describe("PlanAccumulator", () => {
 		unsub();
 	});
 
-	it("tracks degraded rounds when synthesizer is disabled", async () => {
+	it("marks all rounds as degraded in local-only mode", async () => {
 		const bus = new DebateEventBus();
-		const acc = new PlanAccumulator(disabledConfig);
+		const acc = new PlanAccumulator();
 		const unsub = acc.subscribe(bus);
 
 		bus.push({

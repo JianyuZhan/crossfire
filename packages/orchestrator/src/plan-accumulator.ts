@@ -2,33 +2,18 @@ import {
 	type AnyEvent,
 	type EvolvingPlan,
 	type JudgeVerdict,
-	type RoundAnalysis,
 	buildFallbackRoundAnalysis,
 	emptyPlan,
 	projectState,
-	replayPlan,
 	updatePlan,
 	updatePlanWithJudge,
 } from "@crossfire/orchestrator-core";
 import type { DebateEventBus } from "./event-bus.js";
-import {
-	type SynthesizerConfig,
-	buildRoundSynthesisPrompt,
-	callSynthesizerLLM,
-	parseRoundAnalysisResponse,
-} from "./round-synthesizer.js";
 
 export class PlanAccumulator {
-	private config: SynthesizerConfig;
 	private plan: EvolvingPlan = emptyPlan();
-	private roundAnalyses: Map<number, RoundAnalysis> = new Map();
 	private frozen = false;
-	private inflightTasks: Map<number, Promise<void>> = new Map();
 	private events: AnyEvent[] = [];
-
-	constructor(config: SynthesizerConfig) {
-		this.config = config;
-	}
 
 	subscribe(bus: DebateEventBus): () => void {
 		return bus.subscribe((event: AnyEvent) => {
@@ -44,14 +29,7 @@ export class PlanAccumulator {
 
 	async flush(): Promise<void> {
 		if (this.frozen) return;
-		const timeout = this.config.flushTimeoutMs ?? 15000;
-		const pending = [...this.inflightTasks.values()];
-		if (pending.length > 0) {
-			await Promise.race([
-				Promise.allSettled(pending),
-				new Promise<void>((r) => setTimeout(r, timeout)),
-			]);
-		}
+		await new Promise<void>((r) => queueMicrotask(r));
 		this.frozen = true;
 	}
 
@@ -59,7 +37,6 @@ export class PlanAccumulator {
 		if (event.kind === "round.completed") {
 			const e = event as { roundNumber: number; speaker: string };
 			if (e.speaker === "challenger") {
-				// Defer heavy work (projectState replay + LLM call) to avoid blocking the event loop
 				queueMicrotask(() => {
 					if (!this.frozen) this.processRound(e.roundNumber);
 				});
@@ -88,61 +65,10 @@ export class PlanAccumulator {
 			proposerTurn?.meta,
 			challengerTurn?.meta,
 		);
-		this.roundAnalyses.set(roundNumber, fallback);
 		this.plan = updatePlan(this.plan, fallback);
 		this.plan = {
 			...this.plan,
 			degradedRounds: [...this.plan.degradedRounds, roundNumber],
 		};
-
-		if (this.config.enabled && this.config.apiKey) {
-			const task = this.runAsyncSynthesis(
-				roundNumber,
-				proposerTurn?.content ?? "",
-				challengerTurn?.content ?? "",
-			);
-			this.inflightTasks.set(roundNumber, task);
-		}
-	}
-
-	private async runAsyncSynthesis(
-		roundNumber: number,
-		proposerText: string,
-		challengerText: string,
-	): Promise<void> {
-		try {
-			const prevAnalysis = this.roundAnalyses.get(roundNumber - 1);
-			const prompt = buildRoundSynthesisPrompt({
-				roundNumber,
-				proposerText,
-				challengerText,
-				previousRoundSummary: prevAnalysis?.roundSummary,
-				planSnapshot: {
-					consensus: this.plan.consensus,
-					unresolved: this.plan.unresolved,
-				},
-			});
-
-			const response = await callSynthesizerLLM(prompt, this.config);
-
-			if (this.frozen || !response) return;
-
-			const analysis = parseRoundAnalysisResponse(response, roundNumber);
-			if (!analysis) return;
-
-			this.roundAnalyses.set(roundNumber, analysis);
-			const allAnalyses = [...this.roundAnalyses.values()];
-			this.plan = replayPlan(allAnalyses, this.plan.judgeNotes);
-			this.plan = {
-				...this.plan,
-				degradedRounds: this.plan.degradedRounds.filter(
-					(r) => r !== roundNumber,
-				),
-			};
-		} catch {
-			// Non-fatal — fallback stands
-		} finally {
-			this.inflightTasks.delete(roundNumber);
-		}
 	}
 }
