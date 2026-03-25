@@ -1,4 +1,5 @@
 <p align="center">
+  <img src="assets/logo.png" alt="Crossfire Logo" width="600">
   <h1 align="center">Crossfire</h1>
   <p align="center">
     <strong>AI 对抗辩论引擎</strong> — 让两个 AI 智能体进行结构化辩论，辅助更优决策。

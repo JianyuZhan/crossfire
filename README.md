@@ -1,4 +1,5 @@
 <p align="center">
+  <img src="assets/logo.png" alt="Crossfire Logo" width="600">
   <h1 align="center">Crossfire</h1>
   <p align="center">
     <strong>AI Adversarial Debate Engine</strong> — Pit two AI agents against each other in structured debates for better decisions.
