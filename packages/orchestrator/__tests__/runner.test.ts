@@ -26,7 +26,18 @@ function createScriptedAdapter(
 			};
 		},
 		async sendTurn(_handle: SessionHandle, input: TurnInput) {
-			const eventsForTurn = scripts[input.turnId] ?? [];
+			const eventsForTurn = scripts[input.turnId] ?? [
+				// Unknown turnIds still complete immediately (prevents hangs in summary generation etc.)
+				{
+					kind: "turn.completed" as const,
+					status: "completed" as const,
+					durationMs: 0,
+					timestamp: Date.now(),
+					adapterId: id,
+					adapterSessionId: sessionId,
+					turnId: input.turnId,
+				},
+			];
 			setTimeout(() => {
 				for (const e of eventsForTurn) {
 					for (const l of listeners) l(e);
@@ -196,10 +207,7 @@ describe("runDebate", () => {
 			}),
 		});
 
-		const judge = createScriptedAdapter("claude", {
-			"j-final": judgeTurnEvents("j-final", "claude", "claude-s1"),
-		});
-
+		// No judge — convergence terminates directly when judge unavailable
 		const adapters: AdapterMap = {
 			proposer: {
 				adapter: proposer,
@@ -211,13 +219,6 @@ describe("runDebate", () => {
 			challenger: {
 				adapter: challenger,
 				session: await challenger.startSession({
-					profile: "test",
-					workingDirectory: "/tmp",
-				}),
-			},
-			judge: {
-				adapter: judge,
-				session: await judge.startSession({
 					profile: "test",
 					workingDirectory: "/tmp",
 				}),

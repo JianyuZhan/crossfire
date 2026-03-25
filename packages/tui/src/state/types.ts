@@ -139,6 +139,7 @@ export interface TuiState {
 	metrics: MetricsState;
 	command: CommandState;
 	debateState: DebateState;
+	summaryGenerating?: boolean;
 	summary?: DebateSummaryView;
 }
 

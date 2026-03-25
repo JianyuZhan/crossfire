@@ -337,6 +337,12 @@ export async function runDebate(
 			}
 		}
 
+		// Signal TUI that summary generation is starting (may take ~60s for deep summary)
+		bus.push({
+			kind: "summary.generating",
+			timestamp: Date.now(),
+		});
+
 		// Generate summary before debate.completed
 		const preCompleteState = bus.snapshot();
 		const summary = generateSummary(
@@ -345,16 +351,6 @@ export async function runDebate(
 			terminationReason,
 		);
 		if (options?.outputDir) {
-			// summary.json (kept)
-			try {
-				writeFileSync(
-					join(options.outputDir, "summary.json"),
-					JSON.stringify(summary, null, 2) + "\n",
-				);
-			} catch {
-				/* non-fatal */
-			}
-
 			// action-plan.html — try deep summary from judge, fallback to basic
 			try {
 				let actionPlanHtml: string;
@@ -419,7 +415,7 @@ function buildSummarizationPrompt(state: DebateState): string {
 		.map((t) => `[Round ${t.roundNumber} - ${t.role}]\n${t.content}`)
 		.join("\n\n");
 
-	return `You are the judge of a multi-round debate. Based on the full transcript below, produce a deep summary.
+	return `You are synthesizing the results of a multi-round structured review into an actionable plan. Your job is to extract maximum practical value from the exchange — focus on what was established, what remains uncertain, and what to do next.
 
 Topic: ${state.config.topic}
 Rounds: ${state.currentRound}
@@ -428,16 +424,16 @@ ${transcript}
 
 Output the following sections in the same language as the topic:
 
-1. **Consensus — Detailed Action Plan**: For each point both sides agreed on:
-   - title: the consensus point
-   - detail: detailed explanation of what was agreed
+1. **Consensus — Detailed Action Plan**: For each point the review process established as sound:
+   - title: the agreed-upon conclusion
+   - detail: what was established and why it withstood scrutiny
    - nextSteps: concrete next steps or implementation approach
 
-2. **Unresolved Issues & Risks**: For each disputed/unexplored point:
+2. **Unresolved Issues & Risks**: For each point that needs further investigation or carries significant risk:
    - title: the issue
-   - proposerPosition: proposer's stance
-   - challengerPosition: challenger's stance
-   - risk: potential risks if not addressed
+   - proposerPosition: how the proposer addressed it
+   - challengerPosition: why the challenger found it insufficient
+   - risk: potential consequences if not resolved before execution
 
 Format your response as JSON:
 \`\`\`json

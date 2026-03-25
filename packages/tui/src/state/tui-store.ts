@@ -131,6 +131,7 @@ export class TuiStore {
 		"judge.started",
 		"judge.completed",
 		"debate.completed",
+		"summary.generating",
 		"message.final",
 		"tool.call",
 		"turn.completed",
@@ -241,7 +242,7 @@ export class TuiStore {
 	scrollToBottom(): void {
 		this.viewport.scrollOffset = 0;
 		this.viewport.autoFollow = true;
-		for (const cb of this.listeners) cb();
+		this.forceFlush();
 	}
 
 	jumpToRound(roundNumber: number): void {
@@ -324,6 +325,18 @@ export class TuiStore {
 			return;
 		}
 		this.dirty = false;
+
+		// When user is manually scrolled (autoFollow off), preserve absolute
+		// position in the content so the view doesn't drift as new lines arrive.
+		const prevTotal = this.globalLines.length;
+		const wasFollowing = this.viewport.autoFollow;
+		const absoluteTop = wasFollowing
+			? undefined
+			: Math.max(
+					0,
+					prevTotal - this.viewport.scrollOffset - this.viewport.viewportHeight,
+				);
+
 		const panelWidth = Math.floor((this.viewport.contentWidth - 3) / 2);
 		this.chunks = rebuildChunks(this.state);
 		populateChunkLines(this.chunks, panelWidth);
@@ -370,6 +383,12 @@ export class TuiStore {
 
 		if (this.viewport.autoFollow) {
 			this.scrollToActiveContent();
+		} else if (absoluteTop !== undefined) {
+			// Restore absolute position: convert absolute top-line back to offset-from-bottom
+			this.viewport.scrollOffset = Math.max(
+				0,
+				this.globalLines.length - absoluteTop - this.viewport.viewportHeight,
+			);
 		}
 		const maxOffset = Math.max(
 			0,
@@ -401,14 +420,20 @@ export class TuiStore {
 				this.activeSpeaker === "challenger"
 					? activeChunk.rightLines
 					: activeChunk.leftLines;
+			const startLine = activeChunk.layoutMeta.startLine;
 			// Active content ends at: roundStart + 1 (top border) + activeLines.length
-			const activeContentEnd =
-				activeChunk.layoutMeta.startLine + 1 + Math.max(1, activeLines.length);
-			// scrollOffset is from bottom: offset = totalLines - desiredEndLine
-			this.viewport.scrollOffset = Math.max(
-				0,
-				this.globalLines.length - activeContentEnd,
-			);
+			const activeContentEnd = startLine + 1 + Math.max(1, activeLines.length);
+			const total = this.globalLines.length;
+			const vh = this.viewport.viewportHeight;
+
+			// headerAtTop: round header pinned to viewport top — best for short content
+			const headerAtTop = Math.max(0, total - startLine - vh);
+			// contentAtBottom: active speaker's latest line at viewport bottom — best for long content
+			const contentAtBottom = Math.max(0, total - activeContentEnd);
+
+			// When active content < viewport, headerAtTop is smaller (round visible from top).
+			// When active content > viewport, contentAtBottom is smaller (follow latest line).
+			this.viewport.scrollOffset = Math.min(headerAtTop, contentAtBottom);
 		} else {
 			// No active round (judge, summary, between rounds) → bottom
 			this.viewport.scrollOffset = 0;
@@ -749,8 +774,13 @@ export class TuiStore {
 				}
 				break;
 			}
+			case "summary.generating": {
+				this.state.summaryGenerating = true;
+				break;
+			}
 			case "debate.completed": {
 				// Keep judge panel visible on debate end (user wants to read it)
+				this.state.summaryGenerating = false;
 				const e = event as {
 					summary?: Record<string, unknown>;
 					outputDir?: string;
