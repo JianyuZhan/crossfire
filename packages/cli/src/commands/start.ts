@@ -304,10 +304,11 @@ export const startCommand = new Command("start")
 					console.log(`Output saved to: ${outputDir}`);
 				}
 			} finally {
-				// Capture final state before cleanup
-				const finalSummaryText = tuiBundle
-					? buildExitSummary(outputDir)
-					: undefined;
+				// Capture final state before cleanup (skip if interrupted)
+				const finalSummaryText =
+					tuiBundle && !abortController.signal.aborted
+						? buildExitSummary(outputDir)
+						: undefined;
 				// Cleanup
 				process.off("SIGINT", triggerShutdown);
 				tuiBundle?.store.dispose();
