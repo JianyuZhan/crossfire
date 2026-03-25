@@ -108,31 +108,12 @@ crossfire start \
 
 ## 终端 UI
 
-终端 UI 提供实时分屏辩论视图：
+终端 UI 是基于 Ink（CLI 的 React）的全屏应用，由四个垂直区域组成：
 
-```
-┌─ StatusBar ──────────────────────────────────────────────────┐
-│ Crossfire — Round 3/10 — proposer-turn                       │
-├──────────────────────────────┬───────────────────────────────┤
-│  Proposer (claude)           │  Challenger (codex)            │
-│  ◉ Speaking...               │  ○ Idle                        │
-│                              │                               │
-│  [thinking...]               │  Last response:               │
-│  The key advantage of...     │  While caching improves...    │
-│                              │                               │
-│  ▸ Read(src/cache.ts) ✓     │                               │
-│  ▸ Grep("TTL") running...   │                               │
-├──────────────────────────────┴───────────────────────────────┤
-│ Round 2/10 │ Conv: [====------] 35% │ P[agree 0.8] ↔        │
-│ C[disagree 0.7] d=0.45 │ Judge: P7:C5 │ Tokens: 12.4k      │
-├──────────────────────────────────────────────────────────────┤
-│ > /                                                          │
-└──────────────────────────────────────────────────────────────┘
-```
-
-- **智能体面板** — 实时展示思考（灰色）、工具调用和消息输出
-- **指标栏** — 收敛进度、立场追踪、裁判评分、token 用量
-- **命令输入** — 根据上下文自动切换模式（正常 / 审批 / 回放）
+- **顶部栏** — 居中品牌标识、辩论 ID、轮次/阶段、提议者与挑战者的智能体信息、辩论主题
+- **可滚动内容区** — 按轮次展示智能体消息、思考过程和工具调用。支持方向键、`Ctrl+U`/`Ctrl+D`、`Home`/`End` 滚动
+- **指标栏** — 各智能体 token 用量与费用、收敛进度条与百分比、裁判判定、滚动状态（LIVE / SCROLLED）
+- **命令输入** — 根据上下文自动切换提示符（`>`、`approval>`、`replay>`），用于运行时命令
 
 使用 `--headless` 跳过 UI。事件仍会持久化，可随后回放。
 
@@ -191,33 +172,60 @@ crossfire start \
 显示辩论状态摘要。加 `--json` 输出机器可读格式。
 
 ```
-Debate: d-20260321-143022
-Topic:  Should we adopt microservices?
-Rounds: 8/10
-Events: 4523
-Duration: 127.3s
-Ended:  convergence
-Segments: 1
+Debate Status
+=============
+
+Debate ID: d-20260321-143022
+Topic: Should we adopt microservices?
+Started: 2026-03-21T14:30:22.000Z
+Ended: 2026-03-21T14:32:29.300Z
+Duration: 2m 7s
+
+Total Rounds: 8
+Total Events: 4523
+Termination Reason: convergence
+
+Profiles:
+  Proposer: proposer (claude_code)
+    Model: claude-sonnet-4-20250514
+  Challenger: challenger (codex)
+    Model: o3-mini
+  Judge: judge (claude_code)
+    Model: claude-sonnet-4-20250514
+
+Configuration:
+  Max Rounds: 10
+  Judge Every N Rounds: 3
+  Convergence Threshold: 0.3
 ```
 
 ## 运行时命令
 
 辩论进行时，在 TUI 输入栏中输入命令：
 
-| 命令                        | 效果                           |
-| --------------------------- | ------------------------------ |
-| `/pause`                    | 暂停辩论（等当前回合完成）     |
-| `/resume`                   | 恢复暂停的辩论                 |
-| `/stop`                     | 立即停止                       |
-| `/inject proposer <text>`   | 向提议者下一轮注入上下文       |
-| `/inject challenger <text>` | 向挑战者下一轮注入上下文       |
-| `/inject! proposer <text>`  | 高优先级注入（必须处理的指令） |
-| `/inject judge <text>`      | 立即触发裁判并附带用户指令     |
-| `/extend <n>`               | 增加 N 轮最大轮数              |
+| 命令                        | 效果                           | 状态    |
+| --------------------------- | ------------------------------ | ------- |
+| `/stop`                     | 立即停止                       | ✅       |
+| `/inject proposer <text>`   | 向提议者下一轮注入上下文       | ✅       |
+| `/inject challenger <text>` | 向挑战者下一轮注入上下文       | ✅       |
+| `/inject! proposer <text>`  | 高优先级注入（必须处理的指令） | ✅       |
+| `/inject judge <text>`      | 立即触发裁判并附带用户指令     | ✅       |
+| `/pause`                    | 暂停辩论（等当前回合完成）     | 🚧 未实现 |
+| `/resume`                   | 恢复暂停的辩论                 | 🚧 未实现 |
+| `/extend <n>`               | 增加 N 轮最大轮数              | 🚧 未实现 |
 
-**审批模式**（工具审批请求时自动激活）：`/approve`、`/deny`
+> 🚧 **未实现** 表示命令已被 TUI 解析，但尚未接入编排器逻辑。
 
-**回放模式**：`/speed <n>`、`/pause`、`/resume`、`/jump round <n>`
+**审批模式**（工具审批请求时自动激活）：`/approve`、`/deny` ✅
+
+**回放模式**（🚧 尚未接入）：
+
+| 命令              | 效果             | 状态      |
+| ----------------- | ---------------- | --------- |
+| `/speed <n>`      | 调整回放速度     | 🚧 未实现 |
+| `/jump round <n>` | 跳转到指定轮     | 🚧 未实现 |
+| `/pause`          | 暂停回放         | 🚧 未实现 |
+| `/resume`         | 恢复回放         | 🚧 未实现 |
 
 ## 支持的智能体
 

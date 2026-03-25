@@ -108,31 +108,12 @@ crossfire start \
 
 ## TUI
 
-The terminal UI shows a real-time split-panel view of the debate:
+The terminal UI is a full-screen Ink (React for CLI) application with four stacked regions:
 
-```
-┌─ StatusBar ──────────────────────────────────────────────────┐
-│ Crossfire — Round 3/10 — proposer-turn                       │
-├──────────────────────────────┬───────────────────────────────┤
-│  Proposer (claude)           │  Challenger (codex)            │
-│  ◉ Speaking...               │  ○ Idle                        │
-│                              │                               │
-│  [thinking...]               │  Last response:               │
-│  The key advantage of...     │  While caching improves...    │
-│                              │                               │
-│  ▸ Read(src/cache.ts) ✓     │                               │
-│  ▸ Grep("TTL") running...   │                               │
-├──────────────────────────────┴───────────────────────────────┤
-│ Round 2/10 │ Conv: [====------] 35% │ P[agree 0.8] ↔        │
-│ C[disagree 0.7] d=0.45 │ Judge: P7:C5 │ Tokens: 12.4k      │
-├──────────────────────────────────────────────────────────────┤
-│ > /                                                          │
-└──────────────────────────────────────────────────────────────┘
-```
-
-- **Agent panels** — Live thinking (dimmed), tool calls, and message output
-- **Metrics bar** — Convergence progress, stance tracking, judge scores, token usage
-- **Command input** — Context-aware mode switching (normal / approval / replay)
+- **Header bar** — Centered branding, debate ID, round/phase, proposer & challenger agent info, and topic
+- **Scrollable content** — Round-by-round display of agent messages, thinking traces, and tool calls. Scroll with arrow keys, `Ctrl+U`/`Ctrl+D`, or `Home`/`End`
+- **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED)
+- **Command input** — Context-aware prompt (`>`, `approval>`, `replay>`) for runtime commands
 
 Use `--headless` to skip the TUI. Events are still persisted for later replay.
 
@@ -189,33 +170,60 @@ Replay a completed debate with time-scaled playback. No agent connections needed
 Show debate status summary. Add `--json` for machine-readable output.
 
 ```
-Debate: d-20260321-143022
-Topic:  Should we adopt microservices?
-Rounds: 8/10
-Events: 4523
-Duration: 127.3s
-Ended:  convergence
-Segments: 1
+Debate Status
+=============
+
+Debate ID: d-20260321-143022
+Topic: Should we adopt microservices?
+Started: 2026-03-21T14:30:22.000Z
+Ended: 2026-03-21T14:32:29.300Z
+Duration: 2m 7s
+
+Total Rounds: 8
+Total Events: 4523
+Termination Reason: convergence
+
+Profiles:
+  Proposer: proposer (claude_code)
+    Model: claude-sonnet-4-20250514
+  Challenger: challenger (codex)
+    Model: o3-mini
+  Judge: judge (claude_code)
+    Model: claude-sonnet-4-20250514
+
+Configuration:
+  Max Rounds: 10
+  Judge Every N Rounds: 3
+  Convergence Threshold: 0.3
 ```
 
 ## Runtime Commands
 
 During a live debate, type commands in the TUI input bar:
 
-| Command                     | Effect                                           |
-| --------------------------- | ------------------------------------------------ |
-| `/pause`                    | Pause the debate (finishes current turn)         |
-| `/resume`                   | Resume a paused debate                           |
-| `/stop`                     | Stop immediately                                 |
-| `/inject proposer <text>`   | Add context to proposer's next prompt            |
-| `/inject challenger <text>` | Add context to challenger's next prompt          |
-| `/inject! proposer <text>`  | High-priority injection (must-address directive) |
-| `/inject judge <text>`      | Trigger judge immediately with user instruction  |
-| `/extend <n>`               | Increase max rounds by N                         |
+| Command                     | Effect                                           | Status  |
+| --------------------------- | ------------------------------------------------ | ------- |
+| `/stop`                     | Stop immediately                                 | ✅       |
+| `/inject proposer <text>`   | Add context to proposer's next prompt            | ✅       |
+| `/inject challenger <text>` | Add context to challenger's next prompt          | ✅       |
+| `/inject! proposer <text>`  | High-priority injection (must-address directive) | ✅       |
+| `/inject judge <text>`      | Trigger judge immediately with user instruction  | ✅       |
+| `/pause`                    | Pause the debate (finishes current turn)         | 🚧 NYI |
+| `/resume`                   | Resume a paused debate                           | 🚧 NYI |
+| `/extend <n>`               | Increase max rounds by N                         | 🚧 NYI |
 
-**Approval mode** (auto-activates on tool approval requests): `/approve`, `/deny`
+> 🚧 **NYI = Not Yet Implemented.** These commands are parsed by the TUI but not yet wired to the orchestrator.
 
-**Replay mode**: `/speed <n>`, `/pause`, `/resume`, `/jump round <n>`
+**Approval mode** (auto-activates on tool approval requests): `/approve`, `/deny` ✅
+
+**Replay mode** (🚧 not yet wired):
+
+| Command           | Effect                    | Status  |
+| ----------------- | ------------------------- | ------- |
+| `/speed <n>`      | Change playback speed     | 🚧 NYI |
+| `/jump round <n>` | Jump to specific round    | 🚧 NYI |
+| `/pause`          | Pause replay              | 🚧 NYI |
+| `/resume`         | Resume replay             | 🚧 NYI |
 
 ## Supported Agents
 
