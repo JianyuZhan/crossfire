@@ -38,17 +38,9 @@
     - [Director File Layout](#director-file-layout)
   - [DebateEventBus](#debateeventbus)
   - [Runner](#runner)
-  - [Context Builder (Bounded Session Memory)](#context-builder-bounded-session-memory)
-    - [4-Layer Prompt Structure](#4-layer-prompt-structure)
-    - [Two-Stage Pipeline](#two-stage-pipeline)
-    - [PromptContext](#promptcontext)
-    - [JudgePromptContext](#judgepromptcontext)
-    - [Utility Functions](#utility-functions)
-    - [Shared Utility: debate-memory.ts](#shared-utility-debate-memoryts)
-    - [Length Budget](#length-budget)
-    - [Provider Strategy](#provider-strategy)
-    - [TurnPromptOptions](#turnpromptoptions-compatibility)
+  - [Context Builder (Incremental Prompt System)](#context-builder-incremental-prompt-system)
     - [Incremental Prompt Builders](#incremental-prompt-builders)
+    - [Utility Functions](#utility-functions)
   - [Judge Turn](#judge-turn)
   - [Action Plan Synthesis](#action-plan-synthesis)
     - [Pipeline Overview](#pipeline-overview)
@@ -648,171 +640,13 @@ interface RunDebateOptions {
 
 `waitForTurnCompleted()` listens on bus (not directly on adapters), matching by `turnId`.
 
-### Context Builder (Bounded Session Memory)
+### Context Builder (Incremental Prompt System)
 
-The prompt system uses a **4-layer architecture** with bounded token usage, eliminating O(n²) growth in provider threads. Core principle: **provider context = short-term working memory; [`DebateState`](#debatestate) = long-term fact memory.**
+The prompt system uses **incremental prompts** that rely on provider-native session/thread memory. Turn 1 sends the full system prompt + topic + schema; Turn 2+ sends only the opponent's latest response + optional judge feedback + schema reminder. This eliminates redundant context and enables provider-level caching of the stable prefix.
 
-#### 4-Layer Prompt Structure
-
-```
-Layer 1: Stable Prefix      (~10%)  topic, role, rules, language, meta-tool format
-Layer 2: Long-term Memory    (~35%)  structured data from DebateState
-Layer 3: Local Window        (~35%)  opponent last turn (truncated) + self summary
-Layer 4: Turn Instructions   (~20%)  objective, conclude/continue, output format
-```
-
-Layers 2–3 gracefully degrade to empty when no history exists (e.g., Round 1 proposer).
-
-#### Two-Stage Pipeline
-
-Internally, prompt construction is split into extraction and rendering (`buildPromptContext` → `renderTurnPrompt`). The renderers are private; the public API provides both extraction functions (for testing/inspection) and end-to-end wrappers:
-
-- **`buildPromptContext(state, role, options?)`** → `PromptContext` — extraction only (public)
-- **`buildTurnPromptFromState(state, role, options?)`** → `string` — extraction + rendering (public)
-- **`buildTurnPrompt(state, role, options?)`** → `string` — backward-compatible alias for `buildTurnPromptFromState` (public, legacy)
-- **`buildJudgePromptContext(state, options?)`** → `JudgePromptContext` — extraction only (public)
-- **`buildJudgePrompt(state)`** → `string` — extraction + rendering for judge (public, legacy)
-
-#### Incremental Prompt Builder (new — used by Runner)
-
-The runner now uses **incremental prompts** instead of the legacy 4-layer functions. Turn 1 sends the full system prompt + topic + schema; Turn 2+ sends only the opponent's latest response + optional judge feedback + schema reminder. This eliminates redundant context and enables provider-level caching of the stable prefix.
-
-- **`buildInitialPrompt(input)`** → `string` — Turn 1 prompt with system identity, topic, schema (debaters)
-- **`buildIncrementalPrompt(input)`** → `string` — Turn 2+ prompt with opponent text, judge text, schema refresh
-- **`buildJudgeInitialPrompt(input)`** → `string` — Judge Turn 1 with full schema
-- **`buildJudgeIncrementalPrompt(input)`** → `string` — Judge Turn 2+ with schema refresh mode
-- **`buildTranscriptRecoveryPrompt(input)`** → `string` — session recovery with budgeted transcript replay
-- **`getSchemaRefreshMode(turnCount, judgeEveryN, consecutiveFailures)`** → `"full" | "reminder"` — determines when to re-send the full schema definition vs a brief reminder
-
-#### PromptContext
-
-```typescript
-interface PromptContext {
-  topic: string;
-  languageHint: string;
-  roundNumber: number;
-  maxRounds: number;
-  role: "proposer" | "challenger";
-
-  longMemory: {
-    selfStance?: string;
-    selfConfidence?: number;
-    opponentStance?: string;
-    opponentConfidence?: number;
-    selfKeyPoints: string[]; // max 12, each truncate(160)
-    opponentKeyPoints: string[]; // max 12, each truncate(160)
-    selfConcessions: string[]; // max 8, each truncate(160)
-    opponentConcessions: string[]; // max 8, each truncate(160)
-    unresolvedIssues: string[]; // max 10, each truncate(160)
-    judgeSummary?: string; // truncate(300), most recent verdict
-    directorGuidance?: string[]; // max 3 items
-    userInjection?: { text: string; priority: "normal" | "high" };
-  };
-
-  localWindow: {
-    opponentLastTurnFull?: string; // normalizeWhitespace + truncateWithHeadTail(1500)
-    selfLastTurnSummary?: string; // truncate(keyPoints.join("; "), 500) or truncate(content, 300)
-  };
-
-  controls: {
-    shouldTryToConclude: boolean;
-    repetitionWarnings?: string[];
-  };
-}
-```
-
-**Field extraction rules:**
-
-- **Stance/confidence:** from own/opponent latest turn `meta.stance`, `meta.confidence`
-- **keyPoints/concessions:** flatMap across ALL turns, deduplicated (later rounds take priority when over limit)
-- **unresolvedIssues:** latest completed round keyPoints (currentRound - 1 when > 1) filtered through `filterUnresolved()` (from `debate-memory.ts`)
-- **judgeSummary:** iterate turns backward, first `judgeVerdict.reasoning` found, `truncate(300)`
-- **Null safety:** always `t.meta?.keyPoints ?? []`, `t.meta?.concessions ?? []`
-
-#### JudgePromptContext
-
-```typescript
-interface JudgePromptContext {
-  topic: string;
-  languageHint: string;
-  roundNumber: number;
-  maxRounds: number;
-  proposerStance?: string;
-  proposerConfidence?: number;
-  challengerStance?: string;
-  challengerConfidence?: number;
-  proposerKeyPoints: string[];
-  challengerKeyPoints: string[];
-  proposerConcessions: string[];
-  challengerConcessions: string[];
-  unresolvedIssues: string[];
-  previousJudgeSummary?: string; // truncate(300)
-  proposerLastTurn?: string; // truncateWithHeadTail(1500)
-  challengerLastTurn?: string; // truncateWithHeadTail(1500)
-  earlyEndGuidance: string;
-}
-```
-
-Key difference from old design: Judge prompt uses **structured summary + latest round content only**, NOT full transcript. Prompt size is roughly constant regardless of round count. See [Length Budget](#length-budget) for size estimates.
-
-#### Utility Functions
-
-| Function                 | Location             | Purpose                                                                                      |
-| ------------------------ | -------------------- | -------------------------------------------------------------------------------------------- |
-| `truncate(text, max)`    | `context-builder.ts` | Simple end truncation with `"..."` suffix                                                    |
-| `normalizeWhitespace(t)` | `context-builder.ts` | Collapse 3+ newlines → 2, 2+ spaces → 1, trim                                                |
-| `truncateWithHeadTail()` | `context-builder.ts` | Head 60% + tail 40% of space after `[...truncated...]` marker; guard for very small maxChars |
-| `isAcknowledged()`       | `debate-memory.ts`   | Substring overlap on first 20 chars (case-insensitive)                                       |
-| `filterUnresolved()`     | `debate-memory.ts`   | Key points minus acknowledged concessions, deduped                                           |
-
-#### Shared Utility: `debate-memory.ts`
-
-Extracts the unresolved-issue matching heuristic into a neutral module. Both `context-builder.ts` and `summary-generator.ts` import from here (neither depends on the other).
-
-```
-debate-memory.ts  (shared, zero dependencies on other orchestrator-core modules)
-  ↑               ↑
-  │               │
-context-builder.ts   summary-generator.ts
-```
-
-#### Length Budget
-
-| Layer     | Content                             | Proposer/Challenger | Judge             |
-| --------- | ----------------------------------- | ------------------- | ----------------- |
-| 1         | Topic + role + rules + language     | 300–500 chars       | 200–400 chars     |
-| 2         | Long-term memory (structured)       | 800–1,500 chars     | 800–1,500 chars   |
-| 3         | Local window / recent round content | 1,500–2,000 chars   | 2,000–3,000 chars |
-| 4         | Objective + output format           | 400–600 chars       | 300–500 chars     |
-| **Total** |                                     | **~3,000–4,600**    | **~3,300–5,400**  |
-
-#### Provider Strategy
-
-| Provider | Session/Thread        | Prompt Strategy                                        | Phase 2 (future)                   |
-| -------- | --------------------- | ------------------------------------------------------ | ---------------------------------- |
-| Claude   | Keep session (resume) | 4-layer structured prompt; rely on SDK compaction      | Monitor; may need compact boundary |
-| Codex    | Keep thread           | 4-layer structured prompt; no full history in prompt   | Compact/rotate at threshold        |
-| Gemini   | Stateless per-turn    | 4-layer structured prompt; summary provides continuity | N/A (already stateless)            |
-
-All providers receive the same structured prompt. Semantic contract: **model handles short-term coherence, system handles long-term memory.**
-
-#### TurnPromptOptions (Compatibility)
-
-```typescript
-interface TurnPromptOptions {
-  guidance?: string[];  // from DebateDirector.getGuidance()
-  userInjection?: { text: string; priority: "normal" | "high" };
-  shouldTryToConclude?: boolean;
-  repetitionWarnings?: string[];
-  maxOpponentChars?: number; // override truncation limit for opponent's last turn
-}
-```
-
-The old `clarifications` field is removed — superseded by `directorGuidance` and `userInjection`.
+Core principle: **provider context = short-term working memory; [`DebateState`](#debatestate) = long-term fact memory.**
 
 #### Incremental Prompt Builders
-
-New functions that produce prompts for the incremental prompt strategy. These coexist with the 4-layer functions above (which will be removed once the runner switches over).
 
 | Function                          | Purpose                                                                                         |
 | --------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -823,10 +657,20 @@ New functions that produce prompts for the incremental prompt strategy. These co
 | `buildJudgeIncrementalPrompt(input)` | Judge Turn 2+: round header + both debater outputs + schema reminder or full                 |
 | `buildTranscriptRecoveryPrompt(input)` | Reconstructs full context from transcript array; budgeted mode when transcript exceeds limit |
 
-Key design differences from the 4-layer system:
+**Key design principles:**
 - **No truncation** of opponent text — providers with session/thread handle context windowing natively.
 - **Schema refresh modes**: full schema on Turn 1 and every N rounds, reminder-only otherwise.
 - **Transcript recovery**: for stateless providers (Gemini) or after session loss, rebuilds context from event store with optional budget-aware summarization (default 200K chars).
+
+#### Utility Functions
+
+| Function                 | Location             | Purpose                                                                                      |
+| ------------------------ | -------------------- | -------------------------------------------------------------------------------------------- |
+| `truncate(text, max)`    | `context-builder.ts` | Simple end truncation with `"..."` suffix                                                    |
+| `normalizeWhitespace(t)` | `context-builder.ts` | Collapse 3+ newlines → 2, 2+ spaces → 1, trim                                                |
+| `truncateWithHeadTail()` | `context-builder.ts` | Head 60% + tail 40% of space after `[...truncated...]` marker; used by transcript recovery   |
+| `isAcknowledged()`       | `debate-memory.ts`   | Substring overlap on first 20 chars (case-insensitive)                                       |
+| `filterUnresolved()`     | `debate-memory.ts`   | Key points minus acknowledged concessions, deduped                                           |
 
 ### Judge Turn
 
