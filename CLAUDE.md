@@ -1,6 +1,15 @@
 # Crossfire
 
 > **THE NORTH STAR: Every feature, optimization, and architectural decision in this project exists for one purpose — to produce deeper, more comprehensive, and more actionable action plans. The debate is a MEANS, not an end. We do not optimize for who "wins"; we optimize for the quality of insight that emerges from structured adversarial reasoning.**
+>
+> What this means in practice:
+>
+> - **Prompt tone**: Proposer/challenger profiles should say "identify blind spots in the other side's reasoning" rather than "defeat the opponent's argument." Encourage steel-manning, not straw-manning.
+> - **Content design**: The judge prompt should ask "what actionable steps does each side's argument suggest?" — not "who made the stronger case?" The `judge_verdict` schema extracts `actionItems`, `risks`, and `openQuestions`, not a winner declaration.
+> - **Convergence logic**: We stop the debate when both sides *agree on the action plan's key steps* (even if they disagree on framing), not when one side "runs out of counterarguments." Convergence = shared actionable ground, not rhetorical exhaustion.
+> - **Feature prioritization**: A feature that helps surface a hidden assumption (e.g., a meta-tool for "what are we both ignoring?") is higher priority than one that makes arguments more persuasive (e.g., citation formatting).
+> - **Round budget**: Extra rounds are justified only if they produce *new actionable insight*. If round N+1 merely restates round N with different words, the system should converge — even if the "debate score" is close.
+> - **Output structure**: `action-plan.html` leads with prioritized steps + owners + risks, not with a debate summary. The debate transcript is supporting evidence, not the deliverable.
 
 ## Language Policy
 
