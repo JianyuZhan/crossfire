@@ -15,6 +15,10 @@ import {
 	type ReportMeta,
 	type TerminationReason,
 	buildDraftReport,
+	buildIncrementalPrompt,
+	buildInitialPrompt,
+	buildJudgeIncrementalPrompt,
+	buildJudgeInitialPrompt,
 	buildJudgePrompt,
 	buildTurnPrompt,
 	draftToAuditReport,
@@ -44,6 +48,22 @@ export interface RunDebateOptions {
 	bus?: DebateEventBus;
 	resumeFromState?: DebateState;
 	debateId?: string;
+}
+
+/**
+ * Determine schema refresh mode for incremental prompts.
+ * Returns "full" on Turn 1, after parse failures, or on cadence-aligned rounds.
+ * Returns "reminder" otherwise.
+ */
+export function getSchemaRefreshMode(
+	turnCount: number,
+	judgeEveryN: number,
+	consecutiveFailures: number,
+): "full" | "reminder" {
+	if (turnCount <= 1) return "full";
+	if (consecutiveFailures >= 1) return "full";
+	if (judgeEveryN > 0 && turnCount % judgeEveryN === 0) return "full";
+	return "reminder";
 }
 
 export async function runDebate(
@@ -105,6 +125,14 @@ export async function runDebate(
 	let action: DirectorAction = { type: "continue" };
 	let lastJudgeVerdict: JudgeVerdict | undefined;
 
+	// Incremental prompt tracking
+	let proposerTurnCount = 0;
+	let challengerTurnCount = 0;
+	let judgeTurnCount = 0;
+	let lastJudgeText: string | undefined;
+	let proposerConsecutiveFailures = 0;
+	let challengerConsecutiveFailures = 0;
+
 	// Track pending user-triggered judge requests via bus events
 	let pendingUserJudge: string | undefined;
 	const judgeInjectUnsub = bus.subscribe((event: AnyEvent) => {
@@ -127,11 +155,36 @@ export async function runDebate(
 				speaker: "proposer",
 				timestamp: Date.now(),
 			});
+			proposerTurnCount++;
 			const proposerState = bus.snapshot();
-			const pGuidance = director.getGuidance("proposer");
-			const proposerPrompt = buildTurnPrompt(proposerState, "proposer", {
-				guidance: pGuidance,
-			});
+			let proposerPrompt: string;
+			if (proposerTurnCount === 1) {
+				proposerPrompt = buildInitialPrompt({
+					role: "proposer",
+					topic: config.topic,
+					maxRounds: config.maxRounds,
+					systemPrompt: config.proposerSystemPrompt,
+					schemaType: "debate_meta",
+				});
+			} else {
+				const opponentText =
+					proposerState.turns.filter((t) => t.role === "challenger").at(-1)
+						?.content ?? "";
+				proposerPrompt = buildIncrementalPrompt({
+					roundNumber: round,
+					maxRounds: config.maxRounds,
+					opponentRole: "challenger",
+					opponentText,
+					judgeText: lastJudgeText,
+					schemaRefreshMode: getSchemaRefreshMode(
+						proposerTurnCount,
+						config.judgeEveryNRounds,
+						proposerConsecutiveFailures,
+					),
+				});
+			}
+			// Clear judge text after proposer consumes it
+			lastJudgeText = undefined;
 			bus.push({
 				kind: "prompt.stats",
 				roundNumber: round,
@@ -146,6 +199,18 @@ export async function runDebate(
 			});
 			const proposerResult = await waitForTurnCompleted(bus, proposerTurnId);
 			if (proposerResult === "interrupted") return bus.snapshot();
+
+			// Check if proposer produced debate_meta (for schema refresh tracking)
+			const stateAfterProposer = bus.snapshot();
+			const lastProposerTurn = stateAfterProposer.turns
+				.filter((t) => t.role === "proposer")
+				.at(-1);
+			if (lastProposerTurn?.meta) {
+				proposerConsecutiveFailures = 0;
+			} else {
+				proposerConsecutiveFailures++;
+			}
+
 			bus.push({
 				kind: "round.completed",
 				roundNumber: round,
@@ -160,11 +225,41 @@ export async function runDebate(
 				speaker: "challenger",
 				timestamp: Date.now(),
 			});
+			challengerTurnCount++;
 			const challengerState = bus.snapshot();
-			const cGuidance = director.getGuidance("challenger");
-			const challengerPrompt = buildTurnPrompt(challengerState, "challenger", {
-				guidance: cGuidance,
-			});
+			let challengerPrompt: string;
+			if (challengerTurnCount === 1) {
+				// Challenger Turn 1: include proposer's text as context in initial prompt
+				const proposerText =
+					challengerState.turns.filter((t) => t.role === "proposer").at(-1)
+						?.content ?? "";
+				challengerPrompt = buildInitialPrompt({
+					role: "challenger",
+					topic: config.topic,
+					maxRounds: config.maxRounds,
+					systemPrompt: config.challengerSystemPrompt,
+					schemaType: "debate_meta",
+					operationalPreamble: `Proposer's opening response:\n\n${proposerText}`,
+				});
+			} else {
+				const opponentText =
+					challengerState.turns.filter((t) => t.role === "proposer").at(-1)
+						?.content ?? "";
+				challengerPrompt = buildIncrementalPrompt({
+					roundNumber: round,
+					maxRounds: config.maxRounds,
+					opponentRole: "proposer",
+					opponentText,
+					judgeText: lastJudgeText,
+					schemaRefreshMode: getSchemaRefreshMode(
+						challengerTurnCount,
+						config.judgeEveryNRounds,
+						challengerConsecutiveFailures,
+					),
+				});
+			}
+			// Clear judge text after challenger consumes it
+			lastJudgeText = undefined;
 			bus.push({
 				kind: "prompt.stats",
 				roundNumber: round,
@@ -182,6 +277,18 @@ export async function runDebate(
 				challengerTurnId,
 			);
 			if (challengerResult === "interrupted") return bus.snapshot();
+
+			// Check if challenger produced debate_meta (for schema refresh tracking)
+			const stateAfterChallenger = bus.snapshot();
+			const lastChallengerTurn = stateAfterChallenger.turns
+				.filter((t) => t.role === "challenger")
+				.at(-1);
+			if (lastChallengerTurn?.meta) {
+				challengerConsecutiveFailures = 0;
+			} else {
+				challengerConsecutiveFailures++;
+			}
+
 			bus.push({
 				kind: "round.completed",
 				roundNumber: round,
@@ -222,8 +329,37 @@ export async function runDebate(
 					roundNumber: round,
 					timestamp: Date.now(),
 				});
+				judgeTurnCount++;
 				const judgeState = bus.snapshot();
-				const judgePrompt = buildJudgePrompt(judgeState);
+				const proposerText =
+					judgeState.turns.filter((t) => t.role === "proposer").at(-1)
+						?.content ?? "";
+				const challengerText =
+					judgeState.turns.filter((t) => t.role === "challenger").at(-1)
+						?.content ?? "";
+				let judgePrompt: string;
+				if (judgeTurnCount === 1) {
+					judgePrompt = buildJudgeInitialPrompt({
+						topic: config.topic,
+						maxRounds: config.maxRounds,
+						roundNumber: round,
+						proposerText,
+						challengerText,
+						systemPrompt: config.judgeSystemPrompt,
+					});
+				} else {
+					judgePrompt = buildJudgeIncrementalPrompt({
+						roundNumber: round,
+						maxRounds: config.maxRounds,
+						proposerText,
+						challengerText,
+						schemaRefreshMode: getSchemaRefreshMode(
+							judgeTurnCount,
+							config.judgeEveryNRounds,
+							0, // Judge failures not tracked separately
+						),
+					});
+				}
 				bus.push({
 					kind: "prompt.stats",
 					roundNumber: round,
@@ -247,7 +383,10 @@ export async function runDebate(
 					verdict,
 					timestamp: Date.now(),
 				});
-				if (verdict) lastJudgeVerdict = verdict;
+				if (verdict) {
+					lastJudgeVerdict = verdict;
+					lastJudgeText = verdict.reasoning;
+				}
 				if (verdict && !verdict.shouldContinue) {
 					action = { type: "end-debate", reason: "judge-decision" };
 					break;
@@ -277,8 +416,33 @@ export async function runDebate(
 					roundNumber: round,
 					timestamp: Date.now(),
 				});
+				judgeTurnCount++;
 				const judgeState = bus.snapshot();
-				const judgePrompt = `${buildJudgePrompt(judgeState)}\n\n## User Instruction\n${userInstruction}`;
+				const proposerText =
+					judgeState.turns.filter((t) => t.role === "proposer").at(-1)
+						?.content ?? "";
+				const challengerText =
+					judgeState.turns.filter((t) => t.role === "challenger").at(-1)
+						?.content ?? "";
+				let judgePrompt: string;
+				if (judgeTurnCount === 1) {
+					judgePrompt = `${buildJudgeInitialPrompt({
+						topic: config.topic,
+						maxRounds: config.maxRounds,
+						roundNumber: round,
+						proposerText,
+						challengerText,
+						systemPrompt: config.judgeSystemPrompt,
+					})}\n\n## User Instruction\n${userInstruction}`;
+				} else {
+					judgePrompt = `${buildJudgeIncrementalPrompt({
+						roundNumber: round,
+						maxRounds: config.maxRounds,
+						proposerText,
+						challengerText,
+						schemaRefreshMode: "full",
+					})}\n\n## User Instruction\n${userInstruction}`;
+				}
 				bus.push({
 					kind: "prompt.stats",
 					roundNumber: round,
@@ -302,7 +466,10 @@ export async function runDebate(
 					verdict,
 					timestamp: Date.now(),
 				});
-				if (verdict) lastJudgeVerdict = verdict;
+				if (verdict) {
+					lastJudgeVerdict = verdict;
+					lastJudgeText = verdict.reasoning;
+				}
 				if (verdict && !verdict.shouldContinue) {
 					action = { type: "end-debate", reason: "judge-decision" };
 					break;
@@ -329,7 +496,32 @@ export async function runDebate(
 					roundNumber: finalState.currentRound,
 					timestamp: Date.now(),
 				});
-				const judgePrompt = buildJudgePrompt(bus.snapshot());
+				judgeTurnCount++;
+				const proposerText =
+					finalState.turns.filter((t) => t.role === "proposer").at(-1)
+						?.content ?? "";
+				const challengerText =
+					finalState.turns.filter((t) => t.role === "challenger").at(-1)
+						?.content ?? "";
+				let judgePrompt: string;
+				if (judgeTurnCount === 1) {
+					judgePrompt = buildJudgeInitialPrompt({
+						topic: config.topic,
+						maxRounds: config.maxRounds,
+						roundNumber: finalState.currentRound,
+						proposerText,
+						challengerText,
+						systemPrompt: config.judgeSystemPrompt,
+					});
+				} else {
+					judgePrompt = buildJudgeIncrementalPrompt({
+						roundNumber: finalState.currentRound,
+						maxRounds: config.maxRounds,
+						proposerText,
+						challengerText,
+						schemaRefreshMode: "full",
+					});
+				}
 				bus.push({
 					kind: "prompt.stats",
 					roundNumber: finalState.currentRound,

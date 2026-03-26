@@ -10,7 +10,11 @@ import type {
 import type { DebateConfig } from "@crossfire/orchestrator-core";
 import type { AnyEvent } from "@crossfire/orchestrator-core";
 import { describe, expect, it } from "vitest";
-import { type AdapterMap, runDebate } from "../src/runner.js";
+import {
+	type AdapterMap,
+	getSchemaRefreshMode,
+	runDebate,
+} from "../src/runner.js";
 
 function createScriptedAdapter(
 	id: "claude" | "codex" | "gemini",
@@ -911,5 +915,165 @@ describe("runDebate", () => {
 		expect(result.terminationReason).toBe("convergence");
 		expect(result.turns).toHaveLength(2);
 		expect(result.currentRound).toBe(1);
+	});
+
+	it("uses incremental prompts: initial on Turn 1, incremental on Turn 2+", async () => {
+		const { DebateEventBus } = await import("../src/event-bus.js");
+		const bus = new DebateEventBus();
+		const collected: AnyEvent[] = [];
+		bus.subscribe((e) => collected.push(e));
+
+		const twoRoundConfig: DebateConfig = { ...config, maxRounds: 2 };
+
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer round 1", {
+				stance: "strongly_agree",
+				confidence: 0.9,
+				key_points: ["Point A"],
+			}),
+			"p-2": turnEvents("p-2", "claude", "claude-s1", "Proposer round 2", {
+				stance: "agree",
+				confidence: 0.8,
+				key_points: ["Point B"],
+			}),
+		});
+
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger round 1", {
+				stance: "strongly_disagree",
+				confidence: 0.85,
+				key_points: ["Counter A"],
+			}),
+			"c-2": turnEvents("c-2", "codex", "codex-s1", "Challenger round 2", {
+				stance: "disagree",
+				confidence: 0.75,
+				key_points: ["Counter B"],
+			}),
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		const result = await runDebate(twoRoundConfig, adapters, { bus });
+		expect(result.phase).toBe("completed");
+		expect(result.turns).toHaveLength(4);
+
+		// Verify prompt.stats events are still emitted for all turns
+		const promptStats = collected.filter((e) => e.kind === "prompt.stats");
+		expect(promptStats.length).toBeGreaterThanOrEqual(4); // 2 rounds x 2 speakers
+		for (const ps of promptStats) {
+			expect((ps as any).promptChars).toBeGreaterThan(0);
+		}
+	});
+
+	it("passes systemPrompt to initial prompt when provided in config", async () => {
+		const { DebateEventBus } = await import("../src/event-bus.js");
+		const bus = new DebateEventBus();
+
+		const configWithSystem: DebateConfig = {
+			...config,
+			maxRounds: 1,
+			proposerSystemPrompt: "Custom proposer system prompt",
+			challengerSystemPrompt: "Custom challenger system prompt",
+		};
+
+		// Capture prompts sent to adapters
+		const sentPrompts: { turnId: string; prompt: string }[] = [];
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+				stance: "agree",
+				confidence: 0.7,
+				key_points: ["A"],
+			}),
+		});
+		const origSendTurn = proposer.sendTurn.bind(proposer);
+		proposer.sendTurn = async (handle, input) => {
+			sentPrompts.push({ turnId: input.turnId, prompt: input.prompt });
+			return origSendTurn(handle, input);
+		};
+
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+				stance: "disagree",
+				confidence: 0.7,
+				key_points: ["B"],
+			}),
+		});
+		const origChallengerSendTurn = challenger.sendTurn.bind(challenger);
+		challenger.sendTurn = async (handle, input) => {
+			sentPrompts.push({ turnId: input.turnId, prompt: input.prompt });
+			return origChallengerSendTurn(handle, input);
+		};
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		await runDebate(configWithSystem, adapters, { bus });
+
+		// Proposer initial prompt should contain custom system prompt
+		const proposerPrompt = sentPrompts.find((p) => p.turnId === "p-1");
+		expect(proposerPrompt).toBeDefined();
+		expect(proposerPrompt!.prompt).toContain("Custom proposer system prompt");
+
+		// Challenger initial prompt should contain custom system prompt
+		const challengerPrompt = sentPrompts.find((p) => p.turnId === "c-1");
+		expect(challengerPrompt).toBeDefined();
+		expect(challengerPrompt!.prompt).toContain(
+			"Custom challenger system prompt",
+		);
+	});
+});
+
+describe("getSchemaRefreshMode", () => {
+	it("returns 'full' for turn 1", () => {
+		expect(getSchemaRefreshMode(1, 3, 0)).toBe("full");
+	});
+
+	it("returns 'reminder' for normal mid-debate turns", () => {
+		expect(getSchemaRefreshMode(2, 3, 0)).toBe("reminder");
+		expect(getSchemaRefreshMode(4, 3, 0)).toBe("reminder");
+	});
+
+	it("returns 'full' on cadence-aligned turns", () => {
+		expect(getSchemaRefreshMode(3, 3, 0)).toBe("full");
+		expect(getSchemaRefreshMode(6, 3, 0)).toBe("full");
+	});
+
+	it("returns 'full' when there are consecutive failures", () => {
+		expect(getSchemaRefreshMode(2, 3, 1)).toBe("full");
+		expect(getSchemaRefreshMode(4, 3, 2)).toBe("full");
+	});
+
+	it("returns 'reminder' when judgeEveryN is 0 (disabled)", () => {
+		expect(getSchemaRefreshMode(2, 0, 0)).toBe("reminder");
+		expect(getSchemaRefreshMode(5, 0, 0)).toBe("reminder");
 	});
 });

@@ -307,6 +307,9 @@ interface DebateConfig {
   proposerModel?: string;
   challengerModel?: string;
   judgeModel?: string;
+  proposerSystemPrompt?: string;   // from profile; passed to buildInitialPrompt on Turn 1
+  challengerSystemPrompt?: string; // from profile; passed to buildInitialPrompt on Turn 1
+  judgeSystemPrompt?: string;      // from profile; passed to buildJudgeInitialPrompt on Turn 1
 }
 ```
 
@@ -619,10 +622,11 @@ interface RunDebateOptions {
 2. Create `DebateDirector` instance with `DirectorConfig`
 3. Emit `debate.started` (or `debate.resumed` with `fromRound` if resuming)
 4. Loop while not terminated:
-   - **Proposer turn:** `director.getGuidance("proposer")` → `buildTurnPrompt(state, "proposer", { guidance })` → emit `prompt.stats` → `adapter.sendTurn()` → wait for `turn.completed`
-   - **Challenger turn:** same pattern (also emits `prompt.stats`)
+   - **Proposer turn:** Turn 1 → `buildInitialPrompt({ role, topic, systemPrompt })`, Turn 2+ → `buildIncrementalPrompt({ opponentText, judgeText, schemaRefreshMode })` → emit `prompt.stats` → `adapter.sendTurn()` → wait for `turn.completed` → check for `debate_meta` extraction (update consecutive failure counter)
+   - **Challenger turn:** same incremental pattern (Turn 1 includes proposer's opening via `operationalPreamble`)
    - **Director evaluates:** `director.evaluate(bus.snapshot())` → push `director.action` event
-   - **Execute action:** `end-debate` → break to Final Outcome; `trigger-judge` → run Judge turn; `inject-guidance` → store for next turn; `await-user` → block for clarification; `continue` → next round
+   - **Execute action:** `end-debate` → break to Final Outcome; `trigger-judge` → run Judge turn (Turn 1 → `buildJudgeInitialPrompt`, Turn 2+ → `buildJudgeIncrementalPrompt`); `inject-guidance` → store for next turn; `await-user` → block for clarification; `continue` → next round
+   - **Schema refresh mode:** `getSchemaRefreshMode(turnCount, judgeEveryN, consecutiveFailures)` — returns `"full"` on Turn 1, cadence-aligned turns, or after parse failures; `"reminder"` otherwise
 5. **Final Outcome flow:** optional `trigger-judge { reason: "final-review" }` → `SummaryGenerator` → write Final Outcome to transcript → emit `debate.completed` (with `summary` field) as **last** event
 
 `waitForTurnCompleted()` listens on bus (not directly on adapters), matching by `turnId`.
@@ -648,9 +652,20 @@ Internally, prompt construction is split into extraction and rendering (`buildPr
 
 - **`buildPromptContext(state, role, options?)`** → `PromptContext` — extraction only (public)
 - **`buildTurnPromptFromState(state, role, options?)`** → `string` — extraction + rendering (public)
-- **`buildTurnPrompt(state, role, options?)`** → `string` — backward-compatible alias for `buildTurnPromptFromState` (public)
+- **`buildTurnPrompt(state, role, options?)`** → `string` — backward-compatible alias for `buildTurnPromptFromState` (public, legacy)
 - **`buildJudgePromptContext(state, options?)`** → `JudgePromptContext` — extraction only (public)
-- **`buildJudgePrompt(state)`** → `string` — extraction + rendering for judge (public)
+- **`buildJudgePrompt(state)`** → `string` — extraction + rendering for judge (public, legacy)
+
+#### Incremental Prompt Builder (new — used by Runner)
+
+The runner now uses **incremental prompts** instead of the legacy 4-layer functions. Turn 1 sends the full system prompt + topic + schema; Turn 2+ sends only the opponent's latest response + optional judge feedback + schema reminder. This eliminates redundant context and enables provider-level caching of the stable prefix.
+
+- **`buildInitialPrompt(input)`** → `string` — Turn 1 prompt with system identity, topic, schema (debaters)
+- **`buildIncrementalPrompt(input)`** → `string` — Turn 2+ prompt with opponent text, judge text, schema refresh
+- **`buildJudgeInitialPrompt(input)`** → `string` — Judge Turn 1 with full schema
+- **`buildJudgeIncrementalPrompt(input)`** → `string` — Judge Turn 2+ with schema refresh mode
+- **`buildTranscriptRecoveryPrompt(input)`** → `string` — session recovery with budgeted transcript replay
+- **`getSchemaRefreshMode(turnCount, judgeEveryN, consecutiveFailures)`** → `"full" | "reminder"` — determines when to re-send the full schema definition vs a brief reminder
 
 #### PromptContext
 

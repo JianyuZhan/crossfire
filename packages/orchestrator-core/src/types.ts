@@ -24,6 +24,9 @@ export interface DebateConfig {
 	proposerModel?: string;
 	challengerModel?: string;
 	judgeModel?: string;
+	proposerSystemPrompt?: string;
+	challengerSystemPrompt?: string;
+	judgeSystemPrompt?: string;
 }
 
 export interface DebateMeta {
