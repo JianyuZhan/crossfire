@@ -233,6 +233,7 @@ interface StartSessionInput {
 - **`startSession()`** does NOT start a query. `providerSessionId` initializes as `undefined`.
 - **`sendTurn()`** calls `query({ prompt, options })` with `resume: providerSessionId` for follow-up turns, `includePartialMessages: true`. Prompt is top-level param.
 - **`providerSessionId`** set on first `sendTurn()` when `system/init` message arrives.
+- **Usage semantics:** `"session_delta_or_cached"` — reports per-turn token deltas with `cacheReadInputTokens` and `cacheCreationInputTokens` extracted from SDK `result.usage`.
 - **Approval:** `canUseTool` callback returns `PermissionResult` (allow with optional `updatedInput`, or deny with optional message/interrupt).
 - **Hooks** (uppercase names): `PreToolUse` → `tool.call`, `PostToolUse` → `tool.result` (success), `PostToolUseFailure` → `tool.result` (error), `SubagentStart`/`SubagentStop` → `subagent.*` events.
 - **`interrupt()`** uses `Query.interrupt()`.

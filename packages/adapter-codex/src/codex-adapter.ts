@@ -42,6 +42,7 @@ interface SessionState {
 	currentTurnId?: string;
 	currentNativeTurnId?: string;
 	turnStartTime?: number;
+	turnCount: number;
 }
 
 /** Pending approval request */
@@ -139,6 +140,7 @@ export class CodexAdapter implements AgentAdapter {
 			handle,
 			profile: input.profile,
 			model,
+			turnCount: 0,
 		};
 		this.sessions.set(adapterSessionId, sessionState);
 
@@ -167,8 +169,12 @@ export class CodexAdapter implements AgentAdapter {
 			session.turnStartTime = Date.now();
 		}
 
-		// Append meta-tool instructions so Codex knows how to call them
-		const prompt = input.prompt + META_TOOL_INSTRUCTIONS;
+		// Append meta-tool instructions only on first turn so Codex knows how to call them
+		// Subsequent turns use incremental prompts that don't need the instructions repeated
+		const prompt =
+			session?.turnCount === 0
+				? input.prompt + META_TOOL_INSTRUCTIONS
+				: input.prompt;
 
 		// Send `turn/start` request
 		const result = (await this.client.request("turn/start", {
@@ -176,9 +182,10 @@ export class CodexAdapter implements AgentAdapter {
 			input: [{ type: "text", text: prompt }],
 		})) as { turn: { id: string; status: string } };
 
-		// Save native turn ID for interrupt
+		// Save native turn ID for interrupt and increment turn count
 		if (session) {
 			session.currentNativeTurnId = result.turn.id;
+			session.turnCount++;
 		}
 
 		return {

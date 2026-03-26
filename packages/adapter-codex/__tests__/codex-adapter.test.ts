@@ -250,6 +250,36 @@ describe("CodexAdapter", () => {
 			expect(turnHandle.status).toBe("running");
 		});
 
+		it("includes META_TOOL_INSTRUCTIONS on first turn only", async () => {
+			const handle = await setupSession();
+
+			// First turn - should include META_TOOL_INSTRUCTIONS
+			const turn1Promise = adapter.sendTurn(handle, {
+				prompt: "First turn",
+				turnId: "t1",
+			});
+			const turn1Msg = await mock.readNextMessage();
+			expect(turn1Msg.params.input[0].text).toContain("First turn");
+			expect(turn1Msg.params.input[0].text).toContain("Meta-Tool Usage");
+			mock.sendResponse(turn1Msg.id as number, {
+				turn: { id: "native-turn-1", status: "running" },
+			});
+			await turn1Promise;
+
+			// Second turn - should NOT include META_TOOL_INSTRUCTIONS
+			const turn2Promise = adapter.sendTurn(handle, {
+				prompt: "Second turn",
+				turnId: "t2",
+			});
+			const turn2Msg = await mock.readNextMessage();
+			expect(turn2Msg.params.input[0].text).toContain("Second turn");
+			expect(turn2Msg.params.input[0].text).not.toContain("Meta-Tool Usage");
+			mock.sendResponse(turn2Msg.id as number, {
+				turn: { id: "native-turn-2", status: "running" },
+			});
+			await turn2Promise;
+		});
+
 		it("emits session.started event from startSession()", async () => {
 			const { events } = collectEvents(adapter);
 			const handle = await setupSession();
