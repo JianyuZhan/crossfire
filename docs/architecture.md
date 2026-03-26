@@ -2,8 +2,6 @@
 
 > AI agent adversarial debate orchestrator — a pure TypeScript pnpm monorepo.
 
-<!-- TODO: Remove prompt.stats references (lines 336, 634) - replaced by adapter-level metrics -->
-
 ## Table of Contents
 
 - [Overview](#overview)
@@ -352,7 +350,6 @@ interface DebateConfig {
 | `judge.started`           | `roundNumber`                                                         |
 | `judge.completed`         | `roundNumber`, `verdict: JudgeVerdict`                                |
 | `debate.completed`        | `reason: TerminationReason`, `summary?`, `outputDir?`                 |
-| `prompt.stats`            | `roundNumber`, `speaker: "proposer" \| "challenger" \| "judge"`, `promptChars` |
 | `user.inject`             | `target: "proposer" \| "challenger" \| "both" \| "judge"`, `text`, `priority` |
 | `clarification.requested` | `source`, `question`, `judgeComment?`                                 |
 | `clarification.provided`  | `answer`, `answeredBy: "user" \| "judge"`                             |
@@ -650,7 +647,7 @@ interface RunDebateOptions {
 2. Create `DebateDirector` instance with `DirectorConfig`
 3. Emit `debate.started` (or `debate.resumed` with `fromRound` if resuming)
 4. Loop while not terminated:
-   - **Proposer turn:** Turn 1 → `buildInitialPrompt({ role, topic, systemPrompt })`, Turn 2+ → `buildIncrementalPrompt({ opponentText, judgeText, schemaRefreshMode })` → emit `prompt.stats` → `adapter.sendTurn()` → wait for `turn.completed` → check for `debate_meta` extraction (update consecutive failure counter)
+   - **Proposer turn:** Turn 1 → `buildInitialPrompt({ role, topic, systemPrompt })`, Turn 2+ → `buildIncrementalPrompt({ opponentText, judgeText, schemaRefreshMode })` → `adapter.sendTurn()` → wait for `turn.completed` → check for `debate_meta` extraction (update consecutive failure counter)
    - **Challenger turn:** same incremental pattern (Turn 1 includes proposer's opening via `operationalPreamble`)
    - **Director evaluates:** `director.evaluate(bus.snapshot())` → push `director.action` event
    - **Execute action:** `end-debate` → break to Final Outcome; `trigger-judge` → run Judge turn (Turn 1 → `buildJudgeInitialPrompt`, Turn 2+ → `buildJudgeIncrementalPrompt`); `inject-guidance` → store for next turn; `await-user` → block for clarification; `continue` → next round
