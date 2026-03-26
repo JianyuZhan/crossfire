@@ -48,6 +48,7 @@
     - [Length Budget](#length-budget)
     - [Provider Strategy](#provider-strategy)
     - [TurnPromptOptions](#turnpromptoptions-compatibility)
+    - [Incremental Prompt Builders](#incremental-prompt-builders)
   - [Judge Turn](#judge-turn)
   - [Action Plan Synthesis](#action-plan-synthesis)
     - [Pipeline Overview](#pipeline-overview)
@@ -776,6 +777,24 @@ interface TurnPromptOptions {
 ```
 
 The old `clarifications` field is removed — superseded by `directorGuidance` and `userInjection`.
+
+#### Incremental Prompt Builders
+
+New functions that produce prompts for the incremental prompt strategy. These coexist with the 4-layer functions above (which will be removed once the runner switches over).
+
+| Function                          | Purpose                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `defaultSystemPrompt(role)`       | Returns role-appropriate identity text for proposer/challenger/judge                            |
+| `buildInitialPrompt(input)`       | Turn 1: system prompt + topic + round info + language hint + optional preamble + full schema    |
+| `buildIncrementalPrompt(input)`   | Turn 2+: round header + optional judge text + opponent text (no truncation) + schema reminder   |
+| `buildJudgeInitialPrompt(input)`  | Judge Turn 1: system prompt + topic + both debater outputs + verdict schema                     |
+| `buildJudgeIncrementalPrompt(input)` | Judge Turn 2+: round header + both debater outputs + schema reminder or full                 |
+| `buildTranscriptRecoveryPrompt(input)` | Reconstructs full context from transcript array; budgeted mode when transcript exceeds limit |
+
+Key design differences from the 4-layer system:
+- **No truncation** of opponent text — providers with session/thread handle context windowing natively.
+- **Schema refresh modes**: full schema on Turn 1 and every N rounds, reminder-only otherwise.
+- **Transcript recovery**: for stateless providers (Gemini) or after session loss, rebuilds context from event store with optional budget-aware summarization (default 200K chars).
 
 ### Judge Turn
 
