@@ -17,6 +17,7 @@ function mockAdapter(id: string): AgentAdapter {
 			adapterSessionId: `${id}-session`,
 			providerSessionId: undefined,
 			adapterId: id as any,
+			transcript: [],
 		}),
 		sendTurn: vi.fn().mockResolvedValue({ turnId: "t1", status: "completed" }),
 		onEvent: vi.fn().mockReturnValue(() => {}),

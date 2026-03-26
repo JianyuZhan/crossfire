@@ -7,6 +7,7 @@ import type {
 	TurnHandle,
 	TurnInput,
 } from "@crossfire/adapter-core";
+import { parseTurnId } from "@crossfire/adapter-core";
 import type { AdapterCapabilities } from "@crossfire/adapter-core";
 import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
 import { mapSdkMessage } from "./event-mapper.js";
@@ -65,6 +66,7 @@ export class ClaudeAdapter implements AgentAdapter {
 			adapterSessionId,
 			providerSessionId: undefined,
 			adapterId: "claude",
+			transcript: [],
 		};
 		return handle;
 	}
@@ -151,7 +153,7 @@ export class ClaudeAdapter implements AgentAdapter {
 		});
 
 		// Process the async generator in the background
-		this.processMessages(query.messages, ctx, handle).catch(() => {
+		this.processMessages(query.messages, ctx, handle, input).catch(() => {
 			// Errors are handled inside processMessages via run.error emission
 		});
 
@@ -218,6 +220,7 @@ export class ClaudeAdapter implements AgentAdapter {
 		messages: AsyncGenerator<SdkMessage, void, unknown>,
 		ctx: { adapterId: "claude"; adapterSessionId: string; turnId: string },
 		handle: SessionHandle,
+		turnInput: TurnInput,
 	): Promise<void> {
 		try {
 			for await (const msg of messages) {
@@ -226,6 +229,20 @@ export class ClaudeAdapter implements AgentAdapter {
 					// When we get a session.started event, update the handle's providerSessionId
 					if (event.kind === "session.started") {
 						handle.providerSessionId = event.providerSessionId;
+					}
+					// When a turn completes its final message, append to transcript
+					if (event.kind === "message.final") {
+						const role = turnInput.role ?? parseTurnId(turnInput.turnId).role;
+						const roundNumber =
+							turnInput.roundNumber ??
+							parseTurnId(turnInput.turnId).roundNumber;
+						if (role && roundNumber !== undefined) {
+							handle.transcript.push({
+								roundNumber,
+								role,
+								content: event.text,
+							});
+						}
 					}
 					this.emit(event);
 				}

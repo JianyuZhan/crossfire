@@ -840,6 +840,157 @@ describe("ClaudeAdapter", () => {
 		});
 	});
 
+	describe("transcript tracking", () => {
+		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{ type: "assistant", content: "Hello world" },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 10, output_tokens: 5 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "hello", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0]).toEqual({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Hello world",
+			});
+		});
+
+		it("uses explicit role and roundNumber from TurnInput", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{ type: "assistant", content: "Challenger response" },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 10, output_tokens: 5 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, {
+				prompt: "challenge",
+				turnId: "custom-id",
+				role: "challenger",
+				roundNumber: 3,
+			});
+			await waitForTurnCompleted(events, "custom-id");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0].role).toBe("challenger");
+			expect(handle.transcript[0].roundNumber).toBe(3);
+		});
+
+		it("does not append to transcript when turnId does not match pattern and no explicit role", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{ type: "assistant", content: "Some text" },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 10, output_tokens: 5 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, {
+				prompt: "hello",
+				turnId: "unknown-format",
+			});
+			await waitForTurnCompleted(events, "unknown-format");
+
+			expect(handle.transcript).toHaveLength(0);
+		});
+
+		it("accumulates transcript across multiple turns", async () => {
+			let callCount = 0;
+			const queryFn: QueryFn = () => {
+				callCount++;
+				const msgs: SdkMessage[] =
+					callCount === 1
+						? [
+								{
+									type: "system/init",
+									sessionId: "ps1",
+									model: "haiku",
+									tools: [],
+								},
+								{ type: "assistant", content: "Turn 1 response" },
+								{
+									type: "result",
+									subtype: "success",
+									usage: { input_tokens: 10, output_tokens: 5 },
+									duration_ms: 100,
+								},
+							]
+						: [
+								{ type: "assistant", content: "Turn 2 response" },
+								{
+									type: "result",
+									subtype: "success",
+									usage: { input_tokens: 15, output_tokens: 8 },
+									duration_ms: 200,
+								},
+							];
+				return { messages: messagesFrom(msgs), interrupt: vi.fn() };
+			};
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, { prompt: "turn 1", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			await adapter.sendTurn(handle, { prompt: "turn 2", turnId: "c-2" });
+			await waitForTurnCompleted(events, "c-2");
+
+			expect(handle.transcript).toHaveLength(2);
+			expect(handle.transcript[0].role).toBe("proposer");
+			expect(handle.transcript[0].roundNumber).toBe(1);
+			expect(handle.transcript[1].role).toBe("challenger");
+			expect(handle.transcript[1].roundNumber).toBe(2);
+		});
+
+		it("startSession initializes empty transcript", async () => {
+			const { queryFn } = mockQueryFn([]);
+			adapter = new ClaudeAdapter({ queryFn });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			expect(handle.transcript).toEqual([]);
+		});
+	});
+
 	describe("cache token extraction", () => {
 		it("extracts cacheReadTokens and cacheWriteTokens from usage with snake_case fields", async () => {
 			const msgs: SdkMessage[] = [

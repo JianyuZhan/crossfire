@@ -11,29 +11,30 @@ import {
 	ResumeError,
 	TransportError,
 } from "../src/errors.js";
-import type {
-	AgentAdapter,
-	ApprovalRequestEvent,
-	BaseEvent,
-	LocalTurnMetrics,
-	MessageDeltaEvent,
-	MessageFinalEvent,
-	NormalizedEvent,
-	ProviderUsageMetrics,
-	ProviderUsageSemantics,
-	RunErrorEvent,
-	RunWarningEvent,
-	SessionHandle,
-	SessionStartedEvent,
-	StartSessionInput,
-	ThinkingDeltaEvent,
-	ToolCallEvent,
-	ToolResultEvent,
-	TurnCompletedEvent,
-	TurnHandle,
-	TurnInput,
-	TurnRecord,
-	UsageUpdatedEvent,
+import {
+	type AgentAdapter,
+	type ApprovalRequestEvent,
+	type BaseEvent,
+	type LocalTurnMetrics,
+	type MessageDeltaEvent,
+	type MessageFinalEvent,
+	type NormalizedEvent,
+	type ProviderUsageMetrics,
+	type ProviderUsageSemantics,
+	type RunErrorEvent,
+	type RunWarningEvent,
+	type SessionHandle,
+	type SessionStartedEvent,
+	type StartSessionInput,
+	type ThinkingDeltaEvent,
+	type ToolCallEvent,
+	type ToolResultEvent,
+	type TurnCompletedEvent,
+	type TurnHandle,
+	type TurnInput,
+	type TurnRecord,
+	type UsageUpdatedEvent,
+	parseTurnId,
 } from "../src/types.js";
 
 describe("NormalizedEvent types", () => {
@@ -60,6 +61,7 @@ describe("NormalizedEvent types", () => {
 			adapterSessionId: "s1",
 			providerSessionId: undefined,
 			adapterId: "claude",
+			transcript: [],
 		};
 		expect(handle.providerSessionId).toBeUndefined();
 	});
@@ -69,8 +71,20 @@ describe("NormalizedEvent types", () => {
 			adapterSessionId: "s1",
 			providerSessionId: "ps1",
 			adapterId: "codex",
+			transcript: [],
 		};
 		expect(handle.providerSessionId).toBe("ps1");
+	});
+
+	it("SessionHandle initializes with empty transcript", () => {
+		const handle: SessionHandle = {
+			adapterSessionId: "s1",
+			providerSessionId: undefined,
+			adapterId: "claude",
+			transcript: [],
+		};
+		expect(handle.transcript).toEqual([]);
+		expect(handle.transcript).toHaveLength(0);
 	});
 
 	it("TurnCompletedEvent has durationMs", () => {
@@ -337,5 +351,63 @@ describe("Incremental Prompt & Token Tracking types", () => {
 		expect(event.cacheReadTokens).toBeUndefined();
 		expect(event.semantics).toBeUndefined();
 		expect(event.localMetrics).toBeUndefined();
+	});
+
+	it("TurnInput accepts optional role and roundNumber", () => {
+		const input: TurnInput = {
+			prompt: "test",
+			turnId: "p-1",
+			role: "proposer",
+			roundNumber: 1,
+		};
+		expect(input.role).toBe("proposer");
+		expect(input.roundNumber).toBe(1);
+	});
+
+	it("TurnInput role and roundNumber are optional", () => {
+		const input: TurnInput = {
+			prompt: "test",
+			turnId: "t1",
+		};
+		expect(input.role).toBeUndefined();
+		expect(input.roundNumber).toBeUndefined();
+	});
+});
+
+describe("parseTurnId", () => {
+	it("parses 'p-1' as proposer round 1", () => {
+		const result = parseTurnId("p-1");
+		expect(result.role).toBe("proposer");
+		expect(result.roundNumber).toBe(1);
+	});
+
+	it("parses 'c-3' as challenger round 3", () => {
+		const result = parseTurnId("c-3");
+		expect(result.role).toBe("challenger");
+		expect(result.roundNumber).toBe(3);
+	});
+
+	it("parses 'j-2' as judge round 2", () => {
+		const result = parseTurnId("j-2");
+		expect(result.role).toBe("judge");
+		expect(result.roundNumber).toBe(2);
+	});
+
+	it("returns undefined for unrecognized patterns", () => {
+		const result = parseTurnId("unknown-format");
+		expect(result.role).toBeUndefined();
+		expect(result.roundNumber).toBeUndefined();
+	});
+
+	it("returns undefined for empty string", () => {
+		const result = parseTurnId("");
+		expect(result.role).toBeUndefined();
+		expect(result.roundNumber).toBeUndefined();
+	});
+
+	it("returns undefined for partial match like 'p-'", () => {
+		const result = parseTurnId("p-");
+		expect(result.role).toBeUndefined();
+		expect(result.roundNumber).toBeUndefined();
 	});
 });

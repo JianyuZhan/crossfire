@@ -730,6 +730,91 @@ describe("CodexAdapter", () => {
 		});
 	});
 
+	describe("transcript tracking", () => {
+		async function setupSessionHelper() {
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			return sessionPromise;
+		}
+
+		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
+			const { events } = collectEvents(adapter);
+			const handle = await setupSessionHelper();
+
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "test",
+				turnId: "p-1",
+			});
+			const turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-t1", status: "running" },
+			});
+			await turnPromise;
+
+			// Send item/completed with agentMessage to trigger message.final
+			mock.sendNotification("item/completed", {
+				item: {
+					type: "agentMessage",
+					id: "msg1",
+					content: [{ type: "text", text: "Proposer response" }],
+				},
+			});
+			await new Promise((r) => setTimeout(r, 50));
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0]).toEqual({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Proposer response",
+			});
+		});
+
+		it("uses explicit role and roundNumber from TurnInput", async () => {
+			const { events } = collectEvents(adapter);
+			const handle = await setupSessionHelper();
+
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "test",
+				turnId: "custom-id",
+				role: "judge",
+				roundNumber: 5,
+			});
+			const turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-t1", status: "running" },
+			});
+			await turnPromise;
+
+			mock.sendNotification("item/completed", {
+				item: {
+					type: "agentMessage",
+					id: "msg1",
+					content: [{ type: "text", text: "Judge verdict" }],
+				},
+			});
+			await new Promise((r) => setTimeout(r, 50));
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0].role).toBe("judge");
+			expect(handle.transcript[0].roundNumber).toBe(5);
+		});
+
+		it("startSession initializes empty transcript", async () => {
+			const handle = await setupSessionHelper();
+			expect(handle.transcript).toEqual([]);
+		});
+	});
+
 	describe("onEvent() / unsubscribe", () => {
 		it("returns unsubscribe function that stops delivery", async () => {
 			const { events, unsubscribe } = collectEvents(adapter);

@@ -1,13 +1,14 @@
-import type {
-	AgentAdapter,
-	NormalizedEvent,
-	SessionHandle,
-	StartSessionInput,
-	TurnHandle,
-	TurnInput,
+import {
+	type AdapterCapabilities,
+	type AgentAdapter,
+	GEMINI_CAPABILITIES,
+	type NormalizedEvent,
+	type SessionHandle,
+	type StartSessionInput,
+	type TurnHandle,
+	type TurnInput,
+	parseTurnId,
 } from "@crossfire/adapter-core";
-import type { AdapterCapabilities } from "@crossfire/adapter-core";
-import { GEMINI_CAPABILITIES } from "@crossfire/adapter-core";
 import { type GeminiMapContext, mapGeminiEvent } from "./event-mapper.js";
 import { type ProcessHandle, ProcessManager } from "./process-manager.js";
 import { type HistoryEntry, buildStatelessPrompt } from "./prompt-builder.js";
@@ -37,6 +38,8 @@ interface GeminiSessionContext {
 	sessionStarted: boolean; // global flag: has session.started been emitted?
 	currentProcess: ProcessHandle | null;
 	history: HistoryEntry[];
+	currentTurnRole?: "proposer" | "challenger" | "judge";
+	currentTurnRoundNumber?: number;
 }
 
 let sessionCounter = 0;
@@ -89,6 +92,7 @@ export class GeminiAdapter implements AgentAdapter {
 			adapterSessionId,
 			providerSessionId: undefined,
 			adapterId: "gemini",
+			transcript: [],
 		};
 	}
 
@@ -102,6 +106,11 @@ export class GeminiAdapter implements AgentAdapter {
 		if (!session) {
 			throw new Error(`Unknown session: ${handle.adapterSessionId}`);
 		}
+
+		// Store role/roundNumber for transcript tracking
+		const parsed = parseTurnId(input.turnId);
+		session.currentTurnRole = input.role ?? parsed.role;
+		session.currentTurnRoundNumber = input.roundNumber ?? parsed.roundNumber;
 
 		const turnState: TurnRuntimeState = {
 			completed: false,
@@ -302,6 +311,20 @@ export class GeminiAdapter implements AgentAdapter {
 					// Track sessionStarted on the session context
 					if (ne.kind === "session.started") {
 						session.sessionStarted = true;
+					}
+
+					// Append to transcript when a turn's final message arrives
+					if (ne.kind === "message.final") {
+						if (
+							session.currentTurnRole &&
+							session.currentTurnRoundNumber !== undefined
+						) {
+							handle.transcript.push({
+								roundNumber: session.currentTurnRoundNumber,
+								role: session.currentTurnRole,
+								content: ne.text,
+							});
+						}
 					}
 
 					this.emit(ne);

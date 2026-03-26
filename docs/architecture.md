@@ -208,6 +208,21 @@ interface SessionHandle {
   adapterSessionId: string;
   providerSessionId: string | undefined; // set timing varies by adapter
   adapterId: "claude" | "codex" | "gemini";
+  transcript: TurnRecord[]; // universal transcript of completed turns — enables recovery prompt reconstruction
+}
+```
+
+Every adapter initializes `transcript: []` in `startSession()` and appends a `TurnRecord` when a `message.final` event fires. Role and round number are resolved from explicit `TurnInput.role`/`TurnInput.roundNumber` fields, falling back to `parseTurnId()` which parses the `{p|c|j}-{N}` convention.
+
+### TurnInput
+
+```typescript
+interface TurnInput {
+  prompt: string;
+  turnId: string;
+  timeout?: number;
+  role?: "proposer" | "challenger" | "judge"; // hint for transcript tracking
+  roundNumber?: number; // hint for transcript tracking
 }
 ```
 

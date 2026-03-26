@@ -403,6 +403,101 @@ describe("GeminiAdapter", () => {
 		});
 	});
 
+	describe("transcript tracking", () => {
+		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
+			const { pm } = createMockProcessManager([
+				{
+					lines: [
+						initLine("s1"),
+						messageLine("Proposer argument"),
+						resultLine(),
+					],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "hi", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0]).toEqual({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Proposer argument",
+			});
+		});
+
+		it("uses explicit role and roundNumber from TurnInput", async () => {
+			const { pm } = createMockProcessManager([
+				{
+					lines: [initLine("s1"), messageLine("Judge says"), resultLine()],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, {
+				prompt: "judge",
+				turnId: "custom-id",
+				role: "judge",
+				roundNumber: 3,
+			});
+			await waitForTurnCompleted(events, "custom-id");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0].role).toBe("judge");
+			expect(handle.transcript[0].roundNumber).toBe(3);
+		});
+
+		it("accumulates transcript across multiple turns", async () => {
+			const { pm } = createMockProcessManager([
+				{
+					lines: [initLine("s1"), messageLine("Turn 1"), resultLine()],
+					exitCode: 0,
+				},
+				{
+					lines: [initLine("s1"), messageLine("Turn 2"), resultLine()],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, { prompt: "turn 1", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			await adapter.sendTurn(handle, { prompt: "turn 2", turnId: "c-2" });
+			await waitForTurnCompleted(events, "c-2");
+
+			expect(handle.transcript).toHaveLength(2);
+			expect(handle.transcript[0].role).toBe("proposer");
+			expect(handle.transcript[1].role).toBe("challenger");
+		});
+
+		it("startSession initializes empty transcript", async () => {
+			const { pm } = createMockProcessManager([]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			expect(handle.transcript).toEqual([]);
+		});
+	});
+
 	describe("close()", () => {
 		it("kills running process", async () => {
 			let killCalled = false;

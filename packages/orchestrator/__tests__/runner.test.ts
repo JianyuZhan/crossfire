@@ -30,6 +30,7 @@ function createScriptedAdapter(
 				adapterSessionId: sessionId,
 				providerSessionId: `p-${sessionId}`,
 				adapterId: id,
+				transcript: [],
 			};
 		},
 		async sendTurn(_handle: SessionHandle, input: TurnInput) {
