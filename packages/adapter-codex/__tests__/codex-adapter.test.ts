@@ -960,4 +960,151 @@ describe("CodexAdapter", () => {
 			expect(events).toHaveLength(0);
 		});
 	});
+
+	describe("localMetrics in usage.updated", () => {
+		it("attaches localMetrics to usage.updated events on first turn (with overhead)", async () => {
+			const { events } = collectEvents(adapter);
+			const testPrompt = "Hello world";
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+
+			// Send first turn
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: testPrompt,
+				turnId: "p-1",
+			});
+			const turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-turn-1", status: "running" },
+			});
+			await turnPromise;
+
+			// Simulate usage notification
+			mock.sendNotification("thread/tokenUsage/updated", {
+				inputTokens: 100,
+				outputTokens: 50,
+			});
+
+			await waitForEvent(events, (e) => e.kind === "usage.updated", 1000);
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.localMetrics).toBeDefined();
+				expect(usageEvent.localMetrics?.semanticChars).toBe(testPrompt.length);
+				// First turn should have adapter overhead (META_TOOL_INSTRUCTIONS)
+				expect(usageEvent.localMetrics?.adapterOverheadChars).toBeGreaterThan(
+					0,
+				);
+				expect(usageEvent.localMetrics?.totalChars).toBeGreaterThan(
+					testPrompt.length,
+				);
+			}
+		});
+
+		it("attaches localMetrics to usage.updated events on subsequent turns (no overhead)", async () => {
+			const { events } = collectEvents(adapter);
+			const testPrompt = "Follow up question";
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+
+			// Send first turn (to increment turnCount)
+			let turnPromise = adapter.sendTurn(handle, {
+				prompt: "First turn",
+				turnId: "p-1",
+			});
+			let turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-turn-1", status: "running" },
+			});
+			await turnPromise;
+
+			// Emit turn.completed
+			mock.serverToClient.write(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					method: "turn/completed",
+					params: {
+						turnId: "native-turn-1",
+						status: "completed",
+					},
+				}) + "\n",
+			);
+
+			await waitForEvent(
+				events,
+				(e) => e.kind === "turn.completed" && e.turnId === "p-1",
+				1000,
+			);
+
+			// Send second turn
+			turnPromise = adapter.sendTurn(handle, {
+				prompt: testPrompt,
+				turnId: "c-1",
+			});
+			turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-turn-2", status: "running" },
+			});
+			await turnPromise;
+
+			// Simulate usage notification for second turn
+			mock.sendNotification("thread/tokenUsage/updated", {
+				inputTokens: 150,
+				outputTokens: 60,
+			});
+
+			await waitForEvent(
+				events,
+				(e) =>
+					e.kind === "usage.updated" &&
+					e.turnId === "c-1" &&
+					e.inputTokens === 150,
+				1000,
+			);
+
+			const usageEvents = events.filter((e) => e.kind === "usage.updated");
+			const secondTurnUsage = usageEvents.find(
+				(e) => e.turnId === "c-1" && e.inputTokens === 150,
+			);
+			expect(secondTurnUsage).toBeDefined();
+			if (secondTurnUsage?.kind === "usage.updated") {
+				expect(secondTurnUsage.localMetrics).toBeDefined();
+				expect(secondTurnUsage.localMetrics?.semanticChars).toBe(
+					testPrompt.length,
+				);
+				// Subsequent turns should have NO adapter overhead
+				expect(secondTurnUsage.localMetrics?.adapterOverheadChars).toBe(0);
+				expect(secondTurnUsage.localMetrics?.totalChars).toBe(
+					testPrompt.length,
+				);
+			}
+		});
+	});
 });

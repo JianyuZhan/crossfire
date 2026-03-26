@@ -3,11 +3,13 @@ import {
 	type AgentAdapter,
 	type ApprovalDecision,
 	CODEX_CAPABILITIES,
+	type LocalTurnMetrics,
 	type NormalizedEvent,
 	type SessionHandle,
 	type StartSessionInput,
 	type TurnHandle,
 	type TurnInput,
+	measureLocalMetrics,
 	parseTurnId,
 } from "@crossfire/adapter-core";
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
@@ -47,6 +49,7 @@ interface SessionState {
 	turnCount: number;
 	currentTurnRole?: "proposer" | "challenger" | "judge";
 	currentTurnRoundNumber?: number;
+	pendingLocalMetrics?: LocalTurnMetrics;
 }
 
 /** Pending approval request */
@@ -179,10 +182,17 @@ export class CodexAdapter implements AgentAdapter {
 
 		// Append meta-tool instructions only on first turn so Codex knows how to call them
 		// Subsequent turns use incremental prompts that don't need the instructions repeated
-		const prompt =
-			session?.turnCount === 0
-				? input.prompt + META_TOOL_INSTRUCTIONS
-				: input.prompt;
+		const isFirstTurn = session?.turnCount === 0;
+		const prompt = isFirstTurn
+			? input.prompt + META_TOOL_INSTRUCTIONS
+			: input.prompt;
+
+		// Measure local metrics: first turn has overhead, subsequent turns don't
+		const overheadText = isFirstTurn ? META_TOOL_INSTRUCTIONS : "";
+		const localMetrics = measureLocalMetrics(input.prompt, overheadText);
+		if (session) {
+			session.pendingLocalMetrics = localMetrics;
+		}
 
 		try {
 			// Send `turn/start` request — JSON-RPC errors reject the promise
@@ -373,6 +383,13 @@ export class CodexAdapter implements AgentAdapter {
 				if (event.kind === "turn.completed" && ctx.turnStartTime) {
 					(event as { durationMs: number }).durationMs =
 						Date.now() - ctx.turnStartTime;
+				}
+				// Attach local metrics to usage.updated events
+				if (event.kind === "usage.updated") {
+					const session = this.sessions.get(ctx.adapterSessionId);
+					if (session?.pendingLocalMetrics) {
+						event.localMetrics = session.pendingLocalMetrics;
+					}
 				}
 				// Append to transcript when a turn's final message arrives
 				if (event.kind === "message.final") {

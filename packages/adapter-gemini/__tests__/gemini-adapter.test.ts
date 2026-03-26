@@ -763,4 +763,44 @@ describe("GeminiAdapter", () => {
 			}
 		});
 	});
+
+	describe("localMetrics in usage.updated", () => {
+		it("attaches localMetrics to usage.updated events", async () => {
+			const testPrompt = "Hello Gemini world";
+			const { pm } = createMockProcessManager([
+				{
+					lines: [
+						initLine("s1"),
+						JSON.stringify({ type: "message_delta", text: "Hi!" }),
+						JSON.stringify({
+							type: "usage",
+							input_tokens: 100,
+							output_tokens: 50,
+						}),
+						resultLine(),
+					],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: testPrompt, turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.localMetrics).toBeDefined();
+				expect(usageEvent.localMetrics?.semanticChars).toBe(testPrompt.length);
+				// Gemini has no adapter overhead
+				expect(usageEvent.localMetrics?.adapterOverheadChars).toBe(0);
+				expect(usageEvent.localMetrics?.totalChars).toBe(testPrompt.length);
+				expect(usageEvent.localMetrics?.semanticUtf8Bytes).toBeGreaterThan(0);
+			}
+		});
+	});
 });

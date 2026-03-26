@@ -138,7 +138,7 @@ interface AgentAdapter {
 
 **Behavioral contracts:**
 
-- **`sendTurn()`** resolves once the turn is accepted and streaming begins — NOT when the turn finishes. Turn completion is signaled exclusively via the `turn.completed` event.
+- **`sendTurn()`** resolves once the turn is accepted and streaming begins — NOT when the turn finishes. Turn completion is signaled exclusively via the `turn.completed` event. Adapters measure local prompt metrics via `measureLocalMetrics(semanticText, overheadText)` and attach `LocalTurnMetrics` to `usage.updated` events.
 - **`onEvent()`** delivers events from ALL sessions managed by the adapter instance. Consumers filter on `adapterSessionId`. The returned function unsubscribes entirely.
 - **`approve()`/`interrupt()`** are `undefined` (not no-op stubs) when the adapter's capabilities don't support them. Calling when undefined throws `AdapterError`.
 - **`close()`** stops event emission for that session. There is no `session.closed` event — close is imperative, not observable.

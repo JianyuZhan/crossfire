@@ -1,13 +1,14 @@
 import type {
 	AgentAdapter,
 	ApprovalDecision,
+	LocalTurnMetrics,
 	NormalizedEvent,
 	SessionHandle,
 	StartSessionInput,
 	TurnHandle,
 	TurnInput,
 } from "@crossfire/adapter-core";
-import { parseTurnId } from "@crossfire/adapter-core";
+import { measureLocalMetrics, parseTurnId } from "@crossfire/adapter-core";
 import type { AdapterCapabilities } from "@crossfire/adapter-core";
 import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
@@ -24,6 +25,7 @@ export interface ClaudeAdapterOptions {
 interface QueryContext {
 	query: QueryResult;
 	currentTurnId: string;
+	pendingLocalMetrics?: LocalTurnMetrics;
 }
 
 /** Pending approval request state */
@@ -83,6 +85,9 @@ export class ClaudeAdapter implements AgentAdapter {
 			adapterSessionId: handle.adapterSessionId,
 			turnId: input.turnId,
 		};
+
+		// Measure local metrics for this turn (Claude has no adapter overhead)
+		const localMetrics = measureLocalMetrics(input.prompt);
 
 		// Build hooks for this turn
 		const hooks = buildHooks(
@@ -147,10 +152,11 @@ export class ClaudeAdapter implements AgentAdapter {
 			hooks,
 		});
 
-		// Store query context for interrupt
+		// Store query context for interrupt and attach local metrics
 		this.queries.set(handle.adapterSessionId, {
 			query,
 			currentTurnId: input.turnId,
+			pendingLocalMetrics: localMetrics,
 		});
 
 		// Process the async generator in the background
@@ -230,6 +236,13 @@ export class ClaudeAdapter implements AgentAdapter {
 					// When we get a session.started event, update the handle's providerSessionId
 					if (event.kind === "session.started") {
 						handle.providerSessionId = event.providerSessionId;
+					}
+					// Attach local metrics to usage.updated events
+					if (event.kind === "usage.updated") {
+						const queryCtx = this.queries.get(ctx.adapterSessionId);
+						if (queryCtx?.pendingLocalMetrics) {
+							event.localMetrics = queryCtx.pendingLocalMetrics;
+						}
 					}
 					// When a turn completes its final message, append to transcript
 					if (event.kind === "message.final") {
@@ -335,6 +348,13 @@ export class ClaudeAdapter implements AgentAdapter {
 				for (const event of events) {
 					if (event.kind === "session.started") {
 						handle.providerSessionId = event.providerSessionId;
+					}
+					// Attach local metrics to usage.updated events
+					if (event.kind === "usage.updated") {
+						const queryCtx = this.queries.get(ctx.adapterSessionId);
+						if (queryCtx?.pendingLocalMetrics) {
+							event.localMetrics = queryCtx.pendingLocalMetrics;
+						}
 					}
 					if (event.kind === "message.final") {
 						const role = turnInput.role ?? parseTurnId(turnInput.turnId).role;

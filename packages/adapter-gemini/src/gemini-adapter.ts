@@ -2,11 +2,13 @@ import {
 	type AdapterCapabilities,
 	type AgentAdapter,
 	GEMINI_CAPABILITIES,
+	type LocalTurnMetrics,
 	type NormalizedEvent,
 	type SessionHandle,
 	type StartSessionInput,
 	type TurnHandle,
 	type TurnInput,
+	measureLocalMetrics,
 	parseTurnId,
 } from "@crossfire/adapter-core";
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
@@ -41,6 +43,7 @@ interface GeminiSessionContext {
 	history: HistoryEntry[];
 	currentTurnRole?: "proposer" | "challenger" | "judge";
 	currentTurnRoundNumber?: number;
+	pendingLocalMetrics?: LocalTurnMetrics;
 }
 
 let sessionCounter = 0;
@@ -112,6 +115,9 @@ export class GeminiAdapter implements AgentAdapter {
 		const parsed = parseTurnId(input.turnId);
 		session.currentTurnRole = input.role ?? parsed.role;
 		session.currentTurnRoundNumber = input.roundNumber ?? parsed.roundNumber;
+
+		// Measure local metrics (Gemini has no adapter overhead)
+		session.pendingLocalMetrics = measureLocalMetrics(input.prompt);
 
 		const turnState: TurnRuntimeState = {
 			completed: false,
@@ -323,6 +329,11 @@ export class GeminiAdapter implements AgentAdapter {
 					// Track sessionStarted on the session context
 					if (ne.kind === "session.started") {
 						session.sessionStarted = true;
+					}
+
+					// Attach local metrics to usage.updated events
+					if (ne.kind === "usage.updated" && session.pendingLocalMetrics) {
+						ne.localMetrics = session.pendingLocalMetrics;
 					}
 
 					// Append to transcript when a turn's final message arrives
