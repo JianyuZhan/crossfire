@@ -15,9 +15,12 @@ import type {
 	AgentAdapter,
 	ApprovalRequestEvent,
 	BaseEvent,
+	LocalTurnMetrics,
 	MessageDeltaEvent,
 	MessageFinalEvent,
 	NormalizedEvent,
+	ProviderUsageMetrics,
+	ProviderUsageSemantics,
 	RunErrorEvent,
 	RunWarningEvent,
 	SessionHandle,
@@ -29,6 +32,8 @@ import type {
 	TurnCompletedEvent,
 	TurnHandle,
 	TurnInput,
+	TurnRecord,
+	UsageUpdatedEvent,
 } from "../src/types.js";
 
 describe("NormalizedEvent types", () => {
@@ -194,5 +199,143 @@ describe("Error types", () => {
 		const err = new TransportError("codex", "connection lost");
 		expect(err.recoverable).toBe(true);
 		expect(err.name).toBe("TransportError");
+	});
+});
+
+describe("Incremental Prompt & Token Tracking types", () => {
+	it("TurnRecord has required fields", () => {
+		const record: TurnRecord = {
+			roundNumber: 1,
+			role: "proposer",
+			content: "test content",
+		};
+		expect(record.roundNumber).toBe(1);
+		expect(record.role).toBe("proposer");
+		expect(record.content).toBe("test content");
+		expect(record.meta).toBeUndefined();
+	});
+
+	it("TurnRecord accepts optional meta", () => {
+		const record: TurnRecord = {
+			roundNumber: 2,
+			role: "challenger",
+			content: "challenge",
+			meta: {
+				stance: "against",
+				confidence: 0.8,
+				keyPoints: ["point1", "point2"],
+				concessions: ["concession1"],
+			},
+		};
+		expect(record.meta?.stance).toBe("against");
+		expect(record.meta?.confidence).toBe(0.8);
+		expect(record.meta?.keyPoints).toHaveLength(2);
+	});
+
+	it("LocalTurnMetrics has semantic/overhead/total split", () => {
+		const metrics: LocalTurnMetrics = {
+			semanticChars: 100,
+			semanticUtf8Bytes: 200,
+			adapterOverheadChars: 50,
+			adapterOverheadUtf8Bytes: 100,
+			totalChars: 150,
+			totalUtf8Bytes: 300,
+		};
+		expect(metrics.totalChars).toBe(150);
+		expect(metrics.totalTokensEstimate).toBeUndefined();
+	});
+
+	it("LocalTurnMetrics accepts optional token estimate", () => {
+		const metrics: LocalTurnMetrics = {
+			semanticChars: 100,
+			semanticUtf8Bytes: 200,
+			adapterOverheadChars: 0,
+			adapterOverheadUtf8Bytes: 0,
+			totalChars: 100,
+			totalUtf8Bytes: 200,
+			totalTokensEstimate: 75,
+			tokenEstimateMethod: "chars/4",
+		};
+		expect(metrics.totalTokensEstimate).toBe(75);
+		expect(metrics.tokenEstimateMethod).toBe("chars/4");
+	});
+
+	it("ProviderUsageMetrics includes semantics label", () => {
+		const usage: ProviderUsageMetrics = {
+			inputTokens: 100,
+			outputTokens: 200,
+			semantics: "per_turn",
+		};
+		expect(usage.semantics).toBe("per_turn");
+		expect(usage.cacheReadTokens).toBeUndefined();
+	});
+
+	it("ProviderUsageMetrics supports all semantics values", () => {
+		const semanticsValues: ProviderUsageSemantics[] = [
+			"per_turn",
+			"cumulative_thread_total",
+			"session_delta_or_cached",
+			"unknown",
+		];
+		for (const sem of semanticsValues) {
+			const usage: ProviderUsageMetrics = {
+				semantics: sem,
+			};
+			expect(usage.semantics).toBe(sem);
+		}
+	});
+
+	it("ProviderUsageMetrics accepts cache tokens and raw data", () => {
+		const usage: ProviderUsageMetrics = {
+			inputTokens: 100,
+			outputTokens: 200,
+			cacheReadTokens: 1000,
+			cacheWriteTokens: 50,
+			semantics: "session_delta_or_cached",
+			raw: { provider: "claude", model: "haiku" },
+		};
+		expect(usage.cacheReadTokens).toBe(1000);
+		expect(usage.cacheWriteTokens).toBe(50);
+		expect(usage.raw).toEqual({ provider: "claude", model: "haiku" });
+	});
+
+	it("UsageUpdatedEvent supports new optional fields", () => {
+		const event: UsageUpdatedEvent = {
+			kind: "usage.updated",
+			timestamp: Date.now(),
+			adapterId: "claude",
+			adapterSessionId: "s1",
+			inputTokens: 3,
+			outputTokens: 500,
+			cacheReadTokens: 1200,
+			cacheWriteTokens: 50,
+			semantics: "session_delta_or_cached",
+			localMetrics: {
+				semanticChars: 100,
+				semanticUtf8Bytes: 200,
+				adapterOverheadChars: 0,
+				adapterOverheadUtf8Bytes: 0,
+				totalChars: 100,
+				totalUtf8Bytes: 200,
+			},
+		};
+		expect(event.cacheReadTokens).toBe(1200);
+		expect(event.semantics).toBe("session_delta_or_cached");
+		expect(event.localMetrics?.totalChars).toBe(100);
+	});
+
+	it("UsageUpdatedEvent backward compatible without new fields", () => {
+		const event: UsageUpdatedEvent = {
+			kind: "usage.updated",
+			timestamp: Date.now(),
+			adapterId: "codex",
+			adapterSessionId: "s2",
+			inputTokens: 100,
+			outputTokens: 50,
+		};
+		expect(event.inputTokens).toBe(100);
+		expect(event.cacheReadTokens).toBeUndefined();
+		expect(event.semantics).toBeUndefined();
+		expect(event.localMetrics).toBeUndefined();
 	});
 });

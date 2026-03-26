@@ -172,11 +172,22 @@ interface BaseEvent {
 | Tools          | `tool.call`, `tool.progress`, `tool.result` | `toolUseId`, `toolName`, `input`/`output`; `tool.progress` adds `elapsedSeconds`     |
 | Approvals      | `approval.request`, `approval.resolved`     | `requestId`, `approvalType`, `title`, `payload`, `suggestion?: "allow" \| "deny"`    |
 | Subagents      | `subagent.started`, `subagent.completed`    | subagent lifecycle                                                                   |
-| Metrics        | `usage.updated`                             | `inputTokens`, `outputTokens`, `totalCostUsd?`                                      |
-| Turn lifecycle | `turn.completed`                            | `status`, `durationMs`, `usage?`                                                     |
+| Metrics        | `usage.updated`                             | `inputTokens`, `outputTokens`, `totalCostUsd?`, `cacheReadTokens?`, `cacheWriteTokens?`, `semantics?`, `localMetrics?` |
+| Turn lifecycle | `turn.completed`                            | `status`, `durationMs`, `usage?` (includes same cache/semantics/localMetrics fields) |
 | Errors         | `run.error`, `run.warning`                  | `message`; `run.error` adds `recoverable: boolean`                                   |
 
 `turn.completed.status`: `"completed" | "interrupted" | "failed" | "timeout"`
+
+#### Incremental Prompt & Token Tracking Types
+
+For incremental prompt design and enhanced token tracking, `adapter-core` exports:
+
+- **`TurnRecord`**: Universal transcript for recovery when provider sessions are lost. Contains `roundNumber`, `role`, `content`, and optional lightweight `meta` (stance, confidence, keyPoints, concessions).
+- **`LocalTurnMetrics`**: Adapter-boundary measurement (chars/bytes split: semantic vs overhead vs total, optional token estimate). Enables cross-adapter comparison.
+- **`ProviderUsageSemantics`**: Label for provider token reporting behavior: `"per_turn"` | `"cumulative_thread_total"` | `"session_delta_or_cached"` | `"unknown"`.
+- **`ProviderUsageMetrics`**: Structured usage report with `semantics` label, optional `inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens`, and `raw` passthrough for provider-specific data.
+
+These types extend `UsageUpdatedEvent` and `TurnCompletedEvent.usage` to carry both local and provider metrics without loss of fidelity.
 
 ### AdapterCapabilities
 

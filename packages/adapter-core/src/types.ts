@@ -133,6 +133,53 @@ export interface UsageUpdatedEvent extends BaseEvent {
 	inputTokens: number;
 	outputTokens: number;
 	totalCostUsd?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
+	semantics?: ProviderUsageSemantics;
+	localMetrics?: LocalTurnMetrics;
+}
+
+// --- Incremental Prompt & Token Tracking Types ---
+
+/** Record of a completed turn for universal transcript fallback */
+export interface TurnRecord {
+	roundNumber: number;
+	role: "proposer" | "challenger" | "judge";
+	content: string;
+	/** Lightweight extracted metadata — avoids circular dependency on orchestrator-core */
+	meta?: {
+		stance?: string;
+		confidence?: number;
+		keyPoints?: string[];
+		concessions?: string[];
+	};
+}
+
+/** Local metrics measured at the adapter boundary before sending to provider */
+export interface LocalTurnMetrics {
+	semanticChars: number;
+	semanticUtf8Bytes: number;
+	adapterOverheadChars: number;
+	adapterOverheadUtf8Bytes: number;
+	totalChars: number;
+	totalUtf8Bytes: number;
+	totalTokensEstimate?: number;
+	tokenEstimateMethod?: string;
+}
+
+export type ProviderUsageSemantics =
+	| "per_turn"
+	| "cumulative_thread_total"
+	| "session_delta_or_cached"
+	| "unknown";
+
+export interface ProviderUsageMetrics {
+	inputTokens?: number;
+	outputTokens?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
+	raw?: unknown;
+	semantics: ProviderUsageSemantics;
 }
 
 // -- Turn completion --
@@ -145,6 +192,10 @@ export interface TurnCompletedEvent extends BaseEvent {
 		inputTokens: number;
 		outputTokens: number;
 		totalCostUsd?: number;
+		cacheReadTokens?: number;
+		cacheWriteTokens?: number;
+		semantics?: ProviderUsageSemantics;
+		localMetrics?: LocalTurnMetrics;
 	};
 }
 
