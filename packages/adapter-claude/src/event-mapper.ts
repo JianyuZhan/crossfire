@@ -191,6 +191,8 @@ export function mapSdkMessage(
 
 			let inputTokens = 0;
 			let outputTokens = 0;
+			let cacheReadTokens: number | undefined;
+			let cacheWriteTokens: number | undefined;
 			let hasUsage = false;
 
 			if (rawUsage) {
@@ -203,6 +205,17 @@ export function mapSdkMessage(
 					(rawUsage.outputTokens as number) ??
 					(rawUsage.output_tokens as number) ??
 					0;
+
+				// Extract cache token fields (camelCase or snake_case)
+				const cacheRead =
+					(rawUsage.cacheReadInputTokens as number | undefined) ??
+					(rawUsage.cache_read_input_tokens as number | undefined);
+				if (cacheRead !== undefined) cacheReadTokens = cacheRead;
+
+				const cacheWrite =
+					(rawUsage.cacheCreationInputTokens as number | undefined) ??
+					(rawUsage.cache_creation_input_tokens as number | undefined);
+				if (cacheWrite !== undefined) cacheWriteTokens = cacheWrite;
 			}
 
 			const totalCostUsd =
@@ -216,6 +229,9 @@ export function mapSdkMessage(
 					inputTokens,
 					outputTokens,
 					totalCostUsd,
+					cacheReadTokens,
+					cacheWriteTokens,
+					semantics: "session_delta_or_cached" as const,
 				});
 			}
 

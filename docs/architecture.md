@@ -247,6 +247,7 @@ interface StartSessionInput {
 - **Approval:** JSON-RPC request-response. Server sends `requestApproval`, adapter emits `approval.request`, orchestrator calls `approve()`, adapter sends JSON-RPC response back.
 - **`interrupt()`**: `turn/interrupt` method.
 - **Plan:** `turn/plan/updated` notification → `plan.updated` event.
+- **Usage semantics:** `cumulative_thread_total` — `thread/tokenUsage/updated` reports cumulative totals across all turns in the thread.
 - **Schema:** Types derived from `codex app-server generate-ts` output.
 
 #### Gemini Adapter

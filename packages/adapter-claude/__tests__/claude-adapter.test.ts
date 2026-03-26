@@ -839,4 +839,103 @@ describe("ClaudeAdapter", () => {
 			expect(receivedHooks).toHaveProperty("PostToolUse");
 		});
 	});
+
+	describe("cache token extraction", () => {
+		it("extracts cacheReadTokens and cacheWriteTokens from usage with snake_case fields", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{
+					type: "result",
+					subtype: "success",
+					usage: {
+						input_tokens: 100,
+						output_tokens: 50,
+						cache_read_input_tokens: 80,
+						cache_creation_input_tokens: 20,
+					},
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "cached", turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.cacheReadTokens).toBe(80);
+				expect(usageEvent.cacheWriteTokens).toBe(20);
+				expect(usageEvent.semantics).toBe("session_delta_or_cached");
+			}
+		});
+
+		it("extracts cacheReadTokens and cacheWriteTokens from usage with camelCase fields", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{
+					type: "result",
+					subtype: "success",
+					usage: {
+						inputTokens: 100,
+						outputTokens: 50,
+						cacheReadInputTokens: 80,
+						cacheCreationInputTokens: 20,
+					},
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "cached", turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.cacheReadTokens).toBe(80);
+				expect(usageEvent.cacheWriteTokens).toBe(20);
+				expect(usageEvent.semantics).toBe("session_delta_or_cached");
+			}
+		});
+
+		it("omits cacheReadTokens and cacheWriteTokens when not present", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 100, output_tokens: 50 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "no cache", turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.cacheReadTokens).toBeUndefined();
+				expect(usageEvent.cacheWriteTokens).toBeUndefined();
+				expect(usageEvent.semantics).toBe("session_delta_or_cached");
+			}
+		});
+	});
 });
