@@ -9,6 +9,7 @@ import {
 	type TurnInput,
 	parseTurnId,
 } from "@crossfire/adapter-core";
+import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { type GeminiMapContext, mapGeminiEvent } from "./event-mapper.js";
 import { type ProcessHandle, ProcessManager } from "./process-manager.js";
 import { type HistoryEntry, buildStatelessPrompt } from "./prompt-builder.js";
@@ -204,11 +205,19 @@ export class GeminiAdapter implements AgentAdapter {
 			// Reset messageBuffer for B path, but keep sessionStarted flag
 			mapCtx.messageBuffer = "";
 
-			// Build stateless prompt
-			const statelessPrompt = buildStatelessPrompt(
-				input.prompt,
-				session.history,
-			);
+			// Build fallback prompt: prefer transcript recovery if recoveryContext is available
+			let fallbackPrompt: string;
+			if (handle.recoveryContext && handle.transcript.length > 0) {
+				fallbackPrompt = buildTranscriptRecoveryPrompt({
+					systemPrompt: handle.recoveryContext.systemPrompt,
+					topic: handle.recoveryContext.topic,
+					transcript: handle.transcript,
+					schemaType: handle.recoveryContext.schemaType,
+				});
+			} else {
+				fallbackPrompt = buildStatelessPrompt(input.prompt, session.history);
+			}
+			const statelessPrompt = fallbackPrompt;
 
 			// Build args with forceStateless
 			const fallbackArgs = this.resumeManager.buildArgs({
@@ -221,6 +230,9 @@ export class GeminiAdapter implements AgentAdapter {
 			turnState.fallbackTriggered = true;
 			turnState.intentionalKill = false;
 			turnState.resultSeen = false;
+
+			// Clear providerSessionId so Path B's init validation won't reject the new session
+			session.providerSessionId = undefined;
 
 			await this.runProcess(
 				session,

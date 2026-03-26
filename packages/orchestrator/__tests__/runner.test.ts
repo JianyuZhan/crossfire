@@ -1071,3 +1071,120 @@ describe("getSchemaRefreshMode", () => {
 		expect(getSchemaRefreshMode(5, 0, 0)).toBe("reminder");
 	});
 });
+
+describe("recoveryContext wiring", () => {
+	it("sets recoveryContext on proposer and challenger sessions", async () => {
+		const smallConfig: DebateConfig = {
+			...config,
+			maxRounds: 1,
+			proposerSystemPrompt: "Proposer system prompt",
+			challengerSystemPrompt: "Challenger system prompt",
+		};
+
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer round 1", {
+				stance: "agree",
+				confidence: 0.8,
+				key_points: ["Point"],
+			}),
+		});
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger round 1", {
+				stance: "disagree",
+				confidence: 0.7,
+				key_points: ["Counter"],
+			}),
+		});
+
+		const proposerSession = await proposer.startSession({
+			profile: "test",
+			workingDirectory: "/tmp",
+		});
+		const challengerSession = await challenger.startSession({
+			profile: "test",
+			workingDirectory: "/tmp",
+		});
+
+		const adapters: AdapterMap = {
+			proposer: { adapter: proposer, session: proposerSession },
+			challenger: { adapter: challenger, session: challengerSession },
+		};
+
+		await runDebate(smallConfig, adapters);
+
+		// Verify recoveryContext was set
+		expect(proposerSession.recoveryContext).toBeDefined();
+		expect(proposerSession.recoveryContext!.role).toBe("proposer");
+		expect(proposerSession.recoveryContext!.topic).toBe("Test debate topic");
+		expect(proposerSession.recoveryContext!.systemPrompt).toBe(
+			"Proposer system prompt",
+		);
+		expect(proposerSession.recoveryContext!.schemaType).toBe("debate_meta");
+		expect(proposerSession.recoveryContext!.maxRounds).toBe(1);
+
+		expect(challengerSession.recoveryContext).toBeDefined();
+		expect(challengerSession.recoveryContext!.role).toBe("challenger");
+		expect(challengerSession.recoveryContext!.systemPrompt).toBe(
+			"Challenger system prompt",
+		);
+	});
+
+	it("sets recoveryContext on judge session with judge_verdict schema", async () => {
+		const smallConfig: DebateConfig = {
+			...config,
+			maxRounds: 1,
+			judgeSystemPrompt: "Judge system prompt",
+		};
+
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "P round 1", {
+				stance: "agree",
+				confidence: 0.8,
+				key_points: ["Point"],
+			}),
+		});
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "C round 1", {
+				stance: "disagree",
+				confidence: 0.7,
+				key_points: ["Counter"],
+			}),
+		});
+		const judge = createScriptedAdapter("claude", {
+			"j-1": judgeTurnEvents("j-1", "claude", "claude-s1"),
+			"j-final": judgeTurnEvents("j-final", "claude", "claude-s1"),
+		});
+
+		const judgeSession = await judge.startSession({
+			profile: "test",
+			workingDirectory: "/tmp",
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			judge: { adapter: judge, session: judgeSession },
+		};
+
+		await runDebate(smallConfig, adapters);
+
+		expect(judgeSession.recoveryContext).toBeDefined();
+		expect(judgeSession.recoveryContext!.role).toBe("judge");
+		expect(judgeSession.recoveryContext!.schemaType).toBe("judge_verdict");
+		expect(judgeSession.recoveryContext!.systemPrompt).toBe(
+			"Judge system prompt",
+		);
+	});
+});

@@ -10,6 +10,7 @@ import type {
 import { parseTurnId } from "@crossfire/adapter-core";
 import type { AdapterCapabilities } from "@crossfire/adapter-core";
 import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
+import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { mapSdkMessage } from "./event-mapper.js";
 import { buildHooks } from "./hooks.js";
 import type { QueryFn, QueryResult, SdkMessage } from "./types.js";
@@ -249,6 +250,63 @@ export class ClaudeAdapter implements AgentAdapter {
 			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
+
+			// Attempt recovery if recoveryContext is available and we had a provider session
+			if (handle.recoveryContext && handle.providerSessionId) {
+				this.emit({
+					timestamp: Date.now(),
+					adapterId: ctx.adapterId,
+					adapterSessionId: ctx.adapterSessionId,
+					turnId: ctx.turnId,
+					kind: "run.warning",
+					message: `Resume failed (${message}), attempting transcript recovery`,
+				});
+
+				// Build recovery prompt from transcript
+				const recoveryPrompt = buildTranscriptRecoveryPrompt({
+					systemPrompt: handle.recoveryContext.systemPrompt,
+					topic: handle.recoveryContext.topic,
+					transcript: handle.transcript,
+					schemaType: handle.recoveryContext.schemaType,
+				});
+
+				// Clear provider session to force a fresh session
+				handle.providerSessionId = undefined;
+
+				// Build hooks for the recovery turn
+				const hooks = buildHooks(
+					(e) => this.emit(e),
+					{
+						adapterId: "claude",
+						adapterSessionId: handle.adapterSessionId,
+					},
+					() => turnInput.turnId,
+				);
+
+				// Start a new query without resume
+				const recoveryQuery = this.queryFn({
+					prompt: recoveryPrompt,
+					resume: undefined,
+					model: this.sessionModels.get(handle.adapterSessionId),
+					hooks,
+				});
+
+				// Store recovery query context
+				this.queries.set(handle.adapterSessionId, {
+					query: recoveryQuery,
+					currentTurnId: turnInput.turnId,
+				});
+
+				// Process the recovery messages
+				await this.processRecoveryMessages(
+					recoveryQuery.messages,
+					ctx,
+					handle,
+					turnInput,
+				);
+				return;
+			}
+
 			this.emit({
 				timestamp: Date.now(),
 				adapterId: ctx.adapterId,
@@ -257,6 +315,53 @@ export class ClaudeAdapter implements AgentAdapter {
 				kind: "run.error",
 				message,
 				recoverable: true,
+			});
+		}
+	}
+
+	/**
+	 * Process messages for a recovery session. Does NOT attempt further recovery
+	 * to avoid infinite loops.
+	 */
+	private async processRecoveryMessages(
+		messages: AsyncGenerator<SdkMessage, void, unknown>,
+		ctx: { adapterId: "claude"; adapterSessionId: string; turnId: string },
+		handle: SessionHandle,
+		turnInput: TurnInput,
+	): Promise<void> {
+		try {
+			for await (const msg of messages) {
+				const events = mapSdkMessage(msg, ctx);
+				for (const event of events) {
+					if (event.kind === "session.started") {
+						handle.providerSessionId = event.providerSessionId;
+					}
+					if (event.kind === "message.final") {
+						const role = turnInput.role ?? parseTurnId(turnInput.turnId).role;
+						const roundNumber =
+							turnInput.roundNumber ??
+							parseTurnId(turnInput.turnId).roundNumber;
+						if (role && roundNumber !== undefined) {
+							handle.transcript.push({
+								roundNumber,
+								role,
+								content: event.text,
+							});
+						}
+					}
+					this.emit(event);
+				}
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.emit({
+				timestamp: Date.now(),
+				adapterId: ctx.adapterId,
+				adapterSessionId: ctx.adapterSessionId,
+				turnId: ctx.turnId,
+				kind: "run.error",
+				message,
+				recoverable: false,
 			});
 		}
 	}

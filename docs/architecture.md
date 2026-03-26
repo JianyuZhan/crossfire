@@ -203,10 +203,27 @@ interface SessionHandle {
   providerSessionId: string | undefined; // set timing varies by adapter
   adapterId: "claude" | "codex" | "gemini";
   transcript: TurnRecord[]; // universal transcript of completed turns — enables recovery prompt reconstruction
+  recoveryContext?: RecoveryContext; // populated by runner — enables transcript-based session recovery
+}
+
+interface RecoveryContext {
+  systemPrompt: string;
+  topic: string;
+  role: "proposer" | "challenger" | "judge";
+  maxRounds: number;
+  schemaType: "debate_meta" | "judge_verdict";
 }
 ```
 
 Every adapter initializes `transcript: []` in `startSession()` and appends a `TurnRecord` when a `message.final` event fires. Role and round number are resolved from explicit `TurnInput.role`/`TurnInput.roundNumber` fields, falling back to `parseTurnId()` which parses the `{p|c|j}-{N}` convention.
+
+#### Recovery Fallback
+
+When `recoveryContext` is set (by `runDebate()`) and an adapter detects provider session loss, it rebuilds the session using `buildTranscriptRecoveryPrompt()` from the transcript. Each adapter handles this differently:
+
+- **Claude**: catches errors in `processMessages`, creates a new query without `resume`, uses recovery prompt
+- **Codex**: catches `turn/start` JSON-RPC errors, creates a new thread via `thread/start`, retries with recovery prompt
+- **Gemini**: in Path B fallback (session mismatch), uses `buildTranscriptRecoveryPrompt` instead of `buildStatelessPrompt` when transcript is available
 
 ### TurnInput
 

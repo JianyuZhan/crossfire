@@ -73,6 +73,31 @@ export async function runDebate(
 	const isResume = !!options?.resumeFromState;
 	const startRound = isResume ? options!.resumeFromState!.currentRound + 1 : 1;
 
+	// Populate recovery context on each session so adapters can rebuild from transcript
+	adapters.proposer.session.recoveryContext = {
+		systemPrompt: config.proposerSystemPrompt ?? "",
+		topic: config.topic,
+		role: "proposer",
+		maxRounds: config.maxRounds,
+		schemaType: "debate_meta",
+	};
+	adapters.challenger.session.recoveryContext = {
+		systemPrompt: config.challengerSystemPrompt ?? "",
+		topic: config.topic,
+		role: "challenger",
+		maxRounds: config.maxRounds,
+		schemaType: "debate_meta",
+	};
+	if (adapters.judge) {
+		adapters.judge.session.recoveryContext = {
+			systemPrompt: config.judgeSystemPrompt ?? "",
+			topic: config.topic,
+			role: "judge",
+			maxRounds: config.maxRounds,
+			schemaType: "judge_verdict",
+		};
+	}
+
 	const unsubs = [
 		adapters.proposer.adapter.onEvent((e) => bus.push(e)),
 		adapters.challenger.adapter.onEvent((e) => bus.push(e)),

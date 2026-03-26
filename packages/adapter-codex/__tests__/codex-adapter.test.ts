@@ -815,6 +815,131 @@ describe("CodexAdapter", () => {
 		});
 	});
 
+	describe("session recovery fallback", () => {
+		it("recovers by creating a new thread when turn/start fails with thread-not-found and recoveryContext is set", async () => {
+			const { events } = collectEvents(adapter);
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage(); // initialized
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+
+			// Set recovery context
+			handle.recoveryContext = {
+				systemPrompt: "You are the proposer",
+				topic: "Test topic",
+				role: "proposer",
+				maxRounds: 3,
+				schemaType: "debate_meta",
+			};
+
+			// Add a transcript entry so recovery prompt includes content
+			handle.transcript.push({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Previous argument",
+			});
+
+			// First turn: turn/start fails with thread-not-found error
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "new prompt",
+				turnId: "p-2",
+			});
+
+			// Read the first turn/start attempt and respond with JSON-RPC error
+			const turnMsg = await mock.readNextMessage();
+			expect(turnMsg.method).toBe("turn/start");
+			// Send a proper JSON-RPC error (not a result with error field)
+			mock.serverToClient.write(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: turnMsg.id,
+					error: { code: -32000, message: "thread not found" },
+				}) + "\n",
+			);
+
+			// Adapter should create a new thread, read thread/start
+			const newThreadMsg = await mock.readNextMessage();
+			expect(newThreadMsg.method).toBe("thread/start");
+			mock.sendResponse(newThreadMsg.id as number, {
+				thread: { id: "thread-2" },
+			});
+
+			// Then send turn/start on new thread
+			const retryTurnMsg = await mock.readNextMessage();
+			expect(retryTurnMsg.method).toBe("turn/start");
+			expect(retryTurnMsg.params.threadId).toBe("thread-2");
+			// Recovery prompt should contain topic and system prompt
+			expect(retryTurnMsg.params.input[0].text).toContain("Test topic");
+			expect(retryTurnMsg.params.input[0].text).toContain(
+				"You are the proposer",
+			);
+			mock.sendResponse(retryTurnMsg.id as number, {
+				turn: { id: "native-t-retry", status: "running" },
+			});
+
+			await turnPromise;
+
+			// Provider session ID should be updated
+			expect(handle.providerSessionId).toBe("thread-2");
+
+			// A warning event should have been emitted
+			const warnings = events.filter((e) => e.kind === "run.warning");
+			expect(warnings.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("does not attempt recovery when no recoveryContext is set", async () => {
+			const { events } = collectEvents(adapter);
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+			// No recoveryContext set
+
+			// Send turn - will fail
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "new prompt",
+				turnId: "p-2",
+			});
+
+			const turnMsg = await mock.readNextMessage();
+			expect(turnMsg.method).toBe("turn/start");
+
+			// Simulate server error by sending JSON-RPC error response
+			mock.serverToClient.write(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: turnMsg.id,
+					error: { code: -32000, message: "thread not found" },
+				}) + "\n",
+			);
+
+			// Should throw, not recover
+			await expect(turnPromise).rejects.toThrow();
+		});
+	});
+
 	describe("onEvent() / unsubscribe", () => {
 		it("returns unsubscribe function that stops delivery", async () => {
 			const { events, unsubscribe } = collectEvents(adapter);

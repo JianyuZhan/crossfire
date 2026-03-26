@@ -223,12 +223,23 @@ export interface StartSessionInput {
 	providerOptions?: Record<string, unknown>;
 }
 
+/** Recovery context stored on the session handle for transcript-based fallback */
+export interface RecoveryContext {
+	systemPrompt: string;
+	topic: string;
+	role: "proposer" | "challenger" | "judge";
+	maxRounds: number;
+	schemaType: "debate_meta" | "judge_verdict";
+}
+
 export interface SessionHandle {
 	adapterSessionId: string;
 	providerSessionId: string | undefined; // undefined until provider session established. Codex: set during startSession() (thread/start). Claude/Gemini: set on first sendTurn().
 	adapterId: "claude" | "codex" | "gemini";
 	/** Universal transcript of completed turns — enables recovery prompt reconstruction */
 	transcript: TurnRecord[];
+	/** Recovery context populated by the runner — enables transcript-based session recovery */
+	recoveryContext?: RecoveryContext;
 }
 
 export interface TurnInput {
