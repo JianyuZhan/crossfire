@@ -1,6 +1,5 @@
 // packages/orchestrator-core/src/context-builder.ts
 import type { TurnRecord } from "@crossfire/adapter-core";
-import type { DebateRole } from "./types.js";
 
 /** Simple end truncation */
 export function truncate(text: string, maxChars: number): string {
@@ -39,7 +38,7 @@ function detectLanguageHint(text: string): string {
 }
 
 // ===========================================================================
-// Incremental Prompt Builder — new functions (coexist with old 4-layer code)
+// Incremental Prompt Builder
 // ===========================================================================
 
 // --- Role-specific default system prompts ---
