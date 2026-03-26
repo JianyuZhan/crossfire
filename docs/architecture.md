@@ -880,6 +880,20 @@ interface MetricsState {
   judgeScore?: { proposer: number; challenger: number };
   totalTokens: number;
   totalCostUsd: number;
+  proposerUsage: AgentUsage;
+  challengerUsage: AgentUsage;
+}
+
+interface AgentUsage {
+  tokens: number;
+  costUsd: number;
+  // Enhanced metrics for provider-specific tracking
+  localTotalChars?: number;        // adapter-local character count
+  localTotalUtf8Bytes?: number;    // adapter-local byte count
+  previousCumulativeInput?: number; // Codex: baseline for last delta
+  lastDeltaInput?: number;          // Codex: most recent input delta
+  cacheReadTokens?: number;         // Claude: prompt cache hits
+  observedInputPlusCacheRead?: number; // Claude: input + cache for display
 }
 
 interface CommandState {

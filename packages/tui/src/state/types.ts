@@ -82,6 +82,15 @@ export interface JudgeStripState {
 export interface AgentUsage {
 	tokens: number;
 	costUsd: number;
+	// Local metrics (from adapter layer)
+	localTotalChars?: number;
+	localTotalUtf8Bytes?: number;
+	// Codex delta tracking
+	previousCumulativeInput?: number;
+	lastDeltaInput?: number;
+	// Claude cache display
+	cacheReadTokens?: number;
+	observedInputPlusCacheRead?: number;
 }
 
 export interface MetricsState {
