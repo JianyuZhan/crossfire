@@ -820,6 +820,11 @@ interface PlaybackClock {
 
 Lightweight projection from raw events into render-ready state. Prevents excessive re-renders from high-frequency [`thinking.delta`/`message.delta`](#normalizedevent).
 
+**Usage tracking:** The `usage.updated` handler uses the `semantics` field to apply provider-specific logic:
+- **Codex** (`cumulative_thread_total`): computes per-event deltas from the running cumulative totals (both input and output), storing `_lastCumulativeInput`/`_lastCumulativeOutput` as internal tracking fields.
+- **Claude** (`session_delta_or_cached`): accumulates `cacheReadTokens` and tracks `observedInputPlusCacheRead` for cache-aware display.
+- **Local metrics**: accumulates `localTotalChars` / `localTotalUtf8Bytes` from the `localMetrics` field on each event.
+
 ```typescript
 interface TuiState {
   proposer: LiveAgentPanelState;
