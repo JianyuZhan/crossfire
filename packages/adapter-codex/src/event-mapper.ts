@@ -280,6 +280,7 @@ export function mapCodexNotification(
 						params.totalCostUsd !== undefined
 							? Number(params.totalCostUsd)
 							: undefined,
+					semantics: "cumulative_thread_total" as const,
 				} satisfies NormalizedEvent,
 			];
 		}
