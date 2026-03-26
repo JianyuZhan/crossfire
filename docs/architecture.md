@@ -243,7 +243,7 @@ interface StartSessionInput {
 
 - **Transport:** Subprocess + bidirectional JSON-RPC 2.0 over stdio JSONL. Fixed to `--listen stdio://`.
 - **`startSession()`**: `initialize` → `initialized` notification → `thread/start` with `{ model, cwd, approvalPolicy }` → returns `{ thread: { id } }` as `providerSessionId`.
-- **`sendTurn()`**: `turn/start` with `{ threadId, input: [{ type: "text", text }] }` → returns `{ turn: { id, status } }`.
+- **`sendTurn()`**: `turn/start` with `{ threadId, input: [{ type: "text", text }] }` → returns `{ turn: { id, status } }`. Appends `META_TOOL_INSTRUCTIONS` only on first turn (turnCount === 0) to teach Codex how to invoke debate_meta/judge_verdict shell commands. Subsequent turns use incremental prompts without repetition.
 - **Approval:** JSON-RPC request-response. Server sends `requestApproval`, adapter emits `approval.request`, orchestrator calls `approve()`, adapter sends JSON-RPC response back.
 - **`interrupt()`**: `turn/interrupt` method.
 - **Plan:** `turn/plan/updated` notification → `plan.updated` event.

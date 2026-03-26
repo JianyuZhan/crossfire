@@ -366,6 +366,29 @@ describe("CodexAdapter", () => {
 			const usageEvents = events.filter((e) => e.kind === "usage.updated");
 			expect(usageEvents.length).toBeGreaterThan(0);
 		});
+
+		it("includes cumulative_thread_total semantics in usage.updated events", async () => {
+			const { events } = collectEvents(adapter);
+			await setupSessionAndTurn();
+
+			mock.sendNotification("thread/tokenUsage/updated", {
+				tokenUsage: {
+					total: {
+						inputTokens: 100,
+						outputTokens: 50,
+					},
+				},
+			});
+			await new Promise((r) => setTimeout(r, 50));
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.semantics).toBe("cumulative_thread_total");
+				expect(usageEvent.inputTokens).toBe(100);
+				expect(usageEvent.outputTokens).toBe(50);
+			}
+		});
 	});
 
 	describe("streaming: message.delta pipeline", () => {

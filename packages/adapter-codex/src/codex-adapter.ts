@@ -1,14 +1,15 @@
-import type {
-	AgentAdapter,
-	ApprovalDecision,
-	NormalizedEvent,
-	SessionHandle,
-	StartSessionInput,
-	TurnHandle,
-	TurnInput,
+import {
+	type AdapterCapabilities,
+	type AgentAdapter,
+	type ApprovalDecision,
+	CODEX_CAPABILITIES,
+	type NormalizedEvent,
+	type SessionHandle,
+	type StartSessionInput,
+	type TurnHandle,
+	type TurnInput,
+	parseTurnId,
 } from "@crossfire/adapter-core";
-import type { AdapterCapabilities } from "@crossfire/adapter-core";
-import { CODEX_CAPABILITIES } from "@crossfire/adapter-core";
 import { mapCodexNotification } from "./event-mapper.js";
 import type { MapContext } from "./event-mapper.js";
 import { JsonRpcClient } from "./jsonrpc-client.js";
@@ -43,6 +44,8 @@ interface SessionState {
 	currentNativeTurnId?: string;
 	turnStartTime?: number;
 	turnCount: number;
+	currentTurnRole?: "proposer" | "challenger" | "judge";
+	currentTurnRoundNumber?: number;
 }
 
 /** Pending approval request */
@@ -133,6 +136,7 @@ export class CodexAdapter implements AgentAdapter {
 			adapterSessionId,
 			providerSessionId,
 			adapterId: "codex",
+			transcript: [],
 		};
 
 		// Store session state (profile is stored but NOT sent to server)
@@ -167,6 +171,9 @@ export class CodexAdapter implements AgentAdapter {
 		if (session) {
 			session.currentTurnId = input.turnId;
 			session.turnStartTime = Date.now();
+			const parsed = parseTurnId(input.turnId);
+			session.currentTurnRole = input.role ?? parsed.role;
+			session.currentTurnRoundNumber = input.roundNumber ?? parsed.roundNumber;
 		}
 
 		// Append meta-tool instructions only on first turn so Codex knows how to call them
@@ -309,6 +316,20 @@ export class CodexAdapter implements AgentAdapter {
 				if (event.kind === "turn.completed" && ctx.turnStartTime) {
 					(event as { durationMs: number }).durationMs =
 						Date.now() - ctx.turnStartTime;
+				}
+				// Append to transcript when a turn's final message arrives
+				if (event.kind === "message.final") {
+					const session = this.sessions.get(ctx.adapterSessionId);
+					if (
+						session?.currentTurnRole &&
+						session.currentTurnRoundNumber !== undefined
+					) {
+						session.handle.transcript.push({
+							roundNumber: session.currentTurnRoundNumber,
+							role: session.currentTurnRole,
+							content: event.text,
+						});
+					}
 				}
 				this.emit(event);
 			}
