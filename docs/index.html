@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crossfire - AI Adversarial Debate Engine</title>
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jianyuzhan.github.io/crossfire/" />
+  <meta property="og:title" content="Crossfire - AI Adversarial Debate Engine" />
+  <meta property="og:description" content="Pit two AI agents against each other in structured debates for better decisions. Supports Claude, Codex, and Gemini." />
+  <meta property="og:image" content="https://jianyuzhan.github.io/crossfire/og-image.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://jianyuzhan.github.io/crossfire/" />
+  <meta name="twitter:title" content="Crossfire - AI Adversarial Debate Engine" />
+  <meta name="twitter:description" content="Pit two AI agents against each other in structured debates for better decisions. Supports Claude, Codex, and Gemini." />
+  <meta name="twitter:image" content="https://jianyuzhan.github.io/crossfire/og-image.png" />
+
+  <!-- General -->
+  <meta name="description" content="Crossfire orchestrates structured AI debates between Claude, Codex, and Gemini agents. Multi-agent adversarial reasoning for deeper insights." />
+  <meta name="keywords" content="AI debate, multi-agent, Claude, Codex, Gemini, TypeScript, adversarial reasoning" />
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .hero {
+      text-align: center;
+      max-width: 700px;
+    }
+    h1 {
+      font-size: 3.5rem;
+      background: linear-gradient(135deg, #ff6b6b, #ffd93d, #6bcb77);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 1rem;
+    }
+    .tagline {
+      font-size: 1.25rem;
+      color: #aaa;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+    .badges {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 2rem;
+    }
+    .badges img { height: 24px; }
+    .cta {
+      display: inline-block;
+      padding: 0.75rem 2rem;
+      background: linear-gradient(135deg, #ff6b6b, #ffd93d);
+      color: #0f0f23;
+      font-weight: 700;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      transition: transform 0.2s;
+    }
+    .cta:hover { transform: translateY(-2px); }
+    .install {
+      margin-top: 2rem;
+      background: #1a1a3e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 1rem 1.5rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.95rem;
+      color: #6bcb77;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      margin-top: 3rem;
+      max-width: 700px;
+    }
+    .feature {
+      background: #1a1a3e;
+      border: 1px solid #2a2a4e;
+      border-radius: 8px;
+      padding: 1.25rem;
+      text-align: left;
+    }
+    .feature h3 { color: #ffd93d; font-size: 1rem; margin-bottom: 0.5rem; }
+    .feature p { color: #999; font-size: 0.9rem; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Crossfire</h1>
+    <p class="tagline">
+      AI Adversarial Debate Engine &mdash; Pit two AI agents against each other
+      in structured debates for deeper, more actionable insights.
+    </p>
+    <div class="badges">
+      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" />
+      <img src="https://img.shields.io/badge/TypeScript-5.x-blue.svg" alt="TypeScript" />
+      <img src="https://img.shields.io/badge/Node.js-20%2B-green.svg" alt="Node.js 20+" />
+    </div>
+    <a class="cta" href="https://github.com/JianyuZhan/crossfire">View on GitHub</a>
+    <div class="install">npx crossfire start --topic "Your topic here"</div>
+  </div>
+
+  <div class="features">
+    <div class="feature">
+      <h3>Multi-Agent</h3>
+      <p>Claude, Codex, and Gemini debate each other in any combination.</p>
+    </div>
+    <div class="feature">
+      <h3>Event-Sourced</h3>
+      <p>Full replay, resume, and deterministic state from event logs.</p>
+    </div>
+    <div class="feature">
+      <h3>Rich TUI</h3>
+      <p>Real-time terminal UI with stance tracking and live streaming.</p>
+    </div>
+  </div>
+</body>
+</html>
