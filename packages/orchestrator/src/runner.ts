@@ -183,13 +183,6 @@ export async function runDebate(
 			}
 			// Clear judge text after proposer consumes it
 			lastJudgeText = undefined;
-			bus.push({
-				kind: "prompt.stats",
-				roundNumber: round,
-				speaker: "proposer",
-				promptChars: proposerPrompt.length,
-				timestamp: Date.now(),
-			});
 			const proposerTurnId = `p-${round}`;
 			await adapters.proposer.adapter.sendTurn(adapters.proposer.session, {
 				turnId: proposerTurnId,
@@ -258,13 +251,6 @@ export async function runDebate(
 			}
 			// Clear judge text after challenger consumes it
 			lastJudgeText = undefined;
-			bus.push({
-				kind: "prompt.stats",
-				roundNumber: round,
-				speaker: "challenger",
-				promptChars: challengerPrompt.length,
-				timestamp: Date.now(),
-			});
 			const challengerTurnId = `c-${round}`;
 			await adapters.challenger.adapter.sendTurn(adapters.challenger.session, {
 				turnId: challengerTurnId,
@@ -358,13 +344,6 @@ export async function runDebate(
 						),
 					});
 				}
-				bus.push({
-					kind: "prompt.stats",
-					roundNumber: round,
-					speaker: "judge",
-					promptChars: judgePrompt.length,
-					timestamp: Date.now(),
-				});
 				const verdict = await runJudgeTurn(
 					adapters.judge.adapter,
 					adapters.judge.session,
@@ -441,13 +420,6 @@ export async function runDebate(
 						schemaRefreshMode: "full",
 					})}\n\n## User Instruction\n${userInstruction}`;
 				}
-				bus.push({
-					kind: "prompt.stats",
-					roundNumber: round,
-					speaker: "judge",
-					promptChars: judgePrompt.length,
-					timestamp: Date.now(),
-				});
 				const verdict = await runJudgeTurn(
 					adapters.judge.adapter,
 					adapters.judge.session,
@@ -520,13 +492,6 @@ export async function runDebate(
 						schemaRefreshMode: "full",
 					});
 				}
-				bus.push({
-					kind: "prompt.stats",
-					roundNumber: finalState.currentRound,
-					speaker: "judge",
-					promptChars: judgePrompt.length,
-					timestamp: Date.now(),
-				});
 				finalVerdict = await Promise.race([
 					runJudgeTurn(adapters.judge.adapter, adapters.judge.session, bus, {
 						turnId: "j-final",

@@ -94,14 +94,6 @@ export interface DirectorActionEvent {
 	timestamp: number;
 }
 
-export interface PromptStatsEvent {
-	kind: "prompt.stats";
-	roundNumber: number;
-	speaker: "proposer" | "challenger" | "judge";
-	promptChars: number;
-	timestamp: number;
-}
-
 export interface SynthesisStartedEvent {
 	kind: "synthesis.started";
 	timestamp: number;
@@ -125,6 +117,5 @@ export type OrchestratorEvent =
 	| ClarificationRequestedEvent
 	| ClarificationProvidedEvent
 	| DirectorActionEvent
-	| PromptStatsEvent
 	| SynthesisStartedEvent
 	| SynthesisCompletedEvent;

@@ -2,6 +2,8 @@
 
 > AI agent adversarial debate orchestrator — a pure TypeScript pnpm monorepo.
 
+<!-- TODO: Remove prompt.stats references (lines 336, 634) - replaced by adapter-level metrics -->
+
 ## Table of Contents
 
 - [Overview](#overview)

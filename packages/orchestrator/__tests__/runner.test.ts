@@ -972,13 +972,6 @@ describe("runDebate", () => {
 		const result = await runDebate(twoRoundConfig, adapters, { bus });
 		expect(result.phase).toBe("completed");
 		expect(result.turns).toHaveLength(4);
-
-		// Verify prompt.stats events are still emitted for all turns
-		const promptStats = collected.filter((e) => e.kind === "prompt.stats");
-		expect(promptStats.length).toBeGreaterThanOrEqual(4); // 2 rounds x 2 speakers
-		for (const ps of promptStats) {
-			expect((ps as any).promptChars).toBeGreaterThan(0);
-		}
 	});
 
 	it("passes systemPrompt to initial prompt when provided in config", async () => {
