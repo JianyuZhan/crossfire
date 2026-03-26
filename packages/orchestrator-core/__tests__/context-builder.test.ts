@@ -658,6 +658,20 @@ describe("buildInitialPrompt", () => {
 			"IMPORTANT: Use tool calls for structured output.",
 		);
 	});
+
+	it("uses judge_verdict schema when schemaType is judge_verdict", () => {
+		const prompt = buildInitialPrompt({
+			role: "proposer",
+			topic: "Test",
+			maxRounds: 5,
+			systemPrompt: undefined,
+			schemaType: "judge_verdict",
+		});
+		expect(prompt).toContain("judge_verdict");
+		expect(prompt).toContain("leading");
+		expect(prompt).toContain("score");
+		expect(prompt).not.toContain("wants_to_conclude");
+	});
 });
 
 describe("buildIncrementalPrompt", () => {
@@ -789,6 +803,18 @@ describe("buildTranscriptRecoveryPrompt", () => {
 		expect(prompt.length).toBeLessThan(60_000);
 		// Recent turns should still be present in full
 		expect(prompt).toContain("X".repeat(1000));
+	});
+
+	it("returns header only for empty transcript", () => {
+		const prompt = buildTranscriptRecoveryPrompt({
+			systemPrompt: "System.",
+			topic: "Topic.",
+			transcript: [],
+			schemaType: "debate_meta",
+		});
+		expect(prompt).toContain("System.");
+		expect(prompt).toContain("Topic.");
+		expect(prompt).not.toContain("CONTEXT RECOVERED");
 	});
 
 	it("includes operationalPreamble when provided", () => {

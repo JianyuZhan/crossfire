@@ -679,7 +679,11 @@ export function buildInitialPrompt(input: InitialPromptInput): string {
 	];
 	if (languageHint) parts.push(`[LANGUAGE]\n${languageHint}`);
 	if (input.operationalPreamble) parts.push(input.operationalPreamble);
-	parts.push(`[OUTPUT FORMAT]\n${DEBATE_META_SCHEMA_FULL}`);
+	const schema =
+		input.schemaType === "judge_verdict"
+			? JUDGE_VERDICT_SCHEMA_FULL
+			: DEBATE_META_SCHEMA_FULL;
+	parts.push(`[OUTPUT FORMAT]\n${schema}`);
 	return parts.join("\n\n");
 }
 
@@ -795,6 +799,9 @@ export function buildTranscriptRecoveryPrompt(
 	]
 		.filter(Boolean)
 		.join("\n\n");
+
+	// Early return for empty transcript
+	if (input.transcript.length === 0) return header;
 
 	// Try full rebuild first
 	const fullTurns = input.transcript
