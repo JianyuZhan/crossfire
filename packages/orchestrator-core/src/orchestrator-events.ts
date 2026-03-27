@@ -94,6 +94,24 @@ export interface DirectorActionEvent {
 	timestamp: number;
 }
 
+/** Lightweight debug summary safe for JSONL event serialization */
+export interface SynthesisAuditSummary {
+	budgetTier: "short" | "medium" | "long";
+	totalEstimatedTokens: number;
+	budgetTokens: number;
+	promptCharLength: number;
+	fullTextRounds: number[];
+	compressedRounds: number[];
+	shrinkTrace: Array<{
+		step: string;
+		beforeTokens: number;
+		afterTokens: number;
+		detail?: string;
+	}>;
+	fitAchieved: boolean;
+	durationMs: number;
+}
+
 export interface SynthesisStartedEvent {
 	kind: "synthesis.started";
 	timestamp: number;
@@ -102,6 +120,14 @@ export interface SynthesisStartedEvent {
 export interface SynthesisCompletedEvent {
 	kind: "synthesis.completed";
 	quality: "llm-full" | "local-structured" | "local-degraded";
+	timestamp: number;
+	debug?: SynthesisAuditSummary;
+}
+
+export interface SynthesisErrorEvent {
+	kind: "synthesis.error";
+	phase: "judge-final" | "prompt-assembly" | "llm-synthesis" | "file-write";
+	message: string;
 	timestamp: number;
 }
 
@@ -118,4 +144,5 @@ export type OrchestratorEvent =
 	| ClarificationProvidedEvent
 	| DirectorActionEvent
 	| SynthesisStartedEvent
-	| SynthesisCompletedEvent;
+	| SynthesisCompletedEvent
+	| SynthesisErrorEvent;
