@@ -53,10 +53,12 @@ export class PlanAccumulator {
 
 	private processRound(roundNumber: number): void {
 		const state = projectState(this.events);
-		const proposerTurn = state.turns.find(
+		// Use reverse search to find the latest turn for this round (handles reprocess)
+		const reversed = [...state.turns].reverse();
+		const proposerTurn = reversed.find(
 			(t) => t.roundNumber === roundNumber && t.role === "proposer",
 		);
-		const challengerTurn = state.turns.find(
+		const challengerTurn = reversed.find(
 			(t) => t.roundNumber === roundNumber && t.role === "challenger",
 		);
 
@@ -66,9 +68,25 @@ export class PlanAccumulator {
 			challengerTurn?.meta,
 		);
 		this.plan = updatePlan(this.plan, fallback);
+
+		// Upsert roundAnalyses by roundNumber, keeping ascending order
+		const existing = this.plan.roundAnalyses ?? [];
+		const filtered = existing.filter((a) => a.roundNumber !== roundNumber);
+		const updated = [...filtered, fallback].sort(
+			(a, b) => a.roundNumber - b.roundNumber,
+		);
+		this.plan = { ...this.plan, roundAnalyses: updated };
+
+		// Determine degraded status: degraded if neither side provided meta
+		const isDegraded = !proposerTurn?.meta && !challengerTurn?.meta;
+		const currentDegraded = this.plan.degradedRounds.filter(
+			(r) => r !== roundNumber,
+		);
 		this.plan = {
 			...this.plan,
-			degradedRounds: [...this.plan.degradedRounds, roundNumber],
+			degradedRounds: isDegraded
+				? [...currentDegraded, roundNumber].sort((a, b) => a - b)
+				: currentDegraded,
 		};
 	}
 }

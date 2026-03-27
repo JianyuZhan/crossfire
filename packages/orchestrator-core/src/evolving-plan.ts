@@ -25,9 +25,11 @@ export interface EvolvingPlan {
 		roundNumber: number;
 		leading: "proposer" | "challenger" | "tie";
 		reasoning: string;
+		score?: { proposer: number; challenger: number };
 	}>;
 	roundSummaries: string[];
 	degradedRounds: number[];
+	roundAnalyses?: RoundAnalysis[];
 }
 
 export interface RoundAnalysis {
@@ -69,6 +71,7 @@ export function emptyPlan(): EvolvingPlan {
 		judgeNotes: [],
 		roundSummaries: [],
 		degradedRounds: [],
+		roundAnalyses: [],
 	};
 }
 
@@ -153,14 +156,13 @@ export function updatePlan(
 	}
 
 	return {
+		...plan,
 		arguments: args,
 		consensus,
 		unresolved,
 		risks,
 		evidence,
-		judgeNotes: plan.judgeNotes,
 		roundSummaries: summaries,
-		degradedRounds: plan.degradedRounds,
 	};
 }
 
@@ -177,6 +179,7 @@ export function updatePlanWithJudge(
 				roundNumber,
 				leading: verdict.leading,
 				reasoning: verdict.reasoning,
+				...(verdict.score ? { score: verdict.score } : {}),
 			},
 		],
 	};
