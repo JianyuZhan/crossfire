@@ -3,7 +3,13 @@ import { join } from "node:path";
 import type { AnyEvent } from "@crossfire/orchestrator-core";
 
 const FLUSH_INTERVAL_MS = 100;
-const FORCE_FLUSH_KINDS = new Set(["turn.completed", "debate.completed"]);
+const FORCE_FLUSH_KINDS = new Set([
+	"turn.completed",
+	"debate.completed",
+	"synthesis.started",
+	"synthesis.completed",
+	"synthesis.error",
+]);
 
 export class EventStore {
 	private readonly eventsPath: string;

@@ -75,6 +75,23 @@ describe("EventStore", () => {
 		await store.close();
 	});
 
+	it("force-flushes on synthesis.error events", async () => {
+		const store = new EventStore(dir);
+		store.append(
+			makeEvent("synthesis.error", {
+				phase: "llm-synthesis",
+				message: "timeout",
+			}),
+		);
+		// Small delay to allow async flush (though force-flush should be synchronous)
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Read file directly - should contain the event (not just buffered)
+		const content = await readFile(join(dir, "events.jsonl"), "utf-8");
+		expect(content).toContain("synthesis.error");
+		await store.close();
+	});
+
 	it("writes topic from debate.started into index.json", async () => {
 		const store = new EventStore(dir);
 		store.append(
