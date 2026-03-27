@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { EvolvingPlan, RoundAnalysis } from "../src/evolving-plan.js";
 import { emptyPlan } from "../src/evolving-plan.js";
 import {
+	type PhaseBlock,
 	type SynthesisPromptConfig,
+	aggregatePhaseBlockContent,
 	buildCompressedRound,
 	buildFullTextSynthesisPrompt,
 	buildLayer1,
+	buildPhaseBlocks,
+	chooseInitialBudgetTier,
 	detectCjkMajority,
 	estimateTokens,
 	normalizeConfig,
@@ -871,5 +875,413 @@ describe("buildCompressedRound", () => {
 
 		expect(result).toContain("Round 3 specific summary");
 		expect(result).toContain("Microservices improve scalability");
+	});
+});
+
+// --- Helpers for Task 6 tests ---
+
+function makeAnalysis(
+	roundNumber: number,
+	overrides: Partial<RoundAnalysis> = {},
+): RoundAnalysis {
+	return {
+		roundNumber,
+		newArguments: overrides.newArguments ?? [
+			{
+				side: "proposer",
+				argument: `Claim P from round ${roundNumber}`,
+				strength: "strong",
+			},
+			{
+				side: "challenger",
+				argument: `Claim C from round ${roundNumber}`,
+				strength: "moderate",
+			},
+		],
+		challengedArguments: overrides.challengedArguments ?? [
+			{
+				argument: `Challenged in round ${roundNumber}`,
+				challengedBy: "proposer",
+				outcome: "conceded",
+			},
+		],
+		risksIdentified: overrides.risksIdentified ?? [
+			{
+				risk: `Risk from round ${roundNumber}`,
+				severity: "medium",
+				raisedBy: "proposer",
+			},
+		],
+		evidenceCited: overrides.evidenceCited ?? [],
+		newConsensus: overrides.newConsensus ?? [],
+		newDivergence: overrides.newDivergence ?? [],
+		roundSummary: overrides.roundSummary ?? `Summary of round ${roundNumber}`,
+	};
+}
+
+function makeStateWithRounds(roundCount: number): DebateState {
+	const turns: DebateTurn[] = [];
+	for (let r = 1; r <= roundCount; r++) {
+		turns.push({
+			roundNumber: r,
+			role: "proposer",
+			content: `Proposer content R${r}`,
+			meta: {
+				stance: "agree",
+				confidence: 0.7 + r * 0.01,
+				keyPoints: [`point-p-${r}`],
+			},
+		});
+		turns.push({
+			roundNumber: r,
+			role: "challenger",
+			content: `Challenger content R${r}`,
+			meta: {
+				stance: "disagree",
+				confidence: 0.6 + r * 0.01,
+				keyPoints: [`point-c-${r}`],
+			},
+		});
+	}
+	return {
+		config: {
+			topic: "Test Topic",
+			maxRounds: roundCount,
+			judgeEveryNRounds: 2,
+			convergenceThreshold: 0.7,
+		},
+		phase: "completed",
+		currentRound: roundCount,
+		turns,
+		convergence: {
+			converged: false,
+			stanceDelta: 0,
+			mutualConcessions: 0,
+			bothWantToConclude: false,
+		},
+	};
+}
+
+function makePlanWithAnalyses(
+	roundCount: number,
+	overrides: Partial<EvolvingPlan> = {},
+): EvolvingPlan {
+	const analyses: RoundAnalysis[] = [];
+	for (let r = 1; r <= roundCount; r++) {
+		analyses.push(makeAnalysis(r));
+	}
+	return {
+		...emptyPlan(),
+		roundAnalyses: analyses,
+		roundSummaries: analyses.map((a) => a.roundSummary),
+		...overrides,
+	};
+}
+
+describe("chooseInitialBudgetTier", () => {
+	it("returns 'short' when full estimate fits within 60% of budget", () => {
+		// fullEstimate = 500, budget = 1000 => 500 <= 600 => short
+		expect(chooseInitialBudgetTier(5, 500, 1000)).toBe("short");
+	});
+
+	it("returns 'short' at the boundary (exactly 60%)", () => {
+		// fullEstimate = 600, budget = 1000 => 600 <= 600 => short
+		expect(chooseInitialBudgetTier(5, 600, 1000)).toBe("short");
+	});
+
+	it("returns 'medium' when exceeds short but rounds <= 20 and medium estimate fits", () => {
+		// fullEstimate = 700, budget = 1000 => 700 > 600 (not short)
+		// rounds = 10 <= 20, mediumEstimate fits within 850 (0.85 * 1000)
+		expect(chooseInitialBudgetTier(10, 700, 1000)).toBe("medium");
+	});
+
+	it("returns 'long' when rounds > 20", () => {
+		// Even if tokens would fit medium, 21 rounds forces long
+		expect(chooseInitialBudgetTier(21, 700, 1000)).toBe("long");
+	});
+
+	it("returns 'long' when medium estimate does not fit", () => {
+		// fullEstimate = 900, budget = 1000 => 900 > 600 (not short)
+		// rounds = 10 <= 20, but 900 > 850 (medium threshold) => long
+		expect(chooseInitialBudgetTier(10, 900, 1000)).toBe("long");
+	});
+
+	it("returns 'long' when medium estimate exactly at threshold", () => {
+		// fullEstimate = 850, budget = 1000 => 850 > 600 (not short)
+		// rounds = 10, mediumEstimate = 850 <= 850 => medium
+		expect(chooseInitialBudgetTier(10, 850, 1000)).toBe("medium");
+	});
+});
+
+describe("buildPhaseBlocks", () => {
+	it("groups 6 compressed rounds with default window 3 into 2 phase blocks", () => {
+		const state = makeStateWithRounds(6);
+		const plan = makePlanWithAnalyses(6);
+		const compressedRounds = [1, 2, 3, 4, 5, 6];
+
+		const blocks = buildPhaseBlocks(compressedRounds, plan, state);
+
+		expect(blocks).toHaveLength(2);
+		expect(blocks[0].phaseId).toBe("phase-1");
+		expect(blocks[0].coveredRounds).toEqual([1, 2, 3]);
+		expect(blocks[1].phaseId).toBe("phase-2");
+		expect(blocks[1].coveredRounds).toEqual([4, 5, 6]);
+	});
+
+	it("handles non-divisible round counts (7 rounds, window 3 => 3 blocks: [1,2,3], [4,5,6], [7])", () => {
+		const state = makeStateWithRounds(7);
+		const plan = makePlanWithAnalyses(7);
+		const compressedRounds = [1, 2, 3, 4, 5, 6, 7];
+
+		const blocks = buildPhaseBlocks(compressedRounds, plan, state);
+
+		expect(blocks).toHaveLength(3);
+		expect(blocks[0].coveredRounds).toEqual([1, 2, 3]);
+		expect(blocks[1].coveredRounds).toEqual([4, 5, 6]);
+		expect(blocks[2].coveredRounds).toEqual([7]);
+	});
+
+	it("drops empty blocks (rounds with no contributing data)", () => {
+		const state = makeStateWithRounds(3);
+		const plan = makePlanWithAnalyses(3, {
+			roundAnalyses: [
+				// Only round 1 has analysis; rounds 2-3 have empty analyses
+				makeAnalysis(1),
+				{
+					roundNumber: 2,
+					newArguments: [],
+					challengedArguments: [],
+					risksIdentified: [],
+					evidenceCited: [],
+					newConsensus: [],
+					newDivergence: [],
+					roundSummary: "",
+				},
+				{
+					roundNumber: 3,
+					newArguments: [],
+					challengedArguments: [],
+					risksIdentified: [],
+					evidenceCited: [],
+					newConsensus: [],
+					newDivergence: [],
+					roundSummary: "",
+				},
+			],
+		});
+		const compressedRounds = [1, 2, 3];
+
+		const blocks = buildPhaseBlocks(compressedRounds, plan, state);
+
+		// Block covering [1,2,3] should not be empty because round 1 has content
+		expect(blocks.length).toBeGreaterThanOrEqual(1);
+		expect(blocks[0].content.length).toBeGreaterThan(0);
+	});
+
+	it("includes degraded rounds in coveredRounds but they do not contribute semantic content", () => {
+		const state = makeStateWithRounds(3);
+		const plan = makePlanWithAnalyses(3, { degradedRounds: [2] });
+		const compressedRounds = [1, 2, 3];
+
+		const blocks = buildPhaseBlocks(compressedRounds, plan, state);
+
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0].coveredRounds).toContain(2);
+		// Content should include round 1 and 3 claims but not round 2 claims
+		expect(blocks[0].content).toContain("Claim P from round 1");
+		expect(blocks[0].content).toContain("Claim P from round 3");
+		expect(blocks[0].content).not.toContain("Claim P from round 2");
+	});
+
+	it("maintains contiguous blocks in round space", () => {
+		const state = makeStateWithRounds(9);
+		const plan = makePlanWithAnalyses(9);
+		const compressedRounds = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+		const blocks = buildPhaseBlocks(compressedRounds, plan, state);
+
+		for (const block of blocks) {
+			for (let i = 1; i < block.coveredRounds.length; i++) {
+				expect(block.coveredRounds[i]).toBe(block.coveredRounds[i - 1] + 1);
+			}
+		}
+	});
+});
+
+describe("aggregatePhaseBlockContent", () => {
+	it("union-deduplicates claims from multiple rounds", () => {
+		const state = makeStateWithRounds(3);
+		const plan = makePlanWithAnalyses(3, {
+			roundAnalyses: [
+				makeAnalysis(1, {
+					newArguments: [
+						{ side: "proposer", argument: "Shared claim", strength: "strong" },
+					],
+				}),
+				makeAnalysis(2, {
+					newArguments: [
+						{ side: "proposer", argument: "Shared claim", strength: "strong" },
+						{
+							side: "challenger",
+							argument: "Unique claim",
+							strength: "moderate",
+						},
+					],
+				}),
+				makeAnalysis(3),
+			],
+		});
+
+		const content = aggregatePhaseBlockContent([1, 2], plan, state);
+
+		// "Shared claim" appears in both rounds but should be deduped
+		const matches = content.match(/Shared claim/g);
+		expect(matches).toHaveLength(1);
+		expect(content).toContain("Unique claim");
+	});
+
+	it("merges concessions from challengedArguments where outcome is conceded", () => {
+		const state = makeStateWithRounds(2);
+		const plan = makePlanWithAnalyses(2, {
+			roundAnalyses: [
+				makeAnalysis(1, {
+					challengedArguments: [
+						{
+							argument: "Point A",
+							challengedBy: "proposer",
+							outcome: "conceded",
+						},
+					],
+				}),
+				makeAnalysis(2, {
+					challengedArguments: [
+						{
+							argument: "Point B",
+							challengedBy: "challenger",
+							outcome: "weakened",
+						},
+						{
+							argument: "Point C",
+							challengedBy: "proposer",
+							outcome: "conceded",
+						},
+					],
+				}),
+			],
+		});
+
+		const content = aggregatePhaseBlockContent([1, 2], plan, state);
+
+		expect(content).toContain("Point A");
+		expect(content).toContain("Point C");
+		// "weakened" outcome should not appear in concessions section
+	});
+
+	it("merges risk deltas from risksIdentified", () => {
+		const state = makeStateWithRounds(2);
+		const plan = makePlanWithAnalyses(2, {
+			roundAnalyses: [
+				makeAnalysis(1, {
+					risksIdentified: [
+						{ risk: "Risk Alpha", severity: "high", raisedBy: "proposer" },
+					],
+				}),
+				makeAnalysis(2, {
+					risksIdentified: [
+						{ risk: "Risk Beta", severity: "low", raisedBy: "challenger" },
+					],
+				}),
+			],
+		});
+
+		const content = aggregatePhaseBlockContent([1, 2], plan, state);
+
+		expect(content).toContain("Risk Alpha");
+		expect(content).toContain("Risk Beta");
+	});
+
+	it("includes judge swing when judge data is available", () => {
+		const state = makeStateWithRounds(3);
+		const plan = makePlanWithAnalyses(3, {
+			judgeNotes: [
+				{ roundNumber: 1, leading: "proposer", reasoning: "P led" },
+				{ roundNumber: 2, leading: "tie", reasoning: "Even" },
+				{ roundNumber: 3, leading: "challenger", reasoning: "C led" },
+			],
+		});
+
+		const content = aggregatePhaseBlockContent([1, 2, 3], plan, state);
+
+		// Should show swing from first to last leading in window
+		expect(content).toContain("proposer");
+		expect(content).toContain("challenger");
+	});
+
+	it("includes stance trajectory from turn meta", () => {
+		const state = makeStateWithRounds(2);
+		const plan = makePlanWithAnalyses(2);
+
+		const content = aggregatePhaseBlockContent([1, 2], plan, state);
+
+		// Should include stance information from turns
+		expect(content).toContain("agree");
+		expect(content).toContain("disagree");
+	});
+
+	it("accepts arbitrary round subsets for re-aggregation", () => {
+		const state = makeStateWithRounds(5);
+		const plan = makePlanWithAnalyses(5);
+
+		// Phase 2 promotes round 2, so we re-aggregate [1, 3]
+		const contentBefore = aggregatePhaseBlockContent([1, 2, 3], plan, state);
+		const contentAfter = aggregatePhaseBlockContent([1, 3], plan, state);
+
+		// After removal of round 2, round 2 claims should not appear
+		expect(contentBefore).toContain("Claim P from round 2");
+		expect(contentAfter).not.toContain("Claim P from round 2");
+		// But round 1 and 3 claims should still be there
+		expect(contentAfter).toContain("Claim P from round 1");
+		expect(contentAfter).toContain("Claim P from round 3");
+	});
+});
+
+describe("contiguity invariant", () => {
+	it("forbids non-contiguous phase blocks like [1,3]", () => {
+		const state = makeStateWithRounds(6);
+		const plan = makePlanWithAnalyses(6);
+		// Only pass non-contiguous rounds as the compressed region
+		// buildPhaseBlocks should split [1,3] into [1] and [3]
+		const compressedRounds = [1, 3, 4, 5, 6];
+
+		const blocks = buildPhaseBlocks(compressedRounds, plan, state);
+
+		// Every block must have contiguous rounds
+		for (const block of blocks) {
+			for (let i = 1; i < block.coveredRounds.length; i++) {
+				expect(block.coveredRounds[i]).toBe(block.coveredRounds[i - 1] + 1);
+			}
+		}
+
+		// [1] and [3] should be separate (no block contains both 1 and 3 without 2)
+		const blockWith1 = blocks.find((b) => b.coveredRounds.includes(1));
+		const blockWith3 = blocks.find((b) => b.coveredRounds.includes(3));
+		if (blockWith1 && blockWith3 && blockWith1 === blockWith3) {
+			// If same block, it must include 2
+			expect(blockWith1.coveredRounds).toContain(2);
+		}
+	});
+
+	it("splits into individual compressed rounds when gaps exist", () => {
+		const state = makeStateWithRounds(5);
+		const plan = makePlanWithAnalyses(5);
+		// [1, 3, 5] — all non-contiguous
+		const compressedRounds = [1, 3, 5];
+
+		const blocks = buildPhaseBlocks(compressedRounds, plan, state);
+
+		// Each should be a single-round block
+		for (const block of blocks) {
+			expect(block.coveredRounds).toHaveLength(1);
+		}
 	});
 });

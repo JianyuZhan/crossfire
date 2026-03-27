@@ -606,6 +606,217 @@ function buildRichContent(
 	return parts.join("\n\n");
 }
 
+// --- Budget tier selection (spec Section 5) ---
+
+/**
+ * Chooses the initial budget tier for the synthesis prompt.
+ *
+ * - short: fullEstimateTokens <= budgetTokens * 0.6
+ * - medium: exceeds short, rounds <= 20, and estimate fits within budgetTokens * 0.85
+ * - long: rounds > 20 OR medium estimate still does not fit
+ */
+export function chooseInitialBudgetTier(
+	totalRounds: number,
+	fullEstimateTokens: number,
+	budgetTokens: number,
+): "short" | "medium" | "long" {
+	if (fullEstimateTokens <= budgetTokens * 0.6) {
+		return "short";
+	}
+
+	if (totalRounds > 20) {
+		return "long";
+	}
+
+	// Medium: compression allows higher ratio
+	if (fullEstimateTokens <= budgetTokens * 0.85) {
+		return "medium";
+	}
+
+	return "long";
+}
+
+// --- Phase block types and assembly (spec Section 5.1) ---
+
+export interface PhaseBlock {
+	phaseId: string;
+	coveredRounds: number[];
+	content: string;
+}
+
+/**
+ * Aggregates content for a phase block over an arbitrary subset of rounds.
+ *
+ * Designed to accept any subset so Phase 2 can re-aggregate after promoting
+ * rounds without code changes (spec Section 5.1, line 369).
+ *
+ * Aggregation includes:
+ * - Union-deduped claims (from RoundAnalysis.newArguments)
+ * - Merged concessions (from challengedArguments where outcome is "conceded")
+ * - Merged risk deltas (from risksIdentified)
+ * - Judge swing (first leading -> last leading in window)
+ * - Stance trajectory from state.turns[].meta
+ */
+export function aggregatePhaseBlockContent(
+	rounds: number[],
+	plan: EvolvingPlan,
+	state: DebateState,
+): string {
+	if (rounds.length === 0) return "";
+
+	const analyses = (plan.roundAnalyses ?? []).filter(
+		(a) =>
+			rounds.includes(a.roundNumber) &&
+			!plan.degradedRounds.includes(a.roundNumber),
+	);
+
+	const parts: string[] = [];
+
+	// Union-deduped claims
+	const seenClaims = new Set<string>();
+	const claims: string[] = [];
+	for (const a of analyses) {
+		for (const arg of a.newArguments) {
+			if (!seenClaims.has(arg.argument)) {
+				seenClaims.add(arg.argument);
+				claims.push(`- [${arg.side}] (${arg.strength}) ${arg.argument}`);
+			}
+		}
+	}
+	if (claims.length > 0) {
+		parts.push(`**Claims:**\n${claims.join("\n")}`);
+	}
+
+	// Merged concessions (outcome === "conceded")
+	const seenConcessions = new Set<string>();
+	const concessions: string[] = [];
+	for (const a of analyses) {
+		for (const ca of a.challengedArguments) {
+			if (ca.outcome === "conceded" && !seenConcessions.has(ca.argument)) {
+				seenConcessions.add(ca.argument);
+				concessions.push(`- ${ca.argument} (conceded by ${ca.challengedBy})`);
+			}
+		}
+	}
+	if (concessions.length > 0) {
+		parts.push(`**Concessions:**\n${concessions.join("\n")}`);
+	}
+
+	// Merged risk deltas
+	const seenRisks = new Set<string>();
+	const risks: string[] = [];
+	for (const a of analyses) {
+		for (const r of a.risksIdentified) {
+			if (!seenRisks.has(r.risk)) {
+				seenRisks.add(r.risk);
+				risks.push(`- [${r.severity}] ${r.risk} (raised by ${r.raisedBy})`);
+			}
+		}
+	}
+	if (risks.length > 0) {
+		parts.push(`**Risks:**\n${risks.join("\n")}`);
+	}
+
+	// Judge swing: first leading -> last leading in window
+	const windowJudgeNotes = plan.judgeNotes.filter((jn) =>
+		rounds.includes(jn.roundNumber),
+	);
+	if (windowJudgeNotes.length > 0) {
+		const sorted = [...windowJudgeNotes].sort(
+			(a, b) => a.roundNumber - b.roundNumber,
+		);
+		const first = sorted[0];
+		const last = sorted[sorted.length - 1];
+		parts.push(
+			`**Judge Swing:** ${first.leading} (R${first.roundNumber}) -> ${last.leading} (R${last.roundNumber})`,
+		);
+	}
+
+	// Stance trajectory from turn meta
+	const roundTurns = state.turns
+		.filter((t) => rounds.includes(t.roundNumber) && t.meta)
+		.sort((a, b) => a.roundNumber - b.roundNumber);
+	if (roundTurns.length > 0) {
+		const stanceLines: string[] = [];
+		for (const turn of roundTurns) {
+			if (turn.meta) {
+				const role = turn.role === "proposer" ? "Proposer" : "Challenger";
+				stanceLines.push(
+					`- R${turn.roundNumber} ${role}: stance=${turn.meta.stance}, confidence=${turn.meta.confidence}`,
+				);
+			}
+		}
+		if (stanceLines.length > 0) {
+			parts.push(`**Stance Trajectory:**\n${stanceLines.join("\n")}`);
+		}
+	}
+
+	return parts.join("\n\n");
+}
+
+/**
+ * Splits an array of round numbers into contiguous sub-arrays.
+ * e.g., [1, 2, 3, 5, 6, 8] -> [[1, 2, 3], [5, 6], [8]]
+ */
+function splitIntoContiguousRuns(rounds: number[]): number[][] {
+	if (rounds.length === 0) return [];
+	const sorted = [...rounds].sort((a, b) => a - b);
+	const runs: number[][] = [[sorted[0]]];
+	for (let i = 1; i < sorted.length; i++) {
+		if (sorted[i] === sorted[i - 1] + 1) {
+			runs[runs.length - 1].push(sorted[i]);
+		} else {
+			runs.push([sorted[i]]);
+		}
+	}
+	return runs;
+}
+
+/**
+ * Builds phase blocks from the earliest compressed region.
+ *
+ * Rules (spec Section 5.1):
+ * - Default window size 3
+ * - Blocks must be contiguous in round space
+ * - Empty blocks are dropped
+ * - Degraded rounds appear in coveredRounds but do not contribute semantic aggregates
+ * - Non-contiguous inputs are split into contiguous runs first
+ */
+export function buildPhaseBlocks(
+	compressedRounds: number[],
+	plan: EvolvingPlan,
+	state: DebateState,
+	windowSize = 3,
+): PhaseBlock[] {
+	if (compressedRounds.length === 0) return [];
+
+	// First split into contiguous runs to enforce contiguity invariant
+	const contiguousRuns = splitIntoContiguousRuns(compressedRounds);
+
+	const blocks: PhaseBlock[] = [];
+	let phaseCounter = 1;
+
+	for (const run of contiguousRuns) {
+		// Chunk each contiguous run into windows
+		for (let i = 0; i < run.length; i += windowSize) {
+			const chunk = run.slice(i, i + windowSize);
+			const content = aggregatePhaseBlockContent(chunk, plan, state);
+
+			// Drop empty blocks
+			if (content.length === 0) continue;
+
+			blocks.push({
+				phaseId: `phase-${phaseCounter}`,
+				coveredRounds: chunk,
+				content,
+			});
+			phaseCounter++;
+		}
+	}
+
+	return blocks;
+}
+
 /** Builds a stripped transcript excerpt from turns, removing internal blocks. */
 function buildTranscriptExcerpt(roundTurns: DebateState["turns"]): string {
 	if (roundTurns.length === 0) {
