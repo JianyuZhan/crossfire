@@ -134,6 +134,97 @@ export function detectCjkMajority(text: string): boolean {
 }
 
 /**
+ * Renders Layer 1 of the adaptive synthesis prompt: structured plan context.
+ *
+ * Always includes the topic. Conditionally includes non-empty sections:
+ * consensus, unresolved, risks, evidence, compressed judge notes, round summaries.
+ *
+ * Judge notes are compressed per spec Section 3 Layer 1:
+ * each entry shows round number, leading side, confidence shift (when computable),
+ * and a one-line rationale.
+ */
+export function buildLayer1(plan: EvolvingPlan, topic: string): string {
+	const sections: string[] = [];
+
+	// Topic is always included
+	sections.push(`## Topic\n\n${topic}`);
+
+	// Consensus
+	if (plan.consensus.length > 0) {
+		const items = plan.consensus.map((c) => `- ${c}`).join("\n");
+		sections.push(`## Consensus\n\n${items}`);
+	}
+
+	// Unresolved
+	if (plan.unresolved.length > 0) {
+		const items = plan.unresolved.map((u) => `- ${u}`).join("\n");
+		sections.push(`## Unresolved\n\n${items}`);
+	}
+
+	// Risks
+	if (plan.risks.length > 0) {
+		const items = plan.risks
+			.map((r) => `- [${r.severity}] ${r.risk} (round ${r.round})`)
+			.join("\n");
+		sections.push(`## Risks\n\n${items}`);
+	}
+
+	// Evidence
+	if (plan.evidence.length > 0) {
+		const items = plan.evidence
+			.map((e) => `- ${e.claim} (source: ${e.source}, round ${e.round})`)
+			.join("\n");
+		sections.push(`## Evidence\n\n${items}`);
+	}
+
+	// Compressed judge notes
+	if (plan.judgeNotes.length > 0) {
+		const lines: string[] = [];
+		for (let i = 0; i < plan.judgeNotes.length; i++) {
+			const note = plan.judgeNotes[i];
+			const prev = i > 0 ? plan.judgeNotes[i - 1] : undefined;
+
+			let shiftPart = "";
+			if (note.score && prev?.score) {
+				const currentSpread = Math.abs(
+					note.score.proposer - note.score.challenger,
+				);
+				const prevSpread = Math.abs(
+					prev.score.proposer - prev.score.challenger,
+				);
+				const shift = currentSpread - prevSpread;
+				// Round to avoid floating point noise
+				const rounded = Math.round(shift * 100) / 100;
+				const sign = rounded > 0 ? "+" : "";
+				const formatted = Number.isInteger(rounded)
+					? rounded.toFixed(1)
+					: String(rounded);
+				shiftPart = `, shift: ${sign}${formatted}`;
+			}
+
+			const rationale = note.reasoning.replace(/\n/g, " ").trim();
+			lines.push(
+				`- R${note.roundNumber}: leading=${note.leading}${shiftPart} | ${rationale}`,
+			);
+		}
+		sections.push(`## Judge Notes\n\n${lines.join("\n")}`);
+	}
+
+	// Round summaries
+	if (plan.roundSummaries.length > 0) {
+		const items = plan.roundSummaries
+			.filter((s) => s.length > 0)
+			.map((s) => `- ${s}`)
+			.join("\n");
+		if (items.length > 0) {
+			sections.push(`## Round Summaries\n\n${items}`);
+		}
+	}
+
+	return sections.join("\n\n");
+}
+
+/**
  * Builds a full-text synthesis prompt from debate state, judge notes, and optional round summaries.
  * If the full prompt exceeds 60% of contextTokenLimit, it truncates early rounds while preserving:
  * - Last 2 rounds
