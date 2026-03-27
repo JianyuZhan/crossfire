@@ -168,11 +168,11 @@ describe("EventStore", () => {
 
 		await writeFile(
 			segment1Path,
-			JSON.stringify(e1) + "\n" + JSON.stringify(e2) + "\n",
+			`${JSON.stringify(e1)}\n${JSON.stringify(e2)}\n`,
 		);
 		await writeFile(
 			segment2Path,
-			JSON.stringify(e3) + "\n" + JSON.stringify(e4) + "\n",
+			`${JSON.stringify(e3)}\n${JSON.stringify(e4)}\n`,
 		);
 
 		// Create index with segments array

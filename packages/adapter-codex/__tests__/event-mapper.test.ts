@@ -277,7 +277,7 @@ describe("mapCodexNotification", () => {
 					type: "commandExecution",
 					id: "call_abc",
 					command: "/bin/zsh -lc debate_meta",
-					aggregatedOutput: metaJson + "\n",
+					aggregatedOutput: `${metaJson}\n`,
 					exitCode: 0,
 				},
 			},

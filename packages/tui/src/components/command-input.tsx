@@ -62,7 +62,7 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
 		}
 		case "/extend": {
 			const n = Number.parseInt(parts[1], 10);
-			if (isNaN(n)) return { type: "unknown", raw: input };
+			if (Number.isNaN(n)) return { type: "unknown", raw: input };
 			return { type: "extend", rounds: n };
 		}
 		case "/approve":
@@ -71,24 +71,24 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
 			return { type: "deny", requestId: parts[1] };
 		case "/speed": {
 			const n = Number.parseFloat(parts[1]);
-			if (isNaN(n)) return { type: "unknown", raw: input };
+			if (Number.isNaN(n)) return { type: "unknown", raw: input };
 			return { type: "speed", multiplier: n };
 		}
 		case "/expand": {
 			const n = Number.parseInt(parts[1], 10);
-			if (isNaN(n)) return { type: "unknown", raw: input };
+			if (Number.isNaN(n)) return { type: "unknown", raw: input };
 			return { type: "expand", roundNumber: n };
 		}
 		case "/collapse": {
 			const n = Number.parseInt(parts[1], 10);
-			if (isNaN(n)) return { type: "unknown", raw: input };
+			if (Number.isNaN(n)) return { type: "unknown", raw: input };
 			return { type: "collapse", roundNumber: n };
 		}
 		case "/jump": {
 			const arg1 = parts[1];
 			if (!arg1) return { type: "unknown", raw: input };
 			const directN = Number.parseInt(arg1, 10);
-			if (!isNaN(directN) && parts.length === 2) {
+			if (!Number.isNaN(directN) && parts.length === 2) {
 				return { type: "jump", target: "round", value: directN };
 			}
 			const target = arg1 as "round" | "turn";
@@ -96,7 +96,7 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
 				return { type: "unknown", raw: input };
 			const value =
 				target === "round" ? Number.parseInt(parts[2], 10) : parts[2];
-			if (target === "round" && isNaN(value as number))
+			if (target === "round" && Number.isNaN(value as number))
 				return { type: "unknown", raw: input };
 			if (!value) return { type: "unknown", raw: input };
 			return { type: "jump", target, value: value as number | string };

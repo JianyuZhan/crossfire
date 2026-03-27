@@ -56,7 +56,7 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 			if (killed) return;
 			for (const line of behavior.lines) {
 				if (killed) return;
-				stdout.write(line + "\n");
+				stdout.write(`${line}\n`);
 			}
 			setTimeout(() => {
 				if (killed) return;
@@ -636,7 +636,7 @@ describe("GeminiAdapter", () => {
 
 			// Emit init but never exit — long-running process
 			setImmediate(() => {
-				stdout.write(initLine("s1") + "\n");
+				stdout.write(`${initLine("s1")}\n`);
 			});
 
 			const spawnFn = () => proc as any;

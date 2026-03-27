@@ -84,7 +84,7 @@ function createMockCodexServer(fixture: ScenarioFixture) {
 		await defer();
 		if (closed) return;
 		adapterReadable.write(
-			JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n",
+			`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`,
 		);
 	}
 
@@ -92,7 +92,7 @@ function createMockCodexServer(fixture: ScenarioFixture) {
 	function sendNotification(method: string, params: unknown) {
 		if (closed) return;
 		adapterReadable.write(
-			JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n",
+			`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`,
 		);
 	}
 
@@ -102,7 +102,7 @@ function createMockCodexServer(fixture: ScenarioFixture) {
 		const id = serverRequestId++;
 		if (closed) return id;
 		adapterReadable.write(
-			JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
+			`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`,
 		);
 		return id;
 	}

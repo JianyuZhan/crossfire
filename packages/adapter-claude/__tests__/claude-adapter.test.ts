@@ -686,7 +686,7 @@ describe("ClaudeAdapter", () => {
 
 			// Attempt to approve should do nothing (already cleaned up)
 			if (req.kind === "approval.request") {
-				await adapter.approve!({
+				await adapter.approve?.({
 					requestId: req.requestId,
 					decision: "allow",
 				});
@@ -740,7 +740,7 @@ describe("ClaudeAdapter", () => {
 			await adapter.sendTurn(handle, { prompt: "long task", turnId: "t1" });
 			// Wait briefly for the generator to start
 			await new Promise((r) => setTimeout(r, 20));
-			await adapter.interrupt!("t1");
+			await adapter.interrupt?.("t1");
 			expect(interruptCalled).toBe(true);
 		});
 	});
@@ -790,7 +790,7 @@ describe("ClaudeAdapter", () => {
 			expect(req.kind).toBe("approval.request");
 
 			if (req.kind === "approval.request") {
-				await adapter.approve!({
+				await adapter.approve?.({
 					requestId: req.requestId,
 					decision: "allow",
 				});
@@ -1022,6 +1022,7 @@ describe("ClaudeAdapter", () => {
 				if (callCount === 2) {
 					// Second turn: resume fails (session expired)
 					async function* failingGen(): AsyncGenerator<SdkMessage> {
+						yield* [];
 						throw new Error("session not found");
 					}
 					return { messages: failingGen(), interrupt: vi.fn() };
@@ -1123,6 +1124,7 @@ describe("ClaudeAdapter", () => {
 				}
 				// Second call: resume fails
 				async function* failingGen(): AsyncGenerator<SdkMessage> {
+					yield* [];
 					throw new Error("session not found");
 				}
 				return { messages: failingGen(), interrupt: vi.fn() };

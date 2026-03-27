@@ -24,7 +24,7 @@ function makePanel(
 describe("AgentPanel — live mode", () => {
 	it("shows role header", () => {
 		const { lastFrame } = render(
-			<AgentPanel mode="live" role="proposer" state={makePanel()} />,
+			<AgentPanel mode="live" state={makePanel()} />,
 		);
 		expect(lastFrame()).toContain("Proposer");
 	});
@@ -33,7 +33,6 @@ describe("AgentPanel — live mode", () => {
 		const { lastFrame } = render(
 			<AgentPanel
 				mode="live"
-				role="proposer"
 				state={makePanel({ status: "thinking", thinkingText: "Analyzing..." })}
 			/>,
 		);
@@ -45,7 +44,6 @@ describe("AgentPanel — live mode", () => {
 		const { lastFrame } = render(
 			<AgentPanel
 				mode="live"
-				role="proposer"
 				state={makePanel({
 					status: "speaking",
 					currentMessageText: "I argue that...",
@@ -60,7 +58,6 @@ describe("AgentPanel — live mode", () => {
 		const { lastFrame } = render(
 			<AgentPanel
 				mode="live"
-				role="proposer"
 				state={makePanel({
 					status: "tool",
 					tools: [
@@ -82,7 +79,6 @@ describe("AgentPanel — live mode", () => {
 		const { lastFrame } = render(
 			<AgentPanel
 				mode="live"
-				role="proposer"
 				state={makePanel({ status: "error", error: "Connection timeout" })}
 			/>,
 		);
@@ -93,7 +89,6 @@ describe("AgentPanel — live mode", () => {
 		const { lastFrame } = render(
 			<AgentPanel
 				mode="live"
-				role="proposer"
 				state={makePanel({
 					status: "done",
 					turnDurationMs: 2500,
@@ -108,7 +103,6 @@ describe("AgentPanel — live mode", () => {
 		const { lastFrame } = render(
 			<AgentPanel
 				mode="live"
-				role="proposer"
 				state={makePanel({
 					status: "speaking",
 					currentMessageText:
@@ -130,7 +124,7 @@ describe("AgentPanel — snapshot mode", () => {
 			warnings: [],
 		};
 		const { lastFrame } = render(
-			<AgentPanel mode="snapshot" role="challenger" snapshot={snapshot} />,
+			<AgentPanel mode="snapshot" snapshot={snapshot} />,
 		);
 		expect(lastFrame()).toContain("Challenger");
 		expect(lastFrame()).toContain("I believe we should...");
@@ -140,7 +134,7 @@ describe("AgentPanel — snapshot mode", () => {
 
 describe("AgentPanel — idle mode", () => {
 	it("shows waiting label", () => {
-		const { lastFrame } = render(<AgentPanel mode="idle" role="challenger" />);
+		const { lastFrame } = render(<AgentPanel mode="idle" />);
 		expect(lastFrame()).toContain("Challenger");
 		expect(lastFrame()).toContain("Waiting...");
 	});

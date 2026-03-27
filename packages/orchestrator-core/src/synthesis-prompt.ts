@@ -397,11 +397,11 @@ function extractSnippet(entry: {
 	if (sentences && sentences.length > 0) {
 		const excerpt = sentences.slice(0, 2).join("").trim();
 		// Cap at 200 chars
-		return excerpt.length > 200 ? excerpt.slice(0, 197) + "..." : excerpt;
+		return excerpt.length > 200 ? `${excerpt.slice(0, 197)}...` : excerpt;
 	}
 
 	// No sentence boundaries found — use first 200 chars
-	return text.length > 200 ? text.slice(0, 197) + "..." : text.trim();
+	return text.length > 200 ? `${text.slice(0, 197)}...` : text.trim();
 }
 
 /** Debug metadata returned alongside the adaptive synthesis prompt */
@@ -639,7 +639,7 @@ export function buildFullTextSynthesisPrompt(
 
 	// Prepend synthesis instructions (same as old behavior)
 	const instructions = buildInstructions(result.debug.budgetTier);
-	let prompt = instructions + "\n\n" + result.prompt;
+	let prompt = `${instructions}\n\n${result.prompt}`;
 
 	// Append full judge verdicts for backward compatibility.
 	// The adaptive prompt compresses judge notes in Layer 1, but legacy callers
@@ -1674,7 +1674,7 @@ export function shrinkToFit(
 		for (let i = 0; i < currentPlan.roundSummaries.length; i++) {
 			if (currentPlan.roundSummaries[i].length > 80) {
 				currentPlan.roundSummaries[i] =
-					currentPlan.roundSummaries[i].slice(0, 77) + "...";
+					`${currentPlan.roundSummaries[i].slice(0, 77)}...`;
 				changed = true;
 			}
 		}
@@ -1702,7 +1702,7 @@ export function shrinkToFit(
 		for (let i = 0; i < currentPlan.roundSummaries.length; i++) {
 			if (currentPlan.roundSummaries[i].length > 40) {
 				currentPlan.roundSummaries[i] =
-					currentPlan.roundSummaries[i].slice(0, 37) + "...";
+					`${currentPlan.roundSummaries[i].slice(0, 37)}...`;
 				changed = true;
 			}
 		}
@@ -1751,10 +1751,10 @@ export function shrinkToFit(
 		compactedPlan = {
 			...compactedPlan,
 			unresolved: compactedPlan.unresolved.map((u) =>
-				u.length > 60 ? u.slice(0, 57) + "..." : u,
+				u.length > 60 ? `${u.slice(0, 57)}...` : u,
 			),
 			risks: compactedPlan.risks.map((r) => ({
-				risk: r.risk.length > 40 ? r.risk.slice(0, 37) + "..." : r.risk,
+				risk: r.risk.length > 40 ? `${r.risk.slice(0, 37)}...` : r.risk,
 				severity: r.severity,
 				round: r.round,
 			})),
@@ -1764,7 +1764,7 @@ export function shrinkToFit(
 		compactedPlan = {
 			...compactedPlan,
 			consensus: compactedPlan.consensus.map((c) =>
-				c.length > 80 ? c.slice(0, 77) + "..." : c,
+				c.length > 80 ? `${c.slice(0, 77)}...` : c,
 			),
 		};
 
@@ -1894,8 +1894,7 @@ function excerptRoleBlocks(
 		/(\*\*(?:Proposer|Challenger):\*\*\n)([\s\S]*?)(?=\n\n\*\*(?:Proposer|Challenger):\*\*|$)/g,
 		(match, header: string, body: string) => {
 			if (body.length <= first + last + 10) return match;
-			const excerpted =
-				body.slice(0, first) + "\n[...truncated...]\n" + body.slice(-last);
+			const excerpted = `${body.slice(0, first)}\n[...truncated...]\n${body.slice(-last)}`;
 			return header + excerpted;
 		},
 	);

@@ -53,7 +53,8 @@ describe("loadProfile", () => {
 	});
 
 	it("loads valid profile with all fields", () => {
-		const content = `---\nname: test_agent\nagent: claude_code\nmodel: claude-sonnet-4-20250514\n---\nYou are a test agent.`;
+		const content =
+			"---\nname: test_agent\nagent: claude_code\nmodel: claude-sonnet-4-20250514\n---\nYou are a test agent.";
 		writeFileSync(join(profilesDir, "test_agent.md"), content);
 		const profile = loadProfile("test_agent", [profilesDir]);
 		expect(profile.name).toBe("test_agent");

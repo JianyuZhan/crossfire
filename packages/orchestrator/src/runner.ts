@@ -79,8 +79,9 @@ export async function runDebate(
 	options?: RunDebateOptions,
 ): Promise<DebateState> {
 	const bus = options?.bus ?? new DebateEventBus();
-	const isResume = !!options?.resumeFromState;
-	const startRound = isResume ? options!.resumeFromState!.currentRound + 1 : 1;
+	const resumeState = options?.resumeFromState;
+	const isResume = resumeState !== undefined;
+	const startRound = resumeState ? resumeState.currentRound + 1 : 1;
 
 	// Populate recovery context on each session so adapters can rebuild from transcript
 	adapters.proposer.session.recoveryContext = {
@@ -616,12 +617,10 @@ export async function runDebate(
 							durationMs: 0, // updated after LLM call
 						};
 
-						const prompt =
-							buildInstructions(result.debug.budgetTier) +
-							"\n\n" +
-							result.prompt;
+						const prompt = `${buildInstructions(result.debug.budgetTier)}\n\n${result.prompt}`;
 						submittedSynthesisPromptCharLength = prompt.length;
-						synthesisDebug.promptCharLength = submittedSynthesisPromptCharLength;
+						synthesisDebug.promptCharLength =
+							submittedSynthesisPromptCharLength;
 						synthRunResult = await runFinalSynthesis(
 							synthesisAdapter,
 							prompt,
@@ -719,7 +718,7 @@ export async function runDebate(
 					};
 					writeFileSync(
 						join(options.outputDir, "synthesis-debug.json"),
-						JSON.stringify(debugArtifact, null, 2) + "\n",
+						`${JSON.stringify(debugArtifact, null, 2)}\n`,
 					);
 				} catch (err) {
 					bus.push({

@@ -74,13 +74,11 @@ export function App({
 	}, [store]);
 
 	// Resize effect B: re-measure when fixed-area-affecting state changes
+	const fixedAreaHeight = computeFixedAreaHeight(snapshot.state);
 	useEffect(() => {
 		const stdout = process.stdout;
-		store.setViewportDimensions(
-			stdout.rows - computeFixedAreaHeight(store.getState()),
-			stdout.columns,
-		);
-	}, [store, snapshot.state.command.mode, snapshot.state.judge.visible]);
+		store.setViewportDimensions(stdout.rows - fixedAreaHeight, stdout.columns);
+	}, [fixedAreaHeight, store]);
 
 	// Scroll key handling
 	const pageSize = Math.max(1, snapshot.viewport.viewportHeight - 2);

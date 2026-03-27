@@ -15,7 +15,7 @@ function createMockProcess(lines: string[] = [], exitCode = 0) {
 	// Feed lines async
 	setImmediate(() => {
 		for (const line of lines) {
-			stdout.write(line + "\n");
+			stdout.write(`${line}\n`);
 		}
 		stdout.end();
 		proc.emit("exit", exitCode);

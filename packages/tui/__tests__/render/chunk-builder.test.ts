@@ -141,10 +141,10 @@ describe("rebuildChunks — collapsed round summary", () => {
 		expect(collapsed).toBeDefined();
 		if (collapsed?.type === "round") {
 			expect(collapsed.collapsedSummary).toBeDefined();
-			expect(collapsed.collapsedSummary!.proposerLine).toContain(
+			expect(collapsed.collapsedSummary?.proposerLine).toContain(
 				"Proposer argument",
 			);
-			expect(collapsed.collapsedSummary!.challengerLine).toContain(
+			expect(collapsed.collapsedSummary?.challengerLine).toContain(
 				"Challenger rebuttal",
 			);
 		}

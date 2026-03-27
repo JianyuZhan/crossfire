@@ -1714,17 +1714,17 @@ describe("assembleAdaptiveSynthesisPrompt", () => {
 				(d) => d.roundNumber === 2,
 			);
 			expect(r2Disp).toBeDefined();
-			expect(r2Disp!.disposition).not.toBe("fullText");
+			expect(r2Disp?.disposition).not.toBe("fullText");
 
 			// Rounds 1 and 3 should be full text (short tier with large budget)
 			const r1Disp = result.debug.roundDisposition.find(
 				(d) => d.roundNumber === 1,
 			);
-			expect(r1Disp!.disposition).toBe("fullText");
+			expect(r1Disp?.disposition).toBe("fullText");
 			const r3Disp = result.debug.roundDisposition.find(
 				(d) => d.roundNumber === 3,
 			);
-			expect(r3Disp!.disposition).toBe("fullText");
+			expect(r3Disp?.disposition).toBe("fullText");
 		});
 	});
 
@@ -1850,7 +1850,7 @@ describe("assembleAdaptiveSynthesisPrompt", () => {
 
 			expect(result.debug.budgetTier).toBe("long");
 			expect(result.debug.phaseBlocks).toBeDefined();
-			expect(result.debug.phaseBlocks!.length).toBeGreaterThan(0);
+			expect(result.debug.phaseBlocks?.length).toBeGreaterThan(0);
 		});
 	});
 
@@ -2136,27 +2136,27 @@ describe("shrinkToFit", () => {
 					{
 						roundNumber: 1,
 						type: "fullText",
-						content: "P1 " + "x".repeat(500),
+						content: `P1 ${"x".repeat(500)}`,
 					},
 					{
 						roundNumber: 2,
 						type: "fullText",
-						content: "P2 " + "x".repeat(500),
+						content: `P2 ${"x".repeat(500)}`,
 					},
 					{
 						roundNumber: 3,
 						type: "fullText",
-						content: "P3 " + "x".repeat(500),
+						content: `P3 ${"x".repeat(500)}`,
 					},
 					{
 						roundNumber: 4,
 						type: "fullText",
-						content: "P4 " + "x".repeat(500),
+						content: `P4 ${"x".repeat(500)}`,
 					},
 					{
 						roundNumber: 5,
 						type: "fullText",
-						content: "P5 " + "x".repeat(500),
+						content: `P5 ${"x".repeat(500)}`,
 					},
 				],
 			});
@@ -2199,7 +2199,7 @@ describe("shrinkToFit", () => {
 					{
 						roundNumber: 1,
 						type: "fullText",
-						content: "Full text round 1 " + "x".repeat(2000),
+						content: `Full text round 1 ${"x".repeat(2000)}`,
 					},
 				],
 			});
@@ -2354,11 +2354,7 @@ describe("shrinkToFit", () => {
 			const state = makeShrinkState(1);
 
 			// A very long full-text round
-			const longContent =
-				"**Proposer:**\n" +
-				"x".repeat(3000) +
-				"\n\n**Challenger:**\n" +
-				"y".repeat(3000);
+			const longContent = `**Proposer:**\n${"x".repeat(3000)}\n\n**Challenger:**\n${"y".repeat(3000)}`;
 
 			const sections = makeSections({
 				layer1: "## Topic\n\nT",
@@ -2796,8 +2792,8 @@ describe("assembleAdaptiveSynthesisPrompt scoring integration", () => {
 			// Round 2 should have a high score due to concession + risk
 			const r2Score = result.debug.scores.find((s) => s.roundNumber === 2);
 			expect(r2Score).toBeDefined();
-			expect(r2Score!.breakdown.concession).toBe(1.0);
-			expect(r2Score!.breakdown.riskDelta).toBe(0.6);
+			expect(r2Score?.breakdown.concession).toBe(1.0);
+			expect(r2Score?.breakdown.riskDelta).toBe(0.6);
 		}
 	});
 
@@ -3439,10 +3435,10 @@ describe("Phase 3 golden prompts", () => {
 		expect(round1).toBeDefined();
 
 		// Round 2 should score higher than round 1 due to both recency AND reference bonus
-		expect(round2!.score).toBeGreaterThan(round1!.score);
+		expect(round2?.score).toBeGreaterThan(round1?.score);
 
 		// Verify the reference component is significant
-		expect(round2!.breakdown.reference).toBeGreaterThan(0.1);
+		expect(round2?.breakdown.reference).toBeGreaterThan(0.1);
 	});
 
 	it("buildQuoteSnippets token-clamp integration via shrink", () => {
@@ -4627,7 +4623,7 @@ describe("Phase 3: cutSnippets shrink step", () => {
 		const state = makeShrinkState(3);
 
 		// Create a scenario where snippet section is large
-		const snippetSection = "## Key Quotes\n\n> **Round 1:** " + "x".repeat(500);
+		const snippetSection = `## Key Quotes\n\n> **Round 1:** ${"x".repeat(500)}`;
 
 		const transcript = new Map<
 			number,
@@ -4677,7 +4673,7 @@ describe("Phase 3: cutSnippets shrink step", () => {
 				{
 					roundNumber: 3,
 					type: "fullText",
-					content: "P3 full text " + "x".repeat(200),
+					content: `P3 full text ${"x".repeat(200)}`,
 				},
 			],
 			snippetSection,
@@ -4747,7 +4743,7 @@ describe("Phase 3: cutSnippets shrink step", () => {
 				{
 					roundNumber: 1,
 					type: "fullText",
-					content: "P1 full text " + "x".repeat(2000),
+					content: `P1 full text ${"x".repeat(2000)}`,
 				},
 			],
 			snippetSection,

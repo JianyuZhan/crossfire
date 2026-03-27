@@ -52,7 +52,7 @@ export class JsonRpcClient {
 	request(method: string, params?: unknown): Promise<unknown> {
 		const id = this.nextId++;
 		const msg = { jsonrpc: "2.0", id, method, params };
-		this.writable.write(JSON.stringify(msg) + "\n");
+		this.writable.write(`${JSON.stringify(msg)}\n`);
 		return new Promise((resolve, reject) => {
 			this.pendingRequests.set(id, { resolve, reject });
 		});
@@ -60,7 +60,7 @@ export class JsonRpcClient {
 
 	notify(method: string, params?: unknown): void {
 		const msg = { jsonrpc: "2.0", method, params };
-		this.writable.write(JSON.stringify(msg) + "\n");
+		this.writable.write(`${JSON.stringify(msg)}\n`);
 	}
 
 	onNotification(method: string, handler: (...args: unknown[]) => void): void {
@@ -106,7 +106,7 @@ export class JsonRpcClient {
 			if (handler) {
 				handler(msg.params).then((result) => {
 					this.writable.write(
-						JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n",
+						`${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result })}\n`,
 					);
 				});
 			}

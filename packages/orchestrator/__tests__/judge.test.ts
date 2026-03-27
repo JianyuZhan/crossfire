@@ -96,8 +96,8 @@ describe("runJudgeTurn", () => {
 		unsub();
 
 		expect(verdict).toBeDefined();
-		expect(verdict!.leading).toBe("proposer");
-		expect(verdict!.shouldContinue).toBe(true);
+		expect(verdict?.leading).toBe("proposer");
+		expect(verdict?.shouldContinue).toBe(true);
 	});
 
 	it("extracts verdict from fenced code block in message.final", async () => {
@@ -147,10 +147,10 @@ describe("runJudgeTurn", () => {
 		unsub();
 
 		expect(verdict).toBeDefined();
-		expect(verdict!.leading).toBe("challenger");
-		expect(verdict!.score).toEqual({ proposer: 4, challenger: 8 });
-		expect(verdict!.shouldContinue).toBe(false);
-		expect(verdict!.reasoning).toBe("Stronger rebuttal");
+		expect(verdict?.leading).toBe("challenger");
+		expect(verdict?.score).toEqual({ proposer: 4, challenger: 8 });
+		expect(verdict?.shouldContinue).toBe(false);
+		expect(verdict?.reasoning).toBe("Stronger rebuttal");
 	});
 
 	it("returns undefined when judge produces no verdict", async () => {

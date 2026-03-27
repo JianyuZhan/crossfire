@@ -42,7 +42,7 @@ export class EventStore {
 	}
 
 	append(event: AnyEvent): void {
-		const line = JSON.stringify(event) + "\n";
+		const line = `${JSON.stringify(event)}\n`;
 
 		if (event.kind === "round.started" && "roundNumber" in event) {
 			const rn = (event as { roundNumber: number }).roundNumber;
@@ -182,7 +182,7 @@ export class EventStore {
 			turnOffsets: this.turnOffsets,
 			segments,
 		};
-		writeFileSync(indexPath, JSON.stringify(index, null, 2) + "\n");
+		writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`);
 	}
 
 	static load(eventsPath: string): AnyEvent[] {

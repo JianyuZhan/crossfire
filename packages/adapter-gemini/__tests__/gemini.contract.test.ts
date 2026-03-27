@@ -142,7 +142,7 @@ function createMockSpawnFn(
 		// Emit JSONL lines and exit asynchronously
 		setImmediate(() => {
 			for (const line of behavior.lines) {
-				stdout.write(line + "\n");
+				stdout.write(`${line}\n`);
 			}
 			stdout.end();
 			proc.emit("exit", behavior.exitCode, null);

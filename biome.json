@@ -1,9 +1,24 @@
 {
 	"$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
+	"files": {
+		"ignore": [".claude/**", ".turbo/**", "run_output/**", "dist/**"]
+	},
 	"organizeImports": { "enabled": true },
 	"linter": {
 		"enabled": true,
-		"rules": { "recommended": true }
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noExplicitAny": "warn",
+				"noArrayIndexKey": "warn"
+			},
+			"correctness": {
+				"useYield": "warn"
+			},
+			"style": {
+				"noNonNullAssertion": "warn"
+			}
+		}
 	},
 	"formatter": {
 		"enabled": true,

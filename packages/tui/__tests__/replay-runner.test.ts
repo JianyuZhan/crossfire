@@ -52,10 +52,9 @@ describe("ReplayEventSource", () => {
 
 	beforeEach(async () => {
 		dir = await mkdtemp(join(tmpdir(), "replay-"));
-		const jsonl =
-			makeEvents()
-				.map((e) => JSON.stringify(e))
-				.join("\n") + "\n";
+		const jsonl = `${makeEvents()
+			.map((e) => JSON.stringify(e))
+			.join("\n")}\n`;
 		await writeFile(join(dir, "events.jsonl"), jsonl);
 	});
 

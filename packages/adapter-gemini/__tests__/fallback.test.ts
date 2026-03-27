@@ -45,7 +45,7 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 
 		setImmediate(() => {
 			for (const line of behavior.lines) {
-				stdout.write(line + "\n");
+				stdout.write(`${line}\n`);
 			}
 			setTimeout(() => {
 				stdout.end();

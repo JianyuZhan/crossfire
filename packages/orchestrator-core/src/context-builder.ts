@@ -3,7 +3,7 @@ import type { TurnRecord } from "@crossfire/adapter-core";
 
 /** Simple end truncation */
 export function truncate(text: string, maxChars: number): string {
-	return text.length > maxChars ? text.slice(0, maxChars) + "..." : text;
+	return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
 }
 
 /** Collapse excessive whitespace */
@@ -22,7 +22,7 @@ export function truncateWithHeadTail(
 ): string {
 	if (text.length <= maxChars) return text;
 	const marker = "\n[...truncated...]\n";
-	if (maxChars <= marker.length) return text.slice(0, maxChars) + "...";
+	if (maxChars <= marker.length) return `${text.slice(0, maxChars)}...`;
 	const headLen = Math.floor((maxChars - marker.length) * headRatio);
 	const tailLen = maxChars - marker.length - headLen;
 	return text.slice(0, headLen) + marker + text.slice(-tailLen);

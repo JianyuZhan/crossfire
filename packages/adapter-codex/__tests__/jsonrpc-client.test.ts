@@ -27,8 +27,7 @@ describe("JsonRpcClient", () => {
 		expect(req.params).toEqual({ clientInfo: { name: "test" } });
 		// Send response
 		stdout.write(
-			JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { ok: true } }) +
-				"\n",
+			`${JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { ok: true } })}\n`,
 		);
 		const result = await responsePromise;
 		expect(result).toEqual({ ok: true });
@@ -49,11 +48,11 @@ describe("JsonRpcClient", () => {
 		const handler = vi.fn();
 		client.onNotification("item/agentMessage/delta", handler);
 		stdout.write(
-			JSON.stringify({
+			`${JSON.stringify({
 				jsonrpc: "2.0",
 				method: "item/agentMessage/delta",
 				params: { text: "hi" },
-			}) + "\n",
+			})}\n`,
 		);
 		await new Promise((r) => setTimeout(r, 50));
 		expect(handler).toHaveBeenCalledWith({ text: "hi" });
@@ -67,12 +66,12 @@ describe("JsonRpcClient", () => {
 			},
 		);
 		stdout.write(
-			JSON.stringify({
+			`${JSON.stringify({
 				jsonrpc: "2.0",
 				id: 99,
 				method: "item/commandExecution/requestApproval",
 				params: { command: "rm" },
-			}) + "\n",
+			})}\n`,
 		);
 		await new Promise((r) => setTimeout(r, 50));
 		const written = await new Promise<string>((r) =>
@@ -91,11 +90,11 @@ describe("JsonRpcClient", () => {
 		);
 		const req = JSON.parse(written);
 		stdout.write(
-			JSON.stringify({
+			`${JSON.stringify({
 				jsonrpc: "2.0",
 				id: req.id,
 				error: { code: -32601, message: "Method not found" },
-			}) + "\n",
+			})}\n`,
 		);
 		await expect(responsePromise).rejects.toThrow("Method not found");
 	});
@@ -104,11 +103,11 @@ describe("JsonRpcClient", () => {
 		const handler = vi.fn();
 		client.onNotification("*", handler);
 		stdout.write(
-			JSON.stringify({
+			`${JSON.stringify({
 				jsonrpc: "2.0",
 				method: "some/event",
 				params: { a: 1 },
-			}) + "\n",
+			})}\n`,
 		);
 		await new Promise((r) => setTimeout(r, 50));
 		expect(handler).toHaveBeenCalledWith("some/event", { a: 1 });

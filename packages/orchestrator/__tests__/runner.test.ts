@@ -8,20 +8,20 @@ import type {
 	TurnInput,
 } from "@crossfire/adapter-core";
 import {
+	type AnyEvent,
+	type DebateConfig,
 	buildInstructions,
 	computeReferenceScores,
 	projectState,
-	type DebateConfig,
-	type AnyEvent,
 } from "@crossfire/orchestrator-core";
 import { describe, expect, it } from "vitest";
+import { DebateEventBus } from "../src/event-bus.js";
+import { PlanAccumulator } from "../src/plan-accumulator.js";
 import {
 	type AdapterMap,
 	getSchemaRefreshMode,
 	runDebate,
 } from "../src/runner.js";
-import { DebateEventBus } from "../src/event-bus.js";
-import { PlanAccumulator } from "../src/plan-accumulator.js";
 
 function createScriptedAdapter(
 	id: "claude" | "codex" | "gemini",
@@ -1042,12 +1042,12 @@ describe("runDebate", () => {
 		// Proposer initial prompt should contain custom system prompt
 		const proposerPrompt = sentPrompts.find((p) => p.turnId === "p-1");
 		expect(proposerPrompt).toBeDefined();
-		expect(proposerPrompt!.prompt).toContain("Custom proposer system prompt");
+		expect(proposerPrompt?.prompt).toContain("Custom proposer system prompt");
 
 		// Challenger initial prompt should contain custom system prompt
 		const challengerPrompt = sentPrompts.find((p) => p.turnId === "c-1");
 		expect(challengerPrompt).toBeDefined();
-		expect(challengerPrompt!.prompt).toContain(
+		expect(challengerPrompt?.prompt).toContain(
 			"Custom challenger system prompt",
 		);
 	});
@@ -1121,17 +1121,17 @@ describe("recoveryContext wiring", () => {
 
 		// Verify recoveryContext was set
 		expect(proposerSession.recoveryContext).toBeDefined();
-		expect(proposerSession.recoveryContext!.role).toBe("proposer");
-		expect(proposerSession.recoveryContext!.topic).toBe("Test debate topic");
-		expect(proposerSession.recoveryContext!.systemPrompt).toBe(
+		expect(proposerSession.recoveryContext?.role).toBe("proposer");
+		expect(proposerSession.recoveryContext?.topic).toBe("Test debate topic");
+		expect(proposerSession.recoveryContext?.systemPrompt).toBe(
 			"Proposer system prompt",
 		);
-		expect(proposerSession.recoveryContext!.schemaType).toBe("debate_meta");
-		expect(proposerSession.recoveryContext!.maxRounds).toBe(1);
+		expect(proposerSession.recoveryContext?.schemaType).toBe("debate_meta");
+		expect(proposerSession.recoveryContext?.maxRounds).toBe(1);
 
 		expect(challengerSession.recoveryContext).toBeDefined();
-		expect(challengerSession.recoveryContext!.role).toBe("challenger");
-		expect(challengerSession.recoveryContext!.systemPrompt).toBe(
+		expect(challengerSession.recoveryContext?.role).toBe("challenger");
+		expect(challengerSession.recoveryContext?.systemPrompt).toBe(
 			"Challenger system prompt",
 		);
 	});
@@ -1188,9 +1188,9 @@ describe("recoveryContext wiring", () => {
 		await runDebate(smallConfig, adapters);
 
 		expect(judgeSession.recoveryContext).toBeDefined();
-		expect(judgeSession.recoveryContext!.role).toBe("judge");
-		expect(judgeSession.recoveryContext!.schemaType).toBe("judge_verdict");
-		expect(judgeSession.recoveryContext!.systemPrompt).toBe(
+		expect(judgeSession.recoveryContext?.role).toBe("judge");
+		expect(judgeSession.recoveryContext?.schemaType).toBe("judge_verdict");
+		expect(judgeSession.recoveryContext?.systemPrompt).toBe(
 			"Judge system prompt",
 		);
 	});
@@ -1435,13 +1435,9 @@ describe("synthesis audit logging", () => {
 				plan,
 				topic: state.config.topic,
 				config: { contextTokenLimit: 128_000 },
-				referenceScores:
-					referenceScores.size > 0 ? referenceScores : undefined,
+				referenceScores: referenceScores.size > 0 ? referenceScores : undefined,
 			});
-			const submittedPrompt =
-				buildInstructions(assembled.debug.budgetTier) +
-				"\n\n" +
-				assembled.prompt;
+			const submittedPrompt = `${buildInstructions(assembled.debug.budgetTier)}\n\n${assembled.prompt}`;
 
 			expect(debug.promptCharLength).toBe(submittedPrompt.length);
 
@@ -1465,7 +1461,9 @@ describe("synthesis audit logging", () => {
 
 		try {
 			const blockedDebugPath = join(tmpDir, "synthesis-debug.json");
-			await import("node:fs").then(({ mkdirSync }) => mkdirSync(blockedDebugPath));
+			await import("node:fs").then(({ mkdirSync }) =>
+				mkdirSync(blockedDebugPath),
+			);
 
 			const smallConfig: DebateConfig = { ...config, maxRounds: 1 };
 			const proposer = createScriptedAdapter("claude", {

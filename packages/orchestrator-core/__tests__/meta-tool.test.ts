@@ -105,7 +105,7 @@ describe("DebateMetaSchema request_intervention", () => {
 			},
 		});
 		expect(result.success).toBe(true);
-		expect(result.data!.request_intervention!.type).toBe("clarification");
+		expect(result.data?.request_intervention?.type).toBe("clarification");
 	});
 });
 
@@ -133,7 +133,7 @@ describe("JudgeVerdictSchema extensions", () => {
 			},
 		});
 		expect(result.success).toBe(true);
-		expect(result.data!.clarification_response!.answered).toBe(false);
+		expect(result.data?.clarification_response?.answered).toBe(false);
 	});
 });
 

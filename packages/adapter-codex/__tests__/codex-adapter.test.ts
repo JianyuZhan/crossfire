@@ -25,20 +25,20 @@ function createMockClient() {
 
 	// Helper: send a JSON-RPC response from the "server"
 	function sendResponse(id: number, result: unknown) {
-		serverToClient.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+		serverToClient.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
 	}
 
 	// Helper: send a JSON-RPC notification from the "server"
 	function sendNotification(method: string, params: unknown) {
 		serverToClient.write(
-			JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n",
+			`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`,
 		);
 	}
 
 	// Helper: send a server-initiated JSON-RPC request (e.g., approval)
 	function sendServerRequest(id: number, method: string, params: unknown) {
 		serverToClient.write(
-			JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
+			`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`,
 		);
 	}
 
@@ -495,7 +495,7 @@ describe("CodexAdapter", () => {
 			await turnPromise;
 
 			// Interrupt
-			const interruptPromise = adapter.interrupt!("t1");
+			const interruptPromise = adapter.interrupt?.("t1");
 			const interruptMsg = await mock.readNextMessage();
 			expect(interruptMsg.method).toBe("turn/interrupt");
 			expect(interruptMsg.params).toEqual({
@@ -552,7 +552,7 @@ describe("CodexAdapter", () => {
 				expect(req.approvalType).toBe("command");
 
 				// Call approve
-				await adapter.approve!({
+				await adapter.approve?.({
 					requestId: req.requestId,
 					decision: "allow",
 				});
@@ -717,7 +717,7 @@ describe("CodexAdapter", () => {
 
 			// Attempt to approve should do nothing (cleaned up)
 			if (req.kind === "approval.request") {
-				await adapter.approve!({
+				await adapter.approve?.({
 					requestId: req.requestId,
 					decision: "allow",
 				});
@@ -861,11 +861,11 @@ describe("CodexAdapter", () => {
 			expect(turnMsg.method).toBe("turn/start");
 			// Send a proper JSON-RPC error (not a result with error field)
 			mock.serverToClient.write(
-				JSON.stringify({
+				`${JSON.stringify({
 					jsonrpc: "2.0",
 					id: turnMsg.id,
 					error: { code: -32000, message: "thread not found" },
-				}) + "\n",
+				})}\n`,
 			);
 
 			// Adapter should create a new thread, read thread/start
@@ -928,11 +928,11 @@ describe("CodexAdapter", () => {
 
 			// Simulate server error by sending JSON-RPC error response
 			mock.serverToClient.write(
-				JSON.stringify({
+				`${JSON.stringify({
 					jsonrpc: "2.0",
 					id: turnMsg.id,
 					error: { code: -32000, message: "thread not found" },
-				}) + "\n",
+				})}\n`,
 			);
 
 			// Should throw, not recover
@@ -1047,14 +1047,14 @@ describe("CodexAdapter", () => {
 
 			// Emit turn.completed
 			mock.serverToClient.write(
-				JSON.stringify({
+				`${JSON.stringify({
 					jsonrpc: "2.0",
 					method: "turn/completed",
 					params: {
 						turnId: "native-turn-1",
 						status: "completed",
 					},
-				}) + "\n",
+				})}\n`,
 			);
 
 			await waitForEvent(

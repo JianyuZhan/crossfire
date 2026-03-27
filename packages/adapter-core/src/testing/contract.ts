@@ -216,7 +216,7 @@ export function runContractTests(name: string, factory: MockAdapterFactory) {
 				workingDirectory: "/tmp",
 			});
 			await adapter.sendTurn(handle, { prompt: "long task", turnId: "t1" });
-			await adapter.interrupt!("t1");
+			await adapter.interrupt?.("t1");
 			const completed = await waitForTurnCompleted(events, "t1");
 			if (completed.kind === "turn.completed") {
 				expect(completed.status).toBe("interrupted");

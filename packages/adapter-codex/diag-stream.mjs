@@ -23,7 +23,7 @@ function pad(ms) {
 }
 
 console.log(`[diag] Prompt: "${prompt}"`);
-console.log(`[diag] Spawning codex app-server...\n`);
+console.log("[diag] Spawning codex app-server...\n");
 
 const startTime = Date.now();
 let rpcId = 0;
@@ -44,13 +44,13 @@ let turnStartTime = null;
 function send(method, params) {
 	const id = ++rpcId;
 	const msg = { jsonrpc: "2.0", id, method, params };
-	proc.stdin.write(JSON.stringify(msg) + "\n");
+	proc.stdin.write(`${JSON.stringify(msg)}\n`);
 	return new Promise((resolve) => pending.set(id, resolve));
 }
 
 function notify(method, params) {
 	const msg = { jsonrpc: "2.0", method, params };
-	proc.stdin.write(JSON.stringify(msg) + "\n");
+	proc.stdin.write(`${JSON.stringify(msg)}\n`);
 }
 
 rl.on("line", (line) => {
@@ -85,11 +85,11 @@ rl.on("line", (line) => {
 		timeline.push({ t, method: `srv:${msg.method}`, summary: "" });
 		// Auto-approve
 		proc.stdin.write(
-			JSON.stringify({
+			`${JSON.stringify({
 				jsonrpc: "2.0",
 				id: msg.id,
 				result: { approved: true },
-			}) + "\n",
+			})}\n`,
 		);
 		return;
 	}
@@ -212,7 +212,7 @@ function printSummary() {
 	}
 
 	// Key timeline
-	console.log(`\n--- Key Event Timeline ---`);
+	console.log("\n--- Key Event Timeline ---");
 	const interesting = timeline.filter(
 		(e) =>
 			e.method === "turn/started" ||
@@ -247,7 +247,7 @@ function printSummary() {
 	}
 
 	// Check what's missing
-	console.log(`\n--- Missing Events ---`);
+	console.log("\n--- Missing Events ---");
 	const methods = new Set(timeline.map((e) => e.method));
 	const expected = [
 		"turn/started",
