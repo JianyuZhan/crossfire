@@ -1,13 +1,98 @@
+import type { EvolvingPlan } from "./evolving-plan.js";
 import type { DebateState } from "./types.js";
 
 export interface SynthesisPromptConfig {
 	contextTokenLimit: number;
+	recentK?: number;
+	impactM?: number;
+	quoteSnippetBudgetChars?: number;
 }
 
 export interface JudgeNote {
 	roundNumber: number;
 	leading: "proposer" | "challenger" | "tie";
 	reasoning: string;
+	score?: { proposer: number; challenger: number };
+}
+
+/**
+ * Applies spec defaults and normalization rules to SynthesisPromptConfig.
+ * - recentK: default 3, normalized to max(1, floor(value))
+ * - impactM: default 2, normalized to max(0, floor(value))
+ * - quoteSnippetBudgetChars: default 2000, normalized to max(0, floor(value))
+ */
+export function normalizeConfig(
+	config: SynthesisPromptConfig,
+): Required<SynthesisPromptConfig> {
+	const recentK = Math.max(1, Math.floor(config.recentK ?? 3));
+	const impactM = Math.max(0, Math.floor(config.impactM ?? 2));
+	const quoteSnippetBudgetChars = Math.max(
+		0,
+		Math.floor(config.quoteSnippetBudgetChars ?? 2000),
+	);
+
+	return {
+		contextTokenLimit: config.contextTokenLimit,
+		recentK,
+		impactM,
+		quoteSnippetBudgetChars,
+	};
+}
+
+/** Placeholder for Phase 2 scored round data */
+export interface ScoredRound {
+	roundNumber: number;
+	score: number;
+	breakdown: Record<string, number>;
+}
+
+/** Debug metadata returned alongside the adaptive synthesis prompt */
+export interface SynthesisDebugMetadata {
+	budgetTier: "short" | "medium" | "long";
+	totalEstimatedTokens: number;
+	budgetTokens: number;
+	scores: ScoredRound[];
+	fullTextRounds: number[];
+	compressedRounds: number[];
+	roundDisposition: Array<{
+		roundNumber: number;
+		disposition:
+			| "fullText"
+			| "compressed"
+			| "phaseBlockCovered"
+			| "degradedSummary";
+	}>;
+	fitAchieved: boolean;
+	warnings: string[];
+	shrinkTrace: Array<{
+		step: string;
+		beforeTokens: number;
+		afterTokens: number;
+		detail?: string;
+	}>;
+	referenceScoreUsed: boolean;
+	quoteSnippetSourceRounds: number[];
+	phaseBlocks?: Array<{
+		phaseId: string;
+		coveredRounds: number[];
+		excludedPromotedRounds?: number[];
+	}>;
+}
+
+/** Input for assembleAdaptiveSynthesisPrompt() */
+export interface AdaptiveSynthesisInput {
+	state: DebateState;
+	plan: EvolvingPlan;
+	topic: string;
+	cleanTranscript?: Map<number, { proposer?: string; challenger?: string }>;
+	config: SynthesisPromptConfig;
+	referenceScores?: Map<number, number>;
+}
+
+/** Result of assembleAdaptiveSynthesisPrompt() */
+export interface AdaptiveSynthesisResult {
+	prompt: string;
+	debug: SynthesisDebugMetadata;
 }
 
 /**

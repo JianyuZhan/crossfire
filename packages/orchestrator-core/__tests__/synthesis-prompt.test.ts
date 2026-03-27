@@ -4,6 +4,7 @@ import {
 	buildFullTextSynthesisPrompt,
 	detectCjkMajority,
 	estimateTokens,
+	normalizeConfig,
 } from "../src/synthesis-prompt.js";
 import type { DebateState, DebateTurn } from "../src/types.js";
 
@@ -234,5 +235,86 @@ describe("buildFullTextSynthesisPrompt", () => {
 		);
 
 		expect(prompt).toContain("Round 1 was about X");
+	});
+});
+
+describe("normalizeConfig", () => {
+	it("applies defaults when adaptive fields are missing", () => {
+		const config: SynthesisPromptConfig = { contextTokenLimit: 10000 };
+		const result = normalizeConfig(config);
+
+		expect(result.recentK).toBe(3);
+		expect(result.impactM).toBe(2);
+		expect(result.quoteSnippetBudgetChars).toBe(2000);
+		// Original field preserved
+		expect(result.contextTokenLimit).toBe(10000);
+	});
+
+	it("preserves explicitly set values", () => {
+		const config: SynthesisPromptConfig = {
+			contextTokenLimit: 8000,
+			recentK: 5,
+			impactM: 4,
+			quoteSnippetBudgetChars: 3000,
+		};
+		const result = normalizeConfig(config);
+
+		expect(result.recentK).toBe(5);
+		expect(result.impactM).toBe(4);
+		expect(result.quoteSnippetBudgetChars).toBe(3000);
+	});
+
+	it("applies floor to fractional values", () => {
+		const config: SynthesisPromptConfig = {
+			contextTokenLimit: 10000,
+			recentK: 3.7,
+			impactM: 2.9,
+			quoteSnippetBudgetChars: 1500.5,
+		};
+		const result = normalizeConfig(config);
+
+		expect(result.recentK).toBe(3);
+		expect(result.impactM).toBe(2);
+		expect(result.quoteSnippetBudgetChars).toBe(1500);
+	});
+
+	it("enforces min bounds (recentK min 1, impactM min 0, budget min 0)", () => {
+		const config: SynthesisPromptConfig = {
+			contextTokenLimit: 10000,
+			recentK: 0,
+			impactM: -1,
+			quoteSnippetBudgetChars: -500,
+		};
+		const result = normalizeConfig(config);
+
+		expect(result.recentK).toBe(1);
+		expect(result.impactM).toBe(0);
+		expect(result.quoteSnippetBudgetChars).toBe(0);
+	});
+
+	it("clamps negative values to minimums", () => {
+		const config: SynthesisPromptConfig = {
+			contextTokenLimit: 10000,
+			recentK: -10,
+			impactM: -5,
+			quoteSnippetBudgetChars: -1000,
+		};
+		const result = normalizeConfig(config);
+
+		expect(result.recentK).toBe(1);
+		expect(result.impactM).toBe(0);
+		expect(result.quoteSnippetBudgetChars).toBe(0);
+	});
+
+	it("handles fractional values that floor below minimum", () => {
+		const config: SynthesisPromptConfig = {
+			contextTokenLimit: 10000,
+			recentK: 0.5, // floor(0.5) = 0, then clamp to 1
+			impactM: -0.1, // floor(-0.1) = -1, then clamp to 0
+		};
+		const result = normalizeConfig(config);
+
+		expect(result.recentK).toBe(1);
+		expect(result.impactM).toBe(0);
 	});
 });
