@@ -1,14 +1,18 @@
-import type {
-	AgentAdapter,
-	ApprovalDecision,
-	NormalizedEvent,
-	SessionHandle,
-	StartSessionInput,
-	TurnHandle,
-	TurnInput,
+import {
+	type AdapterCapabilities,
+	type AgentAdapter,
+	type ApprovalDecision,
+	CODEX_CAPABILITIES,
+	type LocalTurnMetrics,
+	type NormalizedEvent,
+	type SessionHandle,
+	type StartSessionInput,
+	type TurnHandle,
+	type TurnInput,
+	measureLocalMetrics,
+	parseTurnId,
 } from "@crossfire/adapter-core";
-import type { AdapterCapabilities } from "@crossfire/adapter-core";
-import { CODEX_CAPABILITIES } from "@crossfire/adapter-core";
+import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { mapCodexNotification } from "./event-mapper.js";
 import type { MapContext } from "./event-mapper.js";
 import { JsonRpcClient } from "./jsonrpc-client.js";
@@ -42,6 +46,10 @@ interface SessionState {
 	currentTurnId?: string;
 	currentNativeTurnId?: string;
 	turnStartTime?: number;
+	turnCount: number;
+	currentTurnRole?: "proposer" | "challenger" | "judge";
+	currentTurnRoundNumber?: number;
+	pendingLocalMetrics?: LocalTurnMetrics;
 }
 
 /** Pending approval request */
@@ -132,6 +140,7 @@ export class CodexAdapter implements AgentAdapter {
 			adapterSessionId,
 			providerSessionId,
 			adapterId: "codex",
+			transcript: [],
 		};
 
 		// Store session state (profile is stored but NOT sent to server)
@@ -139,6 +148,7 @@ export class CodexAdapter implements AgentAdapter {
 			handle,
 			profile: input.profile,
 			model,
+			turnCount: 0,
 		};
 		this.sessions.set(adapterSessionId, sessionState);
 
@@ -165,26 +175,97 @@ export class CodexAdapter implements AgentAdapter {
 		if (session) {
 			session.currentTurnId = input.turnId;
 			session.turnStartTime = Date.now();
+			const parsed = parseTurnId(input.turnId);
+			session.currentTurnRole = input.role ?? parsed.role;
+			session.currentTurnRoundNumber = input.roundNumber ?? parsed.roundNumber;
 		}
 
-		// Append meta-tool instructions so Codex knows how to call them
-		const prompt = input.prompt + META_TOOL_INSTRUCTIONS;
+		// Append meta-tool instructions only on first turn so Codex knows how to call them
+		// Subsequent turns use incremental prompts that don't need the instructions repeated
+		const isFirstTurn = session?.turnCount === 0;
+		const prompt = isFirstTurn
+			? input.prompt + META_TOOL_INSTRUCTIONS
+			: input.prompt;
 
-		// Send `turn/start` request
-		const result = (await this.client.request("turn/start", {
-			threadId: handle.providerSessionId,
-			input: [{ type: "text", text: prompt }],
-		})) as { turn: { id: string; status: string } };
-
-		// Save native turn ID for interrupt
+		// Measure local metrics: first turn has overhead, subsequent turns don't
+		const overheadText = isFirstTurn ? META_TOOL_INSTRUCTIONS : "";
+		const localMetrics = measureLocalMetrics(input.prompt, overheadText);
 		if (session) {
-			session.currentNativeTurnId = result.turn.id;
+			session.pendingLocalMetrics = localMetrics;
 		}
 
-		return {
-			turnId: input.turnId,
-			status: "running",
-		};
+		try {
+			// Send `turn/start` request — JSON-RPC errors reject the promise
+			const result = (await this.client.request("turn/start", {
+				threadId: handle.providerSessionId,
+				input: [{ type: "text", text: prompt }],
+			})) as { turn: { id: string; status: string } };
+
+			// Save native turn ID for interrupt and increment turn count
+			if (session) {
+				session.currentNativeTurnId = result.turn.id;
+				session.turnCount++;
+			}
+
+			return {
+				turnId: input.turnId,
+				status: "running",
+			};
+		} catch (err) {
+			// Attempt recovery if recoveryContext is available
+			if (handle.recoveryContext) {
+				const message = err instanceof Error ? err.message : String(err);
+				this.emit({
+					timestamp: Date.now(),
+					adapterId: "codex",
+					adapterSessionId: handle.adapterSessionId,
+					turnId: input.turnId,
+					kind: "run.warning",
+					message: `turn/start failed (${message}), attempting transcript recovery`,
+				});
+
+				// Create a new thread
+				const threadResult = (await this.client.request("thread/start", {
+					model: session?.model ?? "gpt-5.1-codex-mini",
+					cwd: "/tmp",
+					approvalPolicy: "on-failure",
+				})) as { thread: { id: string } };
+
+				const newThreadId = threadResult.thread.id;
+				handle.providerSessionId = newThreadId;
+				if (session) {
+					session.handle.providerSessionId = newThreadId;
+				}
+
+				// Build recovery prompt from transcript
+				const recoveryPrompt =
+					buildTranscriptRecoveryPrompt({
+						systemPrompt: handle.recoveryContext.systemPrompt,
+						topic: handle.recoveryContext.topic,
+						transcript: handle.transcript,
+						schemaType: handle.recoveryContext.schemaType,
+					}) + META_TOOL_INSTRUCTIONS;
+
+				// Retry turn/start on new thread with recovery prompt
+				const retryResult = (await this.client.request("turn/start", {
+					threadId: newThreadId,
+					input: [{ type: "text", text: recoveryPrompt }],
+				})) as { turn: { id: string; status: string } };
+
+				if (session) {
+					session.currentNativeTurnId = retryResult.turn.id;
+					session.turnCount++;
+				}
+
+				return {
+					turnId: input.turnId,
+					status: "running",
+				};
+			}
+
+			// No recovery context — re-throw
+			throw err;
+		}
 	}
 
 	onEvent(cb: (e: NormalizedEvent) => void): () => void {
@@ -302,6 +383,27 @@ export class CodexAdapter implements AgentAdapter {
 				if (event.kind === "turn.completed" && ctx.turnStartTime) {
 					(event as { durationMs: number }).durationMs =
 						Date.now() - ctx.turnStartTime;
+				}
+				// Attach local metrics to usage.updated events
+				if (event.kind === "usage.updated") {
+					const session = this.sessions.get(ctx.adapterSessionId);
+					if (session?.pendingLocalMetrics) {
+						event.localMetrics = session.pendingLocalMetrics;
+					}
+				}
+				// Append to transcript when a turn's final message arrives
+				if (event.kind === "message.final") {
+					const session = this.sessions.get(ctx.adapterSessionId);
+					if (
+						session?.currentTurnRole &&
+						session.currentTurnRoundNumber !== undefined
+					) {
+						session.handle.transcript.push({
+							roundNumber: session.currentTurnRoundNumber,
+							role: session.currentTurnRole,
+							content: event.text,
+						});
+					}
 				}
 				this.emit(event);
 			}

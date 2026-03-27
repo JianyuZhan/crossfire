@@ -507,4 +507,114 @@ describe("TuiStore", () => {
 		expect(s.rounds[0].proposer?.messageText).toBe("My argument.");
 		expect(s.rounds[0].proposer?.messageText).not.toContain("debate_meta");
 	});
+
+	it("accumulates localMetrics from usage.updated events", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 2,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("usage.updated", {
+				inputTokens: 500,
+				outputTokens: 200,
+				totalCostUsd: 0.03,
+				localMetrics: { totalChars: 1200, totalUtf8Bytes: 1500 },
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("usage.updated", {
+				inputTokens: 300,
+				outputTokens: 100,
+				totalCostUsd: 0.02,
+				localMetrics: { totalChars: 800, totalUtf8Bytes: 1000 },
+				turnId: "p-1",
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.metrics.proposerUsage.localTotalChars).toBe(2000);
+		expect(s.metrics.proposerUsage.localTotalUtf8Bytes).toBe(2500);
+	});
+
+	it("computes Codex delta from cumulative usage events", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 2,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		// First cumulative event
+		store.handleEvent(
+			ev("usage.updated", {
+				inputTokens: 1000,
+				outputTokens: 200,
+				semantics: "cumulative_thread_total",
+				turnId: "p-1",
+			}),
+		);
+		// Second cumulative event
+		store.handleEvent(
+			ev("usage.updated", {
+				inputTokens: 1500,
+				outputTokens: 200,
+				semantics: "cumulative_thread_total",
+				turnId: "p-1",
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.metrics.proposerUsage.previousCumulativeInput).toBe(1000);
+		expect(s.metrics.proposerUsage.lastDeltaInput).toBe(500);
+		expect(s.metrics.proposerUsage.tokens).toBe(1700); // (1000+200) first + (500+0) second = 1700
+	});
+
+	it("tracks Claude cache reads and observedInputPlusCacheRead", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 2,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("usage.updated", {
+				inputTokens: 500,
+				outputTokens: 200,
+				cacheReadTokens: 3000,
+				semantics: "session_delta_or_cached",
+				turnId: "p-1",
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.metrics.proposerUsage.cacheReadTokens).toBe(3000);
+		expect(s.metrics.proposerUsage.observedInputPlusCacheRead).toBe(3500);
+		expect(s.metrics.proposerUsage.tokens).toBe(700); // 500 input + 200 output
+	});
 });

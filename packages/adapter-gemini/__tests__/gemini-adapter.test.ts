@@ -36,6 +36,7 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 		spawnArgs.push(args);
 
 		const stdout = new PassThrough();
+		let killed = false;
 		const proc = new EventEmitter() as EventEmitter & {
 			pid: number;
 			stdout: PassThrough;
@@ -44,16 +45,22 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 		proc.pid = 1000 + spawnIndex;
 		proc.stdout = stdout;
 		proc.kill = () => {
+			if (killed) return;
+			killed = true;
 			stdout.end();
 			proc.emit("exit", null);
 		};
 
 		// Write lines then exit after a tick
 		setImmediate(() => {
+			if (killed) return;
 			for (const line of behavior.lines) {
+				if (killed) return;
 				stdout.write(line + "\n");
 			}
 			setTimeout(() => {
+				if (killed) return;
+				killed = true;
 				stdout.end();
 				proc.emit("exit", behavior.exitCode);
 			}, behavior.exitDelay ?? 0);
@@ -403,6 +410,213 @@ describe("GeminiAdapter", () => {
 		});
 	});
 
+	describe("transcript tracking", () => {
+		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
+			const { pm } = createMockProcessManager([
+				{
+					lines: [
+						initLine("s1"),
+						messageLine("Proposer argument"),
+						resultLine(),
+					],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "hi", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0]).toEqual({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Proposer argument",
+			});
+		});
+
+		it("uses explicit role and roundNumber from TurnInput", async () => {
+			const { pm } = createMockProcessManager([
+				{
+					lines: [initLine("s1"), messageLine("Judge says"), resultLine()],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, {
+				prompt: "judge",
+				turnId: "custom-id",
+				role: "judge",
+				roundNumber: 3,
+			});
+			await waitForTurnCompleted(events, "custom-id");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0].role).toBe("judge");
+			expect(handle.transcript[0].roundNumber).toBe(3);
+		});
+
+		it("accumulates transcript across multiple turns", async () => {
+			const { pm } = createMockProcessManager([
+				{
+					lines: [initLine("s1"), messageLine("Turn 1"), resultLine()],
+					exitCode: 0,
+				},
+				{
+					lines: [initLine("s1"), messageLine("Turn 2"), resultLine()],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, { prompt: "turn 1", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			await adapter.sendTurn(handle, { prompt: "turn 2", turnId: "c-2" });
+			await waitForTurnCompleted(events, "c-2");
+
+			expect(handle.transcript).toHaveLength(2);
+			expect(handle.transcript[0].role).toBe("proposer");
+			expect(handle.transcript[1].role).toBe("challenger");
+		});
+
+		it("startSession initializes empty transcript", async () => {
+			const { pm } = createMockProcessManager([]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			expect(handle.transcript).toEqual([]);
+		});
+	});
+
+	describe("session recovery fallback", () => {
+		it("uses buildTranscriptRecoveryPrompt in Path B when recoveryContext is set", async () => {
+			const { pm, spawnArgs } = createMockProcessManager([
+				// First turn: succeeds (Path A)
+				{
+					lines: [initLine("s1"), messageLine("Turn 1"), resultLine()],
+					exitCode: 0,
+				},
+				// Second turn Path A: resume fails (wrong session_id triggers fallback)
+				{
+					lines: [initLine("different-session")],
+					exitCode: 0,
+					exitDelay: 10,
+				},
+				// Second turn Path B: recovery with new session
+				{
+					lines: [
+						initLine("s2"),
+						messageLine("Recovered response"),
+						resultLine(),
+					],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			// Set recovery context
+			handle.recoveryContext = {
+				systemPrompt: "You are the proposer",
+				topic: "Test topic for recovery",
+				role: "proposer",
+				maxRounds: 3,
+				schemaType: "debate_meta",
+			};
+
+			// First turn succeeds
+			await adapter.sendTurn(handle, { prompt: "turn 1", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+			expect(handle.providerSessionId).toBe("s1");
+
+			// Second turn: resume attempt fails (session mismatch), triggers Path B
+			await adapter.sendTurn(handle, { prompt: "turn 2", turnId: "p-2" });
+			await waitForTurnCompleted(events, "p-2");
+
+			// Verify Path B used recovery prompt instead of stateless prompt
+			// The third spawn (Path B) should have a prompt containing topic and system prompt
+			expect(spawnArgs.length).toBe(3);
+			const pathBArgs = spawnArgs[2];
+			const promptArgIdx = pathBArgs.indexOf("-p");
+			expect(promptArgIdx).toBeGreaterThanOrEqual(0);
+			const recoveryPrompt = pathBArgs[promptArgIdx + 1];
+			expect(recoveryPrompt).toContain("Test topic for recovery");
+			expect(recoveryPrompt).toContain("You are the proposer");
+
+			// Warning about fallback should be emitted
+			const warnings = events.filter((e) => e.kind === "run.warning");
+			expect(warnings.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("falls back to buildStatelessPrompt when no recoveryContext is set", async () => {
+			const { pm, spawnArgs } = createMockProcessManager([
+				// First turn: succeeds
+				{
+					lines: [initLine("s1"), messageLine("Turn 1"), resultLine()],
+					exitCode: 0,
+				},
+				// Second turn Path A: resume fails
+				{
+					lines: [initLine("different-session")],
+					exitCode: 0,
+					exitDelay: 10,
+				},
+				// Second turn Path B: stateless fallback
+				{
+					lines: [
+						initLine("s2"),
+						messageLine("Fallback response"),
+						resultLine(),
+					],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			// No recoveryContext set
+
+			await adapter.sendTurn(handle, { prompt: "turn 1", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			await adapter.sendTurn(handle, { prompt: "turn 2", turnId: "p-2" });
+			await waitForTurnCompleted(events, "p-2");
+
+			// Path B should use stateless prompt (no topic/systemPrompt in prompt)
+			expect(spawnArgs.length).toBe(3);
+			const pathBArgs = spawnArgs[2];
+			const promptArgIdx = pathBArgs.indexOf("-p");
+			const fallbackPrompt = pathBArgs[promptArgIdx + 1];
+			// Stateless prompt just has "Previous conversation:" + original prompt
+			expect(fallbackPrompt).not.toContain("[SYSTEM PROMPT]");
+			expect(fallbackPrompt).not.toContain("[TOPIC]");
+		});
+	});
+
 	describe("close()", () => {
 		it("kills running process", async () => {
 			let killCalled = false;
@@ -546,6 +760,46 @@ describe("GeminiAdapter", () => {
 			expect(completed).toBeDefined();
 			if (completed?.kind === "turn.completed") {
 				expect(completed.status).toBe("failed");
+			}
+		});
+	});
+
+	describe("localMetrics in usage.updated", () => {
+		it("attaches localMetrics to usage.updated events", async () => {
+			const testPrompt = "Hello Gemini world";
+			const { pm } = createMockProcessManager([
+				{
+					lines: [
+						initLine("s1"),
+						JSON.stringify({ type: "message_delta", text: "Hi!" }),
+						JSON.stringify({
+							type: "usage",
+							input_tokens: 100,
+							output_tokens: 50,
+						}),
+						resultLine(),
+					],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: testPrompt, turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.localMetrics).toBeDefined();
+				expect(usageEvent.localMetrics?.semanticChars).toBe(testPrompt.length);
+				// Gemini has no adapter overhead
+				expect(usageEvent.localMetrics?.adapterOverheadChars).toBe(0);
+				expect(usageEvent.localMetrics?.totalChars).toBe(testPrompt.length);
+				expect(usageEvent.localMetrics?.semanticUtf8Bytes).toBeGreaterThan(0);
 			}
 		});
 	});

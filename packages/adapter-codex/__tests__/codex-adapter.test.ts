@@ -250,6 +250,36 @@ describe("CodexAdapter", () => {
 			expect(turnHandle.status).toBe("running");
 		});
 
+		it("includes META_TOOL_INSTRUCTIONS on first turn only", async () => {
+			const handle = await setupSession();
+
+			// First turn - should include META_TOOL_INSTRUCTIONS
+			const turn1Promise = adapter.sendTurn(handle, {
+				prompt: "First turn",
+				turnId: "t1",
+			});
+			const turn1Msg = await mock.readNextMessage();
+			expect(turn1Msg.params.input[0].text).toContain("First turn");
+			expect(turn1Msg.params.input[0].text).toContain("Meta-Tool Usage");
+			mock.sendResponse(turn1Msg.id as number, {
+				turn: { id: "native-turn-1", status: "running" },
+			});
+			await turn1Promise;
+
+			// Second turn - should NOT include META_TOOL_INSTRUCTIONS
+			const turn2Promise = adapter.sendTurn(handle, {
+				prompt: "Second turn",
+				turnId: "t2",
+			});
+			const turn2Msg = await mock.readNextMessage();
+			expect(turn2Msg.params.input[0].text).toContain("Second turn");
+			expect(turn2Msg.params.input[0].text).not.toContain("Meta-Tool Usage");
+			mock.sendResponse(turn2Msg.id as number, {
+				turn: { id: "native-turn-2", status: "running" },
+			});
+			await turn2Promise;
+		});
+
 		it("emits session.started event from startSession()", async () => {
 			const { events } = collectEvents(adapter);
 			const handle = await setupSession();
@@ -335,6 +365,29 @@ describe("CodexAdapter", () => {
 
 			const usageEvents = events.filter((e) => e.kind === "usage.updated");
 			expect(usageEvents.length).toBeGreaterThan(0);
+		});
+
+		it("includes cumulative_thread_total semantics in usage.updated events", async () => {
+			const { events } = collectEvents(adapter);
+			await setupSessionAndTurn();
+
+			mock.sendNotification("thread/tokenUsage/updated", {
+				tokenUsage: {
+					total: {
+						inputTokens: 100,
+						outputTokens: 50,
+					},
+				},
+			});
+			await new Promise((r) => setTimeout(r, 50));
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.semantics).toBe("cumulative_thread_total");
+				expect(usageEvent.inputTokens).toBe(100);
+				expect(usageEvent.outputTokens).toBe(50);
+			}
 		});
 	});
 
@@ -677,6 +730,216 @@ describe("CodexAdapter", () => {
 		});
 	});
 
+	describe("transcript tracking", () => {
+		async function setupSessionHelper() {
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			return sessionPromise;
+		}
+
+		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
+			const { events } = collectEvents(adapter);
+			const handle = await setupSessionHelper();
+
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "test",
+				turnId: "p-1",
+			});
+			const turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-t1", status: "running" },
+			});
+			await turnPromise;
+
+			// Send item/completed with agentMessage to trigger message.final
+			mock.sendNotification("item/completed", {
+				item: {
+					type: "agentMessage",
+					id: "msg1",
+					content: [{ type: "text", text: "Proposer response" }],
+				},
+			});
+			await new Promise((r) => setTimeout(r, 50));
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0]).toEqual({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Proposer response",
+			});
+		});
+
+		it("uses explicit role and roundNumber from TurnInput", async () => {
+			const { events } = collectEvents(adapter);
+			const handle = await setupSessionHelper();
+
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "test",
+				turnId: "custom-id",
+				role: "judge",
+				roundNumber: 5,
+			});
+			const turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-t1", status: "running" },
+			});
+			await turnPromise;
+
+			mock.sendNotification("item/completed", {
+				item: {
+					type: "agentMessage",
+					id: "msg1",
+					content: [{ type: "text", text: "Judge verdict" }],
+				},
+			});
+			await new Promise((r) => setTimeout(r, 50));
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0].role).toBe("judge");
+			expect(handle.transcript[0].roundNumber).toBe(5);
+		});
+
+		it("startSession initializes empty transcript", async () => {
+			const handle = await setupSessionHelper();
+			expect(handle.transcript).toEqual([]);
+		});
+	});
+
+	describe("session recovery fallback", () => {
+		it("recovers by creating a new thread when turn/start fails with thread-not-found and recoveryContext is set", async () => {
+			const { events } = collectEvents(adapter);
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage(); // initialized
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+
+			// Set recovery context
+			handle.recoveryContext = {
+				systemPrompt: "You are the proposer",
+				topic: "Test topic",
+				role: "proposer",
+				maxRounds: 3,
+				schemaType: "debate_meta",
+			};
+
+			// Add a transcript entry so recovery prompt includes content
+			handle.transcript.push({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Previous argument",
+			});
+
+			// First turn: turn/start fails with thread-not-found error
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "new prompt",
+				turnId: "p-2",
+			});
+
+			// Read the first turn/start attempt and respond with JSON-RPC error
+			const turnMsg = await mock.readNextMessage();
+			expect(turnMsg.method).toBe("turn/start");
+			// Send a proper JSON-RPC error (not a result with error field)
+			mock.serverToClient.write(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: turnMsg.id,
+					error: { code: -32000, message: "thread not found" },
+				}) + "\n",
+			);
+
+			// Adapter should create a new thread, read thread/start
+			const newThreadMsg = await mock.readNextMessage();
+			expect(newThreadMsg.method).toBe("thread/start");
+			mock.sendResponse(newThreadMsg.id as number, {
+				thread: { id: "thread-2" },
+			});
+
+			// Then send turn/start on new thread
+			const retryTurnMsg = await mock.readNextMessage();
+			expect(retryTurnMsg.method).toBe("turn/start");
+			expect(retryTurnMsg.params.threadId).toBe("thread-2");
+			// Recovery prompt should contain topic and system prompt
+			expect(retryTurnMsg.params.input[0].text).toContain("Test topic");
+			expect(retryTurnMsg.params.input[0].text).toContain(
+				"You are the proposer",
+			);
+			mock.sendResponse(retryTurnMsg.id as number, {
+				turn: { id: "native-t-retry", status: "running" },
+			});
+
+			await turnPromise;
+
+			// Provider session ID should be updated
+			expect(handle.providerSessionId).toBe("thread-2");
+
+			// A warning event should have been emitted
+			const warnings = events.filter((e) => e.kind === "run.warning");
+			expect(warnings.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("does not attempt recovery when no recoveryContext is set", async () => {
+			const { events } = collectEvents(adapter);
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+			// No recoveryContext set
+
+			// Send turn - will fail
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "new prompt",
+				turnId: "p-2",
+			});
+
+			const turnMsg = await mock.readNextMessage();
+			expect(turnMsg.method).toBe("turn/start");
+
+			// Simulate server error by sending JSON-RPC error response
+			mock.serverToClient.write(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					id: turnMsg.id,
+					error: { code: -32000, message: "thread not found" },
+				}) + "\n",
+			);
+
+			// Should throw, not recover
+			await expect(turnPromise).rejects.toThrow();
+		});
+	});
+
 	describe("onEvent() / unsubscribe", () => {
 		it("returns unsubscribe function that stops delivery", async () => {
 			const { events, unsubscribe } = collectEvents(adapter);
@@ -695,6 +958,153 @@ describe("CodexAdapter", () => {
 			await sessionPromise;
 
 			expect(events).toHaveLength(0);
+		});
+	});
+
+	describe("localMetrics in usage.updated", () => {
+		it("attaches localMetrics to usage.updated events on first turn (with overhead)", async () => {
+			const { events } = collectEvents(adapter);
+			const testPrompt = "Hello world";
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+
+			// Send first turn
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: testPrompt,
+				turnId: "p-1",
+			});
+			const turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-turn-1", status: "running" },
+			});
+			await turnPromise;
+
+			// Simulate usage notification
+			mock.sendNotification("thread/tokenUsage/updated", {
+				inputTokens: 100,
+				outputTokens: 50,
+			});
+
+			await waitForEvent(events, (e) => e.kind === "usage.updated", 1000);
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.localMetrics).toBeDefined();
+				expect(usageEvent.localMetrics?.semanticChars).toBe(testPrompt.length);
+				// First turn should have adapter overhead (META_TOOL_INSTRUCTIONS)
+				expect(usageEvent.localMetrics?.adapterOverheadChars).toBeGreaterThan(
+					0,
+				);
+				expect(usageEvent.localMetrics?.totalChars).toBeGreaterThan(
+					testPrompt.length,
+				);
+			}
+		});
+
+		it("attaches localMetrics to usage.updated events on subsequent turns (no overhead)", async () => {
+			const { events } = collectEvents(adapter);
+			const testPrompt = "Follow up question";
+
+			// Setup session
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+				model: "test-model",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+
+			// Send first turn (to increment turnCount)
+			let turnPromise = adapter.sendTurn(handle, {
+				prompt: "First turn",
+				turnId: "p-1",
+			});
+			let turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-turn-1", status: "running" },
+			});
+			await turnPromise;
+
+			// Emit turn.completed
+			mock.serverToClient.write(
+				JSON.stringify({
+					jsonrpc: "2.0",
+					method: "turn/completed",
+					params: {
+						turnId: "native-turn-1",
+						status: "completed",
+					},
+				}) + "\n",
+			);
+
+			await waitForEvent(
+				events,
+				(e) => e.kind === "turn.completed" && e.turnId === "p-1",
+				1000,
+			);
+
+			// Send second turn
+			turnPromise = adapter.sendTurn(handle, {
+				prompt: testPrompt,
+				turnId: "c-1",
+			});
+			turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-turn-2", status: "running" },
+			});
+			await turnPromise;
+
+			// Simulate usage notification for second turn
+			mock.sendNotification("thread/tokenUsage/updated", {
+				inputTokens: 150,
+				outputTokens: 60,
+			});
+
+			await waitForEvent(
+				events,
+				(e) =>
+					e.kind === "usage.updated" &&
+					e.turnId === "c-1" &&
+					e.inputTokens === 150,
+				1000,
+			);
+
+			const usageEvents = events.filter((e) => e.kind === "usage.updated");
+			const secondTurnUsage = usageEvents.find(
+				(e) => e.turnId === "c-1" && e.inputTokens === 150,
+			);
+			expect(secondTurnUsage).toBeDefined();
+			if (secondTurnUsage?.kind === "usage.updated") {
+				expect(secondTurnUsage.localMetrics).toBeDefined();
+				expect(secondTurnUsage.localMetrics?.semanticChars).toBe(
+					testPrompt.length,
+				);
+				// Subsequent turns should have NO adapter overhead
+				expect(secondTurnUsage.localMetrics?.adapterOverheadChars).toBe(0);
+				expect(secondTurnUsage.localMetrics?.totalChars).toBe(
+					testPrompt.length,
+				);
+			}
 		});
 	});
 });

@@ -839,4 +839,452 @@ describe("ClaudeAdapter", () => {
 			expect(receivedHooks).toHaveProperty("PostToolUse");
 		});
 	});
+
+	describe("transcript tracking", () => {
+		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{ type: "assistant", content: "Hello world" },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 10, output_tokens: 5 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "hello", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0]).toEqual({
+				roundNumber: 1,
+				role: "proposer",
+				content: "Hello world",
+			});
+		});
+
+		it("uses explicit role and roundNumber from TurnInput", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{ type: "assistant", content: "Challenger response" },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 10, output_tokens: 5 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, {
+				prompt: "challenge",
+				turnId: "custom-id",
+				role: "challenger",
+				roundNumber: 3,
+			});
+			await waitForTurnCompleted(events, "custom-id");
+
+			expect(handle.transcript).toHaveLength(1);
+			expect(handle.transcript[0].role).toBe("challenger");
+			expect(handle.transcript[0].roundNumber).toBe(3);
+		});
+
+		it("does not append to transcript when turnId does not match pattern and no explicit role", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{ type: "assistant", content: "Some text" },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 10, output_tokens: 5 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, {
+				prompt: "hello",
+				turnId: "unknown-format",
+			});
+			await waitForTurnCompleted(events, "unknown-format");
+
+			expect(handle.transcript).toHaveLength(0);
+		});
+
+		it("accumulates transcript across multiple turns", async () => {
+			let callCount = 0;
+			const queryFn: QueryFn = () => {
+				callCount++;
+				const msgs: SdkMessage[] =
+					callCount === 1
+						? [
+								{
+									type: "system/init",
+									sessionId: "ps1",
+									model: "haiku",
+									tools: [],
+								},
+								{ type: "assistant", content: "Turn 1 response" },
+								{
+									type: "result",
+									subtype: "success",
+									usage: { input_tokens: 10, output_tokens: 5 },
+									duration_ms: 100,
+								},
+							]
+						: [
+								{ type: "assistant", content: "Turn 2 response" },
+								{
+									type: "result",
+									subtype: "success",
+									usage: { input_tokens: 15, output_tokens: 8 },
+									duration_ms: 200,
+								},
+							];
+				return { messages: messagesFrom(msgs), interrupt: vi.fn() };
+			};
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, { prompt: "turn 1", turnId: "p-1" });
+			await waitForTurnCompleted(events, "p-1");
+
+			await adapter.sendTurn(handle, { prompt: "turn 2", turnId: "c-2" });
+			await waitForTurnCompleted(events, "c-2");
+
+			expect(handle.transcript).toHaveLength(2);
+			expect(handle.transcript[0].role).toBe("proposer");
+			expect(handle.transcript[0].roundNumber).toBe(1);
+			expect(handle.transcript[1].role).toBe("challenger");
+			expect(handle.transcript[1].roundNumber).toBe(2);
+		});
+
+		it("startSession initializes empty transcript", async () => {
+			const { queryFn } = mockQueryFn([]);
+			adapter = new ClaudeAdapter({ queryFn });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			expect(handle.transcript).toEqual([]);
+		});
+	});
+
+	describe("session recovery fallback", () => {
+		it("recovers by creating a new session when resume fails and recoveryContext is set", async () => {
+			let callCount = 0;
+			const capturedPrompts: string[] = [];
+			const queryFn: QueryFn = (opts) => {
+				callCount++;
+				capturedPrompts.push(opts.prompt);
+				if (callCount === 1) {
+					// First turn: normal, sets providerSessionId
+					return {
+						messages: messagesFrom([
+							{
+								type: "system/init",
+								sessionId: "ps1",
+								model: "haiku",
+								tools: [],
+							},
+							{ type: "assistant", content: "Turn 1 response" },
+							{
+								type: "result",
+								subtype: "success",
+								usage: { input_tokens: 10, output_tokens: 5 },
+								duration_ms: 100,
+							},
+						]),
+						interrupt: vi.fn(),
+					};
+				}
+				if (callCount === 2) {
+					// Second turn: resume fails (session expired)
+					async function* failingGen(): AsyncGenerator<SdkMessage> {
+						throw new Error("session not found");
+					}
+					return { messages: failingGen(), interrupt: vi.fn() };
+				}
+				// Third call: recovery with new session
+				return {
+					messages: messagesFrom([
+						{
+							type: "system/init",
+							sessionId: "ps2",
+							model: "haiku",
+							tools: [],
+						},
+						{ type: "assistant", content: "Recovered response" },
+						{
+							type: "result",
+							subtype: "success",
+							usage: { input_tokens: 20, output_tokens: 10 },
+							duration_ms: 200,
+						},
+					]),
+					interrupt: vi.fn(),
+				};
+			};
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			// Set recovery context
+			handle.recoveryContext = {
+				systemPrompt: "You are the proposer",
+				topic: "Test topic",
+				role: "proposer",
+				maxRounds: 3,
+				schemaType: "debate_meta",
+			};
+
+			// First turn succeeds and populates transcript
+			await adapter.sendTurn(handle, {
+				prompt: "initial prompt",
+				turnId: "p-1",
+			});
+			await waitForTurnCompleted(events, "p-1");
+			expect(handle.providerSessionId).toBe("ps1");
+
+			// Second turn: resume fails, should trigger recovery
+			await adapter.sendTurn(handle, {
+				prompt: "turn 2 prompt",
+				turnId: "p-2",
+			});
+			await waitForTurnCompleted(events, "p-2");
+
+			// Verify recovery happened: 3 calls total (initial, failed resume, recovery)
+			expect(callCount).toBe(3);
+
+			// Recovery call should NOT use resume (new session)
+			// The recovery prompt should contain transcript content
+			const recoveryPrompt = capturedPrompts[2];
+			expect(recoveryPrompt).toContain("Test topic");
+			expect(recoveryPrompt).toContain("You are the proposer");
+
+			// Provider session ID should be updated to new session
+			expect(handle.providerSessionId).toBe("ps2");
+
+			// run.warning should be emitted about recovery
+			const warnings = events.filter((e) => e.kind === "run.warning");
+			expect(warnings.length).toBeGreaterThanOrEqual(1);
+			const recoveryWarning = warnings.find(
+				(e) => e.kind === "run.warning" && e.message.includes("recovery"),
+			);
+			expect(recoveryWarning).toBeDefined();
+		});
+
+		it("emits run.error without recovery when no recoveryContext is set", async () => {
+			let callCount = 0;
+			const queryFn: QueryFn = () => {
+				callCount++;
+				if (callCount === 1) {
+					return {
+						messages: messagesFrom([
+							{
+								type: "system/init",
+								sessionId: "ps1",
+								model: "haiku",
+								tools: [],
+							},
+							{
+								type: "result",
+								subtype: "success",
+								usage: { input_tokens: 10, output_tokens: 5 },
+								duration_ms: 100,
+							},
+						]),
+						interrupt: vi.fn(),
+					};
+				}
+				// Second call: resume fails
+				async function* failingGen(): AsyncGenerator<SdkMessage> {
+					throw new Error("session not found");
+				}
+				return { messages: failingGen(), interrupt: vi.fn() };
+			};
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			// No recoveryContext set
+
+			await adapter.sendTurn(handle, { prompt: "turn 1", turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			await adapter.sendTurn(handle, { prompt: "turn 2", turnId: "t2" });
+			await new Promise((r) => setTimeout(r, 100));
+
+			// Should emit run.error but NOT attempt recovery
+			expect(callCount).toBe(2); // Only 2 calls, no recovery attempt
+			const errors = events.filter((e) => e.kind === "run.error");
+			expect(errors.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe("cache token extraction", () => {
+		it("extracts cacheReadTokens and cacheWriteTokens from usage with snake_case fields", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{
+					type: "result",
+					subtype: "success",
+					usage: {
+						input_tokens: 100,
+						output_tokens: 50,
+						cache_read_input_tokens: 80,
+						cache_creation_input_tokens: 20,
+					},
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "cached", turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.cacheReadTokens).toBe(80);
+				expect(usageEvent.cacheWriteTokens).toBe(20);
+				expect(usageEvent.semantics).toBe("session_delta_or_cached");
+			}
+		});
+
+		it("extracts cacheReadTokens and cacheWriteTokens from usage with camelCase fields", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{
+					type: "result",
+					subtype: "success",
+					usage: {
+						inputTokens: 100,
+						outputTokens: 50,
+						cacheReadInputTokens: 80,
+						cacheCreationInputTokens: 20,
+					},
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "cached", turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.cacheReadTokens).toBe(80);
+				expect(usageEvent.cacheWriteTokens).toBe(20);
+				expect(usageEvent.semantics).toBe("session_delta_or_cached");
+			}
+		});
+
+		it("omits cacheReadTokens and cacheWriteTokens when not present", async () => {
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 100, output_tokens: 50 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "no cache", turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.cacheReadTokens).toBeUndefined();
+				expect(usageEvent.cacheWriteTokens).toBeUndefined();
+				expect(usageEvent.semantics).toBe("session_delta_or_cached");
+			}
+		});
+	});
+
+	describe("localMetrics in usage.updated", () => {
+		it("attaches localMetrics to usage.updated events", async () => {
+			const testPrompt = "Hello world";
+			const msgs: SdkMessage[] = [
+				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{
+					type: "stream_event",
+					event: {
+						type: "content_block_delta",
+						delta: { type: "text_delta", text: "Hi!" },
+					},
+				},
+				{
+					type: "result",
+					subtype: "success",
+					usage: { input_tokens: 100, output_tokens: 50 },
+					duration_ms: 100,
+				},
+			];
+			const { queryFn } = mockQueryFn(msgs);
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: testPrompt, turnId: "t1" });
+			await waitForTurnCompleted(events, "t1");
+
+			const usageEvent = events.find((e) => e.kind === "usage.updated");
+			expect(usageEvent).toBeDefined();
+			if (usageEvent?.kind === "usage.updated") {
+				expect(usageEvent.localMetrics).toBeDefined();
+				expect(usageEvent.localMetrics?.semanticChars).toBe(testPrompt.length);
+				expect(usageEvent.localMetrics?.adapterOverheadChars).toBe(0);
+				expect(usageEvent.localMetrics?.totalChars).toBe(testPrompt.length);
+				expect(usageEvent.localMetrics?.semanticUtf8Bytes).toBeGreaterThan(0);
+			}
+		});
+	});
 });

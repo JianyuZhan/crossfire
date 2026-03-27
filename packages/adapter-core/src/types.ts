@@ -223,16 +223,33 @@ export interface StartSessionInput {
 	providerOptions?: Record<string, unknown>;
 }
 
+/** Recovery context stored on the session handle for transcript-based fallback */
+export interface RecoveryContext {
+	systemPrompt: string;
+	topic: string;
+	role: "proposer" | "challenger" | "judge";
+	maxRounds: number;
+	schemaType: "debate_meta" | "judge_verdict";
+}
+
 export interface SessionHandle {
 	adapterSessionId: string;
 	providerSessionId: string | undefined; // undefined until provider session established. Codex: set during startSession() (thread/start). Claude/Gemini: set on first sendTurn().
 	adapterId: "claude" | "codex" | "gemini";
+	/** Universal transcript of completed turns — enables recovery prompt reconstruction */
+	transcript: TurnRecord[];
+	/** Recovery context populated by the runner — enables transcript-based session recovery */
+	recoveryContext?: RecoveryContext;
 }
 
 export interface TurnInput {
 	prompt: string;
 	turnId: string;
 	timeout?: number;
+	/** Role hint for transcript tracking — if omitted, parsed from turnId pattern {p|c|j}-{round} */
+	role?: "proposer" | "challenger" | "judge";
+	/** Round number hint for transcript tracking — if omitted, parsed from turnId pattern */
+	roundNumber?: number;
 }
 
 export interface TurnHandle {
@@ -244,6 +261,27 @@ export interface ApprovalDecision {
 	requestId: string;
 	decision: "allow" | "deny" | "allow-always";
 	updatedInput?: unknown;
+}
+
+/**
+ * Parse a turnId like "p-1", "c-2", "j-3" into role and roundNumber.
+ * Returns undefined values when the pattern doesn't match.
+ */
+export function parseTurnId(turnId: string): {
+	role: "proposer" | "challenger" | "judge" | undefined;
+	roundNumber: number | undefined;
+} {
+	const match = turnId.match(/^([pcj])-(\d+)$/);
+	if (!match) return { role: undefined, roundNumber: undefined };
+	const roleMap: Record<string, "proposer" | "challenger" | "judge"> = {
+		p: "proposer",
+		c: "challenger",
+		j: "judge",
+	};
+	return {
+		role: roleMap[match[1]],
+		roundNumber: Number.parseInt(match[2], 10),
+	};
 }
 
 export interface AgentAdapter {

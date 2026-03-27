@@ -687,14 +687,57 @@ export class TuiStore {
 					inputTokens: number;
 					outputTokens: number;
 					totalCostUsd?: number;
+					semantics?: string;
+					cacheReadTokens?: number;
+					localMetrics?: { totalChars: number; totalUtf8Bytes: number };
 				};
-				const tokens = e.inputTokens + e.outputTokens;
+
+				// Determine token delta based on semantics
+				let inputDelta = e.inputTokens;
+				let outputDelta = e.outputTokens;
+				if (e.semantics === "cumulative_thread_total" && this.activeSpeaker) {
+					// Codex cumulative tracking: both input and output are cumulative
+					const usage =
+						this.activeSpeaker === "proposer"
+							? this.state.metrics.proposerUsage
+							: this.state.metrics.challengerUsage;
+
+					// Internal tracking fields for next calculation (not exposed in interface)
+					const lastCumulativeInput = (
+						usage as { _lastCumulativeInput?: number }
+					)._lastCumulativeInput;
+					const lastCumulativeOutput = (
+						usage as { _lastCumulativeOutput?: number }
+					)._lastCumulativeOutput;
+
+					if (lastCumulativeInput !== undefined) {
+						// Compute delta from last cumulative values
+						inputDelta = e.inputTokens - lastCumulativeInput;
+						outputDelta = e.outputTokens - (lastCumulativeOutput ?? 0);
+						usage.lastDeltaInput = inputDelta;
+						usage.previousCumulativeInput = lastCumulativeInput;
+					} else {
+						// First event: use full values as delta (no previous baseline)
+						inputDelta = e.inputTokens;
+						outputDelta = e.outputTokens;
+						usage.lastDeltaInput = e.inputTokens;
+						// Don't set previousCumulativeInput for first event
+					}
+					// Store current cumulative for next delta calculation
+					(usage as { _lastCumulativeInput?: number })._lastCumulativeInput =
+						e.inputTokens;
+					(usage as { _lastCumulativeOutput?: number })._lastCumulativeOutput =
+						e.outputTokens;
+				}
+
+				const tokens = inputDelta + outputDelta;
 				const cost = e.totalCostUsd ?? 0;
 				this.state.metrics.totalTokens += tokens;
 				if (e.totalCostUsd !== undefined) {
 					this.state.metrics.totalCostUsd =
 						(this.state.metrics.totalCostUsd ?? 0) + e.totalCostUsd;
 				}
+
 				// Per-agent attribution
 				if (this.activeSpeaker) {
 					const usage =
@@ -703,6 +746,25 @@ export class TuiStore {
 							: this.state.metrics.challengerUsage;
 					usage.tokens += tokens;
 					usage.costUsd += cost;
+
+					// Accumulate local metrics
+					if (e.localMetrics) {
+						usage.localTotalChars =
+							(usage.localTotalChars ?? 0) + e.localMetrics.totalChars;
+						usage.localTotalUtf8Bytes =
+							(usage.localTotalUtf8Bytes ?? 0) + e.localMetrics.totalUtf8Bytes;
+					}
+
+					// Track Claude cache reads
+					if (
+						e.semantics === "session_delta_or_cached" &&
+						e.cacheReadTokens !== undefined
+					) {
+						usage.cacheReadTokens =
+							(usage.cacheReadTokens ?? 0) + e.cacheReadTokens;
+						usage.observedInputPlusCacheRead =
+							e.inputTokens + e.cacheReadTokens;
+					}
 				}
 				break;
 			}

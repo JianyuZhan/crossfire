@@ -17,6 +17,7 @@ function makeMockAdapter(scriptedEvents: NormalizedEvent[]): AgentAdapter {
 				adapterSessionId: "js1",
 				providerSessionId: "ps1",
 				adapterId: "claude",
+				transcript: [],
 			};
 		},
 		async sendTurn(_handle, input) {
@@ -79,6 +80,7 @@ describe("runJudgeTurn", () => {
 			adapterSessionId: "js1",
 			providerSessionId: "ps1",
 			adapterId: "claude",
+			transcript: [],
 		};
 		const bus = new DebateEventBus();
 
@@ -131,6 +133,7 @@ describe("runJudgeTurn", () => {
 			adapterSessionId: "js1",
 			providerSessionId: "ps1",
 			adapterId: "claude",
+			transcript: [],
 		};
 		const bus = new DebateEventBus();
 		const unsub = adapter.onEvent((e) => bus.push(e));
@@ -177,6 +180,7 @@ describe("runJudgeTurn", () => {
 			adapterSessionId: "js1",
 			providerSessionId: "ps1",
 			adapterId: "claude",
+			transcript: [],
 		};
 		const bus = new DebateEventBus();
 		const unsub = adapter.onEvent((e) => bus.push(e));

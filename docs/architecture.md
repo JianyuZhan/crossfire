@@ -38,16 +38,9 @@
     - [Director File Layout](#director-file-layout)
   - [DebateEventBus](#debateeventbus)
   - [Runner](#runner)
-  - [Context Builder (Bounded Session Memory)](#context-builder-bounded-session-memory)
-    - [4-Layer Prompt Structure](#4-layer-prompt-structure)
-    - [Two-Stage Pipeline](#two-stage-pipeline)
-    - [PromptContext](#promptcontext)
-    - [JudgePromptContext](#judgepromptcontext)
+  - [Context Builder (Incremental Prompt System)](#context-builder-incremental-prompt-system)
+    - [Incremental Prompt Builders](#incremental-prompt-builders)
     - [Utility Functions](#utility-functions)
-    - [Shared Utility: debate-memory.ts](#shared-utility-debate-memoryts)
-    - [Length Budget](#length-budget)
-    - [Provider Strategy](#provider-strategy)
-    - [TurnPromptOptions](#turnpromptoptions-compatibility)
   - [Judge Turn](#judge-turn)
   - [Action Plan Synthesis](#action-plan-synthesis)
     - [Pipeline Overview](#pipeline-overview)
@@ -143,7 +136,7 @@ interface AgentAdapter {
 
 **Behavioral contracts:**
 
-- **`sendTurn()`** resolves once the turn is accepted and streaming begins — NOT when the turn finishes. Turn completion is signaled exclusively via the `turn.completed` event.
+- **`sendTurn()`** resolves once the turn is accepted and streaming begins — NOT when the turn finishes. Turn completion is signaled exclusively via the `turn.completed` event. Adapters measure local prompt metrics via `measureLocalMetrics(semanticText, overheadText)` and attach `LocalTurnMetrics` to `usage.updated` events.
 - **`onEvent()`** delivers events from ALL sessions managed by the adapter instance. Consumers filter on `adapterSessionId`. The returned function unsubscribes entirely.
 - **`approve()`/`interrupt()`** are `undefined` (not no-op stubs) when the adapter's capabilities don't support them. Calling when undefined throws `AdapterError`.
 - **`close()`** stops event emission for that session. There is no `session.closed` event — close is imperative, not observable.
@@ -207,6 +200,38 @@ interface SessionHandle {
   adapterSessionId: string;
   providerSessionId: string | undefined; // set timing varies by adapter
   adapterId: "claude" | "codex" | "gemini";
+  transcript: TurnRecord[]; // universal transcript of completed turns — enables recovery prompt reconstruction
+  recoveryContext?: RecoveryContext; // populated by runner — enables transcript-based session recovery
+}
+
+interface RecoveryContext {
+  systemPrompt: string;
+  topic: string;
+  role: "proposer" | "challenger" | "judge";
+  maxRounds: number;
+  schemaType: "debate_meta" | "judge_verdict";
+}
+```
+
+Every adapter initializes `transcript: []` in `startSession()` and appends a `TurnRecord` when a `message.final` event fires. Role and round number are resolved from explicit `TurnInput.role`/`TurnInput.roundNumber` fields, falling back to `parseTurnId()` which parses the `{p|c|j}-{N}` convention.
+
+#### Recovery Fallback
+
+When `recoveryContext` is set (by `runDebate()`) and an adapter detects provider session loss, it rebuilds the session using `buildTranscriptRecoveryPrompt()` from the transcript. Each adapter handles this differently:
+
+- **Claude**: catches errors in `processMessages`, creates a new query without `resume`, uses recovery prompt
+- **Codex**: catches `turn/start` JSON-RPC errors, creates a new thread via `thread/start`, retries with recovery prompt
+- **Gemini**: in Path B fallback (session mismatch), uses `buildTranscriptRecoveryPrompt` instead of `buildStatelessPrompt` when transcript is available
+
+### TurnInput
+
+```typescript
+interface TurnInput {
+  prompt: string;
+  turnId: string;
+  timeout?: number;
+  role?: "proposer" | "challenger" | "judge"; // hint for transcript tracking
+  roundNumber?: number; // hint for transcript tracking
 }
 ```
 
@@ -232,6 +257,7 @@ interface StartSessionInput {
 - **`startSession()`** does NOT start a query. `providerSessionId` initializes as `undefined`.
 - **`sendTurn()`** calls `query({ prompt, options })` with `resume: providerSessionId` for follow-up turns, `includePartialMessages: true`. Prompt is top-level param.
 - **`providerSessionId`** set on first `sendTurn()` when `system/init` message arrives.
+- **Usage semantics:** `"session_delta_or_cached"` — reports per-turn token deltas with `cacheReadInputTokens` and `cacheCreationInputTokens` extracted from SDK `result.usage`.
 - **Approval:** `canUseTool` callback returns `PermissionResult` (allow with optional `updatedInput`, or deny with optional message/interrupt).
 - **Hooks** (uppercase names): `PreToolUse` → `tool.call`, `PostToolUse` → `tool.result` (success), `PostToolUseFailure` → `tool.result` (error), `SubagentStart`/`SubagentStop` → `subagent.*` events.
 - **`interrupt()`** uses `Query.interrupt()`.
@@ -241,10 +267,11 @@ interface StartSessionInput {
 
 - **Transport:** Subprocess + bidirectional JSON-RPC 2.0 over stdio JSONL. Fixed to `--listen stdio://`.
 - **`startSession()`**: `initialize` → `initialized` notification → `thread/start` with `{ model, cwd, approvalPolicy }` → returns `{ thread: { id } }` as `providerSessionId`.
-- **`sendTurn()`**: `turn/start` with `{ threadId, input: [{ type: "text", text }] }` → returns `{ turn: { id, status } }`.
+- **`sendTurn()`**: `turn/start` with `{ threadId, input: [{ type: "text", text }] }` → returns `{ turn: { id, status } }`. Appends `META_TOOL_INSTRUCTIONS` only on first turn (turnCount === 0) to teach Codex how to invoke debate_meta/judge_verdict shell commands. Subsequent turns use incremental prompts without repetition.
 - **Approval:** JSON-RPC request-response. Server sends `requestApproval`, adapter emits `approval.request`, orchestrator calls `approve()`, adapter sends JSON-RPC response back.
 - **`interrupt()`**: `turn/interrupt` method.
 - **Plan:** `turn/plan/updated` notification → `plan.updated` event.
+- **Usage semantics:** `cumulative_thread_total` — `thread/tokenUsage/updated` reports cumulative totals across all turns in the thread.
 - **Schema:** Types derived from `codex app-server generate-ts` output.
 
 #### Gemini Adapter
@@ -306,6 +333,9 @@ interface DebateConfig {
   proposerModel?: string;
   challengerModel?: string;
   judgeModel?: string;
+  proposerSystemPrompt?: string;   // from profile; passed to buildInitialPrompt on Turn 1
+  challengerSystemPrompt?: string; // from profile; passed to buildInitialPrompt on Turn 1
+  judgeSystemPrompt?: string;      // from profile; passed to buildJudgeInitialPrompt on Turn 1
 }
 ```
 
@@ -320,7 +350,6 @@ interface DebateConfig {
 | `judge.started`           | `roundNumber`                                                         |
 | `judge.completed`         | `roundNumber`, `verdict: JudgeVerdict`                                |
 | `debate.completed`        | `reason: TerminationReason`, `summary?`, `outputDir?`                 |
-| `prompt.stats`            | `roundNumber`, `speaker: "proposer" \| "challenger" \| "judge"`, `promptChars` |
 | `user.inject`             | `target: "proposer" \| "challenger" \| "both" \| "judge"`, `text`, `priority` |
 | `clarification.requested` | `source`, `question`, `judgeComment?`                                 |
 | `clarification.provided`  | `answer`, `answeredBy: "user" \| "judge"`                             |
@@ -618,109 +647,36 @@ interface RunDebateOptions {
 2. Create `DebateDirector` instance with `DirectorConfig`
 3. Emit `debate.started` (or `debate.resumed` with `fromRound` if resuming)
 4. Loop while not terminated:
-   - **Proposer turn:** `director.getGuidance("proposer")` → `buildTurnPrompt(state, "proposer", { guidance })` → emit `prompt.stats` → `adapter.sendTurn()` → wait for `turn.completed`
-   - **Challenger turn:** same pattern (also emits `prompt.stats`)
+   - **Proposer turn:** Turn 1 → `buildInitialPrompt({ role, topic, systemPrompt })`, Turn 2+ → `buildIncrementalPrompt({ opponentText, judgeText, schemaRefreshMode })` → `adapter.sendTurn()` → wait for `turn.completed` → check for `debate_meta` extraction (update consecutive failure counter)
+   - **Challenger turn:** same incremental pattern (Turn 1 includes proposer's opening via `operationalPreamble`)
    - **Director evaluates:** `director.evaluate(bus.snapshot())` → push `director.action` event
-   - **Execute action:** `end-debate` → break to Final Outcome; `trigger-judge` → run Judge turn; `inject-guidance` → store for next turn; `await-user` → block for clarification; `continue` → next round
+   - **Execute action:** `end-debate` → break to Final Outcome; `trigger-judge` → run Judge turn (Turn 1 → `buildJudgeInitialPrompt`, Turn 2+ → `buildJudgeIncrementalPrompt`); `inject-guidance` → store for next turn; `await-user` → block for clarification; `continue` → next round
+   - **Schema refresh mode:** `getSchemaRefreshMode(turnCount, judgeEveryN, consecutiveFailures)` — returns `"full"` on Turn 1, cadence-aligned turns, or after parse failures; `"reminder"` otherwise
 5. **Final Outcome flow:** optional `trigger-judge { reason: "final-review" }` → `SummaryGenerator` → write Final Outcome to transcript → emit `debate.completed` (with `summary` field) as **last** event
 
 `waitForTurnCompleted()` listens on bus (not directly on adapters), matching by `turnId`.
 
-### Context Builder (Bounded Session Memory)
+### Context Builder (Incremental Prompt System)
 
-The prompt system uses a **4-layer architecture** with bounded token usage, eliminating O(n²) growth in provider threads. Core principle: **provider context = short-term working memory; [`DebateState`](#debatestate) = long-term fact memory.**
+The prompt system uses **incremental prompts** that rely on provider-native session/thread memory. Turn 1 sends the full system prompt + topic + schema; Turn 2+ sends only the opponent's latest response + optional judge feedback + schema reminder. This eliminates redundant context and enables provider-level caching of the stable prefix.
 
-#### 4-Layer Prompt Structure
+Core principle: **provider context = short-term working memory; [`DebateState`](#debatestate) = long-term fact memory.**
 
-```
-Layer 1: Stable Prefix      (~10%)  topic, role, rules, language, meta-tool format
-Layer 2: Long-term Memory    (~35%)  structured data from DebateState
-Layer 3: Local Window        (~35%)  opponent last turn (truncated) + self summary
-Layer 4: Turn Instructions   (~20%)  objective, conclude/continue, output format
-```
+#### Incremental Prompt Builders
 
-Layers 2–3 gracefully degrade to empty when no history exists (e.g., Round 1 proposer).
+| Function                          | Purpose                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `defaultSystemPrompt(role)`       | Returns role-appropriate identity text for proposer/challenger/judge                            |
+| `buildInitialPrompt(input)`       | Turn 1: system prompt + topic + round info + language hint + optional preamble + full schema    |
+| `buildIncrementalPrompt(input)`   | Turn 2+: round header + optional judge text + opponent text (no truncation) + schema reminder   |
+| `buildJudgeInitialPrompt(input)`  | Judge Turn 1: system prompt + topic + both debater outputs + verdict schema                     |
+| `buildJudgeIncrementalPrompt(input)` | Judge Turn 2+: round header + both debater outputs + schema reminder or full                 |
+| `buildTranscriptRecoveryPrompt(input)` | Reconstructs full context from transcript array; budgeted mode when transcript exceeds limit |
 
-#### Two-Stage Pipeline
-
-Internally, prompt construction is split into extraction and rendering (`buildPromptContext` → `renderTurnPrompt`). The renderers are private; the public API provides both extraction functions (for testing/inspection) and end-to-end wrappers:
-
-- **`buildPromptContext(state, role, options?)`** → `PromptContext` — extraction only (public)
-- **`buildTurnPromptFromState(state, role, options?)`** → `string` — extraction + rendering (public)
-- **`buildTurnPrompt(state, role, options?)`** → `string` — backward-compatible alias for `buildTurnPromptFromState` (public)
-- **`buildJudgePromptContext(state, options?)`** → `JudgePromptContext` — extraction only (public)
-- **`buildJudgePrompt(state)`** → `string` — extraction + rendering for judge (public)
-
-#### PromptContext
-
-```typescript
-interface PromptContext {
-  topic: string;
-  languageHint: string;
-  roundNumber: number;
-  maxRounds: number;
-  role: "proposer" | "challenger";
-
-  longMemory: {
-    selfStance?: string;
-    selfConfidence?: number;
-    opponentStance?: string;
-    opponentConfidence?: number;
-    selfKeyPoints: string[]; // max 12, each truncate(160)
-    opponentKeyPoints: string[]; // max 12, each truncate(160)
-    selfConcessions: string[]; // max 8, each truncate(160)
-    opponentConcessions: string[]; // max 8, each truncate(160)
-    unresolvedIssues: string[]; // max 10, each truncate(160)
-    judgeSummary?: string; // truncate(300), most recent verdict
-    directorGuidance?: string[]; // max 3 items
-    userInjection?: { text: string; priority: "normal" | "high" };
-  };
-
-  localWindow: {
-    opponentLastTurnFull?: string; // normalizeWhitespace + truncateWithHeadTail(1500)
-    selfLastTurnSummary?: string; // truncate(keyPoints.join("; "), 500) or truncate(content, 300)
-  };
-
-  controls: {
-    shouldTryToConclude: boolean;
-    repetitionWarnings?: string[];
-  };
-}
-```
-
-**Field extraction rules:**
-
-- **Stance/confidence:** from own/opponent latest turn `meta.stance`, `meta.confidence`
-- **keyPoints/concessions:** flatMap across ALL turns, deduplicated (later rounds take priority when over limit)
-- **unresolvedIssues:** latest completed round keyPoints (currentRound - 1 when > 1) filtered through `filterUnresolved()` (from `debate-memory.ts`)
-- **judgeSummary:** iterate turns backward, first `judgeVerdict.reasoning` found, `truncate(300)`
-- **Null safety:** always `t.meta?.keyPoints ?? []`, `t.meta?.concessions ?? []`
-
-#### JudgePromptContext
-
-```typescript
-interface JudgePromptContext {
-  topic: string;
-  languageHint: string;
-  roundNumber: number;
-  maxRounds: number;
-  proposerStance?: string;
-  proposerConfidence?: number;
-  challengerStance?: string;
-  challengerConfidence?: number;
-  proposerKeyPoints: string[];
-  challengerKeyPoints: string[];
-  proposerConcessions: string[];
-  challengerConcessions: string[];
-  unresolvedIssues: string[];
-  previousJudgeSummary?: string; // truncate(300)
-  proposerLastTurn?: string; // truncateWithHeadTail(1500)
-  challengerLastTurn?: string; // truncateWithHeadTail(1500)
-  earlyEndGuidance: string;
-}
-```
-
-Key difference from old design: Judge prompt uses **structured summary + latest round content only**, NOT full transcript. Prompt size is roughly constant regardless of round count. See [Length Budget](#length-budget) for size estimates.
+**Key design principles:**
+- **No truncation** of opponent text — providers with session/thread handle context windowing natively.
+- **Schema refresh modes**: full schema on Turn 1 and every N rounds, reminder-only otherwise.
+- **Transcript recovery**: for stateless providers (Gemini) or after session loss, rebuilds context from event store with optional budget-aware summarization (default 200K chars).
 
 #### Utility Functions
 
@@ -728,54 +684,9 @@ Key difference from old design: Judge prompt uses **structured summary + latest 
 | ------------------------ | -------------------- | -------------------------------------------------------------------------------------------- |
 | `truncate(text, max)`    | `context-builder.ts` | Simple end truncation with `"..."` suffix                                                    |
 | `normalizeWhitespace(t)` | `context-builder.ts` | Collapse 3+ newlines → 2, 2+ spaces → 1, trim                                                |
-| `truncateWithHeadTail()` | `context-builder.ts` | Head 60% + tail 40% of space after `[...truncated...]` marker; guard for very small maxChars |
+| `truncateWithHeadTail()` | `context-builder.ts` | Head 60% + tail 40% of space after `[...truncated...]` marker; used by transcript recovery   |
 | `isAcknowledged()`       | `debate-memory.ts`   | Substring overlap on first 20 chars (case-insensitive)                                       |
 | `filterUnresolved()`     | `debate-memory.ts`   | Key points minus acknowledged concessions, deduped                                           |
-
-#### Shared Utility: `debate-memory.ts`
-
-Extracts the unresolved-issue matching heuristic into a neutral module. Both `context-builder.ts` and `summary-generator.ts` import from here (neither depends on the other).
-
-```
-debate-memory.ts  (shared, zero dependencies on other orchestrator-core modules)
-  ↑               ↑
-  │               │
-context-builder.ts   summary-generator.ts
-```
-
-#### Length Budget
-
-| Layer     | Content                             | Proposer/Challenger | Judge             |
-| --------- | ----------------------------------- | ------------------- | ----------------- |
-| 1         | Topic + role + rules + language     | 300–500 chars       | 200–400 chars     |
-| 2         | Long-term memory (structured)       | 800–1,500 chars     | 800–1,500 chars   |
-| 3         | Local window / recent round content | 1,500–2,000 chars   | 2,000–3,000 chars |
-| 4         | Objective + output format           | 400–600 chars       | 300–500 chars     |
-| **Total** |                                     | **~3,000–4,600**    | **~3,300–5,400**  |
-
-#### Provider Strategy
-
-| Provider | Session/Thread        | Prompt Strategy                                        | Phase 2 (future)                   |
-| -------- | --------------------- | ------------------------------------------------------ | ---------------------------------- |
-| Claude   | Keep session (resume) | 4-layer structured prompt; rely on SDK compaction      | Monitor; may need compact boundary |
-| Codex    | Keep thread           | 4-layer structured prompt; no full history in prompt   | Compact/rotate at threshold        |
-| Gemini   | Stateless per-turn    | 4-layer structured prompt; summary provides continuity | N/A (already stateless)            |
-
-All providers receive the same structured prompt. Semantic contract: **model handles short-term coherence, system handles long-term memory.**
-
-#### TurnPromptOptions (Compatibility)
-
-```typescript
-interface TurnPromptOptions {
-  guidance?: string[];  // from DebateDirector.getGuidance()
-  userInjection?: { text: string; priority: "normal" | "high" };
-  shouldTryToConclude?: boolean;
-  repetitionWarnings?: string[];
-  maxOpponentChars?: number; // override truncation limit for opponent's last turn
-}
-```
-
-The old `clarifications` field is removed — superseded by `directorGuidance` and `userInjection`.
 
 ### Judge Turn
 
@@ -925,6 +836,11 @@ interface PlaybackClock {
 
 Lightweight projection from raw events into render-ready state. Prevents excessive re-renders from high-frequency [`thinking.delta`/`message.delta`](#normalizedevent).
 
+**Usage tracking:** The `usage.updated` handler uses the `semantics` field to apply provider-specific logic:
+- **Codex** (`cumulative_thread_total`): computes per-event deltas from the running cumulative totals (both input and output), storing `_lastCumulativeInput`/`_lastCumulativeOutput` as internal tracking fields.
+- **Claude** (`session_delta_or_cached`): accumulates `cacheReadTokens` and tracks `observedInputPlusCacheRead` for cache-aware display.
+- **Local metrics**: accumulates `localTotalChars` / `localTotalUtf8Bytes` from the `localMetrics` field on each event.
+
 ```typescript
 interface TuiState {
   proposer: LiveAgentPanelState;
@@ -985,6 +901,20 @@ interface MetricsState {
   judgeScore?: { proposer: number; challenger: number };
   totalTokens: number;
   totalCostUsd: number;
+  proposerUsage: AgentUsage;
+  challengerUsage: AgentUsage;
+}
+
+interface AgentUsage {
+  tokens: number;
+  costUsd: number;
+  // Enhanced metrics for provider-specific tracking
+  localTotalChars?: number;        // adapter-local character count
+  localTotalUtf8Bytes?: number;    // adapter-local byte count
+  previousCumulativeInput?: number; // Codex: baseline for last delta
+  lastDeltaInput?: number;          // Codex: most recent input delta
+  cacheReadTokens?: number;         // Claude: prompt cache hits
+  observedInputPlusCacheRead?: number; // Claude: input + cache for display
 }
 
 interface CommandState {

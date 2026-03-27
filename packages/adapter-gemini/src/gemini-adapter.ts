@@ -1,13 +1,17 @@
-import type {
-	AgentAdapter,
-	NormalizedEvent,
-	SessionHandle,
-	StartSessionInput,
-	TurnHandle,
-	TurnInput,
+import {
+	type AdapterCapabilities,
+	type AgentAdapter,
+	GEMINI_CAPABILITIES,
+	type LocalTurnMetrics,
+	type NormalizedEvent,
+	type SessionHandle,
+	type StartSessionInput,
+	type TurnHandle,
+	type TurnInput,
+	measureLocalMetrics,
+	parseTurnId,
 } from "@crossfire/adapter-core";
-import type { AdapterCapabilities } from "@crossfire/adapter-core";
-import { GEMINI_CAPABILITIES } from "@crossfire/adapter-core";
+import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { type GeminiMapContext, mapGeminiEvent } from "./event-mapper.js";
 import { type ProcessHandle, ProcessManager } from "./process-manager.js";
 import { type HistoryEntry, buildStatelessPrompt } from "./prompt-builder.js";
@@ -37,6 +41,9 @@ interface GeminiSessionContext {
 	sessionStarted: boolean; // global flag: has session.started been emitted?
 	currentProcess: ProcessHandle | null;
 	history: HistoryEntry[];
+	currentTurnRole?: "proposer" | "challenger" | "judge";
+	currentTurnRoundNumber?: number;
+	pendingLocalMetrics?: LocalTurnMetrics;
 }
 
 let sessionCounter = 0;
@@ -89,6 +96,7 @@ export class GeminiAdapter implements AgentAdapter {
 			adapterSessionId,
 			providerSessionId: undefined,
 			adapterId: "gemini",
+			transcript: [],
 		};
 	}
 
@@ -102,6 +110,14 @@ export class GeminiAdapter implements AgentAdapter {
 		if (!session) {
 			throw new Error(`Unknown session: ${handle.adapterSessionId}`);
 		}
+
+		// Store role/roundNumber for transcript tracking
+		const parsed = parseTurnId(input.turnId);
+		session.currentTurnRole = input.role ?? parsed.role;
+		session.currentTurnRoundNumber = input.roundNumber ?? parsed.roundNumber;
+
+		// Measure local metrics (Gemini has no adapter overhead)
+		session.pendingLocalMetrics = measureLocalMetrics(input.prompt);
 
 		const turnState: TurnRuntimeState = {
 			completed: false,
@@ -195,11 +211,19 @@ export class GeminiAdapter implements AgentAdapter {
 			// Reset messageBuffer for B path, but keep sessionStarted flag
 			mapCtx.messageBuffer = "";
 
-			// Build stateless prompt
-			const statelessPrompt = buildStatelessPrompt(
-				input.prompt,
-				session.history,
-			);
+			// Build fallback prompt: prefer transcript recovery if recoveryContext is available
+			let fallbackPrompt: string;
+			if (handle.recoveryContext && handle.transcript.length > 0) {
+				fallbackPrompt = buildTranscriptRecoveryPrompt({
+					systemPrompt: handle.recoveryContext.systemPrompt,
+					topic: handle.recoveryContext.topic,
+					transcript: handle.transcript,
+					schemaType: handle.recoveryContext.schemaType,
+				});
+			} else {
+				fallbackPrompt = buildStatelessPrompt(input.prompt, session.history);
+			}
+			const statelessPrompt = fallbackPrompt;
 
 			// Build args with forceStateless
 			const fallbackArgs = this.resumeManager.buildArgs({
@@ -212,6 +236,9 @@ export class GeminiAdapter implements AgentAdapter {
 			turnState.fallbackTriggered = true;
 			turnState.intentionalKill = false;
 			turnState.resultSeen = false;
+
+			// Clear providerSessionId so Path B's init validation won't reject the new session
+			session.providerSessionId = undefined;
 
 			await this.runProcess(
 				session,
@@ -302,6 +329,25 @@ export class GeminiAdapter implements AgentAdapter {
 					// Track sessionStarted on the session context
 					if (ne.kind === "session.started") {
 						session.sessionStarted = true;
+					}
+
+					// Attach local metrics to usage.updated events
+					if (ne.kind === "usage.updated" && session.pendingLocalMetrics) {
+						ne.localMetrics = session.pendingLocalMetrics;
+					}
+
+					// Append to transcript when a turn's final message arrives
+					if (ne.kind === "message.final") {
+						if (
+							session.currentTurnRole &&
+							session.currentTurnRoundNumber !== undefined
+						) {
+							handle.transcript.push({
+								roundNumber: session.currentTurnRoundNumber,
+								role: session.currentTurnRole,
+								content: ne.text,
+							});
+						}
 					}
 
 					this.emit(ne);

@@ -9,7 +9,8 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@crossfire/adapter-core": "workspace:*"
+		"@crossfire/adapter-core": "workspace:*",
+		"@crossfire/orchestrator-core": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

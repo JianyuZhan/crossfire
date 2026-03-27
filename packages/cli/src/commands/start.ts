@@ -149,6 +149,9 @@ export const startCommand = new Command("start")
 				proposerModel: roles.proposer.model,
 				challengerModel: roles.challenger.model,
 				judgeModel: roles.judge?.model,
+				proposerSystemPrompt: roles.proposer.profile.systemPrompt,
+				challengerSystemPrompt: roles.challenger.profile.systemPrompt,
+				judgeSystemPrompt: roles.judge?.profile.systemPrompt,
 			};
 
 			// Generate debate ID and output directory
