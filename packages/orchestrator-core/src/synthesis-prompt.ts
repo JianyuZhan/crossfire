@@ -817,6 +817,297 @@ export function buildPhaseBlocks(
 	return blocks;
 }
 
+// --- assembleAdaptiveSynthesisPrompt (Task 7: Phase 1) ---
+
+/**
+ * Assembles the adaptive synthesis prompt using a tiered strategy.
+ *
+ * Phase 1 selection rule: recency only (no scoring rescue).
+ * Never throws; returns best-effort output on any error.
+ */
+export function assembleAdaptiveSynthesisPrompt(
+	input: AdaptiveSynthesisInput,
+): AdaptiveSynthesisResult {
+	try {
+		return assembleAdaptiveSynthesisPromptInner(input);
+	} catch (err) {
+		// Best-effort: return a minimal result with the error in warnings
+		const layer1 = buildLayer1(input.plan, input.topic);
+		const norm = normalizeConfig(input.config);
+		return {
+			prompt: layer1,
+			debug: {
+				budgetTier: "short",
+				totalEstimatedTokens: estimateTokens(layer1),
+				budgetTokens: norm.contextTokenLimit,
+				scores: [],
+				fullTextRounds: [],
+				compressedRounds: [],
+				roundDisposition: [],
+				fitAchieved: true,
+				warnings: [
+					`assembleAdaptiveSynthesisPrompt caught error: ${err instanceof Error ? err.message : String(err)}`,
+				],
+				shrinkTrace: [],
+				referenceScoreUsed: false,
+				quoteSnippetSourceRounds: [],
+			},
+		};
+	}
+}
+
+function assembleAdaptiveSynthesisPromptInner(
+	input: AdaptiveSynthesisInput,
+): AdaptiveSynthesisResult {
+	const { state, plan, topic } = input;
+	const norm = normalizeConfig(input.config);
+	const warnings: string[] = [];
+
+	// --- Build or reconstruct cleanTranscript ---
+	let transcript: Map<number, { proposer?: string; challenger?: string }>;
+	if (input.cleanTranscript && input.cleanTranscript.size > 0) {
+		transcript = input.cleanTranscript;
+	} else {
+		// Reconstruct from state.turns via stripInternalBlocks
+		transcript = new Map();
+		for (const turn of state.turns) {
+			if (!transcript.has(turn.roundNumber)) {
+				transcript.set(turn.roundNumber, {});
+			}
+			const entry = transcript.get(turn.roundNumber)!;
+			entry[turn.role] = stripInternalBlocks(turn.content);
+		}
+		if (state.turns.length > 0) {
+			warnings.push(
+				"cleanTranscript was empty; reconstructed from state.turns",
+			);
+		}
+	}
+
+	// --- Compute round universe (union of all sources) ---
+	const roundSet = new Set<number>();
+
+	// From cleanTranscript
+	for (const r of transcript.keys()) {
+		roundSet.add(r);
+	}
+
+	// From state.turns
+	for (const turn of state.turns) {
+		roundSet.add(turn.roundNumber);
+	}
+
+	// From plan.roundSummaries (index+1 for non-empty entries)
+	for (let i = 0; i < plan.roundSummaries.length; i++) {
+		if (plan.roundSummaries[i].length > 0) {
+			roundSet.add(i + 1);
+		}
+	}
+
+	const allRounds = Array.from(roundSet).sort((a, b) => a - b);
+	const totalRounds = allRounds.length;
+
+	if (totalRounds === 0) {
+		const layer1 = buildLayer1(plan, topic);
+		return {
+			prompt: layer1,
+			debug: {
+				budgetTier: "short",
+				totalEstimatedTokens: estimateTokens(layer1),
+				budgetTokens: norm.contextTokenLimit,
+				scores: [],
+				fullTextRounds: [],
+				compressedRounds: [],
+				roundDisposition: [],
+				fitAchieved: true,
+				warnings,
+				shrinkTrace: [],
+				referenceScoreUsed: false,
+				quoteSnippetSourceRounds: [],
+			},
+		};
+	}
+
+	// --- Determine which rounds can be rendered full text ---
+	// A round can be full text only if it has at least one side in transcript
+	function hasTranscript(r: number): boolean {
+		const entry = transcript.get(r);
+		if (!entry) return false;
+		return Boolean(entry.proposer) || Boolean(entry.challenger);
+	}
+
+	// --- Estimate full-text cost for tier selection ---
+	const layer1Text = buildLayer1(plan, topic);
+	let fullEstimate = estimateTokens(layer1Text);
+	for (const r of allRounds) {
+		if (hasTranscript(r)) {
+			const entry = transcript.get(r)!;
+			const roundText = renderFullTextRound(r, entry);
+			fullEstimate += estimateTokens(roundText);
+		} else {
+			const compressed = buildCompressedRound(r, plan, state);
+			fullEstimate += estimateTokens(compressed);
+		}
+	}
+
+	const budgetTokens = norm.contextTokenLimit;
+	const tier = chooseInitialBudgetTier(totalRounds, fullEstimate, budgetTokens);
+
+	// --- Determine full-text vs compressed per round ---
+	const fullTextRounds: number[] = [];
+	const compressedRounds: number[] = [];
+
+	if (tier === "short") {
+		// All rounds with transcript get full text; others degrade
+		for (const r of allRounds) {
+			if (hasTranscript(r)) {
+				fullTextRounds.push(r);
+			} else {
+				compressedRounds.push(r);
+			}
+		}
+	} else {
+		// medium / long: recency-only, last recentK rounds get full text
+		const recentK = norm.recentK;
+		const recentCutoff =
+			allRounds.length >= recentK
+				? allRounds[allRounds.length - recentK]
+				: allRounds[0];
+
+		for (const r of allRounds) {
+			if (r >= recentCutoff && hasTranscript(r)) {
+				fullTextRounds.push(r);
+			} else {
+				compressedRounds.push(r);
+			}
+		}
+	}
+
+	// --- Build the prompt ---
+	const promptParts: string[] = [];
+
+	// Layer 1 always first
+	promptParts.push(layer1Text);
+
+	// Context note for medium/long
+	if (tier === "medium" || tier === "long") {
+		promptParts.push(
+			"Note: Earlier rounds have been compressed to fit the context window. The most recent rounds are shown in full.",
+		);
+	}
+
+	// Phase blocks for long tier (earliest compressed region)
+	let phaseBlocks: PhaseBlock[] | undefined;
+	const phaseBlockDebug: SynthesisDebugMetadata["phaseBlocks"] = [];
+
+	if (tier === "long" && compressedRounds.length > 0) {
+		// Earliest compressed region: all compressed rounds before the first full-text round
+		const firstFullText =
+			fullTextRounds.length > 0 ? fullTextRounds[0] : Number.POSITIVE_INFINITY;
+		const earliestCompressed = compressedRounds.filter(
+			(r) => r < firstFullText,
+		);
+
+		if (earliestCompressed.length > 0) {
+			phaseBlocks = buildPhaseBlocks(earliestCompressed, plan, state);
+		}
+	}
+
+	// Render rounds in ascending order
+	const fullTextSet = new Set(fullTextRounds);
+	const phaseBlockCoveredRounds = new Set<number>();
+
+	if (phaseBlocks && phaseBlocks.length > 0) {
+		// Render phase blocks in order, then remaining compressed/full rounds
+		for (const block of phaseBlocks) {
+			for (const r of block.coveredRounds) {
+				phaseBlockCoveredRounds.add(r);
+			}
+			phaseBlockDebug.push({
+				phaseId: block.phaseId,
+				coveredRounds: block.coveredRounds,
+			});
+			promptParts.push(
+				`## ${block.phaseId} (Rounds ${block.coveredRounds[0]}-${block.coveredRounds[block.coveredRounds.length - 1]})\n\n${block.content}`,
+			);
+		}
+	}
+
+	for (const r of allRounds) {
+		if (phaseBlockCoveredRounds.has(r)) {
+			continue; // Already rendered as part of phase block
+		}
+
+		if (fullTextSet.has(r)) {
+			const entry = transcript.get(r)!;
+			promptParts.push(renderFullTextRound(r, entry));
+		} else {
+			promptParts.push(buildCompressedRound(r, plan, state));
+		}
+	}
+
+	const prompt = promptParts.join("\n\n");
+	const totalEstimatedTokens = estimateTokens(prompt);
+	const fitAchieved = totalEstimatedTokens <= budgetTokens;
+
+	// --- Build round disposition ---
+	const roundDisposition: SynthesisDebugMetadata["roundDisposition"] = [];
+	for (const r of allRounds) {
+		let disposition:
+			| "fullText"
+			| "compressed"
+			| "phaseBlockCovered"
+			| "degradedSummary";
+		if (fullTextSet.has(r)) {
+			disposition = "fullText";
+		} else if (phaseBlockCoveredRounds.has(r)) {
+			disposition = "phaseBlockCovered";
+		} else if (!hasTranscript(r) && tier === "short") {
+			// In short tier, a round without transcript is a degraded summary
+			disposition = "degradedSummary";
+		} else {
+			disposition = "compressed";
+		}
+		roundDisposition.push({ roundNumber: r, disposition });
+	}
+
+	return {
+		prompt,
+		debug: {
+			budgetTier: tier,
+			totalEstimatedTokens,
+			budgetTokens,
+			scores: [],
+			fullTextRounds,
+			compressedRounds,
+			roundDisposition,
+			fitAchieved,
+			warnings,
+			shrinkTrace: [],
+			referenceScoreUsed: false,
+			quoteSnippetSourceRounds: [],
+			phaseBlocks: phaseBlockDebug.length > 0 ? phaseBlockDebug : undefined,
+		},
+	};
+}
+
+/** Renders a single round in full-text format per spec. */
+function renderFullTextRound(
+	roundNumber: number,
+	entry: { proposer?: string; challenger?: string },
+): string {
+	const parts: string[] = [`### Round ${roundNumber}`];
+
+	if (entry.proposer) {
+		parts.push(`**Proposer:**\n${entry.proposer}`);
+	}
+	if (entry.challenger) {
+		parts.push(`**Challenger:**\n${entry.challenger}`);
+	}
+
+	return parts.join("\n\n");
+}
+
 /** Builds a stripped transcript excerpt from turns, removing internal blocks. */
 function buildTranscriptExcerpt(roundTurns: DebateState["turns"]): string {
 	if (roundTurns.length === 0) {

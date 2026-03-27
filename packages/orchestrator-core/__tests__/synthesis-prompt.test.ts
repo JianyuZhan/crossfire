@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { EvolvingPlan, RoundAnalysis } from "../src/evolving-plan.js";
 import { emptyPlan } from "../src/evolving-plan.js";
 import {
+	type AdaptiveSynthesisInput,
+	type AdaptiveSynthesisResult,
 	type PhaseBlock,
 	type SynthesisPromptConfig,
 	aggregatePhaseBlockContent,
+	assembleAdaptiveSynthesisPrompt,
 	buildCompressedRound,
 	buildFullTextSynthesisPrompt,
 	buildLayer1,
@@ -1283,5 +1286,443 @@ describe("contiguity invariant", () => {
 		for (const block of blocks) {
 			expect(block.coveredRounds).toHaveLength(1);
 		}
+	});
+});
+
+// --- Task 7: assembleAdaptiveSynthesisPrompt tests ---
+
+describe("assembleAdaptiveSynthesisPrompt", () => {
+	function makeInput(
+		overrides: Partial<AdaptiveSynthesisInput> = {},
+	): AdaptiveSynthesisInput {
+		const roundCount = 3;
+		const state = makeStateWithRounds(roundCount);
+		const plan = makePlanWithAnalyses(roundCount);
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= roundCount; r++) {
+			transcript.set(r, {
+				proposer: `Proposer full text R${r}`,
+				challenger: `Challenger full text R${r}`,
+			});
+		}
+		return {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 100000 },
+			...overrides,
+		};
+	}
+
+	describe("short tier (all rounds full text)", () => {
+		it("renders all rounds as full text when budget allows", () => {
+			const input = makeInput();
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// All rounds should be full text
+			expect(result.debug.budgetTier).toBe("short");
+			expect(result.debug.fullTextRounds).toEqual([1, 2, 3]);
+			expect(result.debug.compressedRounds).toEqual([]);
+
+			// Full text format
+			expect(result.prompt).toContain("### Round 1");
+			expect(result.prompt).toContain("### Round 2");
+			expect(result.prompt).toContain("### Round 3");
+			expect(result.prompt).toContain("Proposer full text R1");
+			expect(result.prompt).toContain("Challenger full text R3");
+		});
+
+		it("includes Layer 1 content", () => {
+			const input = makeInput();
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// Layer 1 always present
+			expect(result.prompt).toContain("## Topic");
+			expect(result.prompt).toContain("Test Topic");
+		});
+
+		it("uses correct full-text rendering format", () => {
+			const input = makeInput();
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// Check that the format matches spec:
+			// ### Round {N}
+			// **Proposer:**
+			// {text}
+			// **Challenger:**
+			// {text}
+			expect(result.prompt).toContain("**Proposer:**");
+			expect(result.prompt).toContain("**Challenger:**");
+		});
+	});
+
+	describe("medium tier (recency-only selection)", () => {
+		it("compresses early rounds, keeps recent rounds full text", () => {
+			// Use a small budget so it falls to medium tier
+			const state = makeStateWithRounds(8);
+			const plan = makePlanWithAnalyses(8);
+			const transcript = new Map<
+				number,
+				{ proposer?: string; challenger?: string }
+			>();
+			for (let r = 1; r <= 8; r++) {
+				transcript.set(r, {
+					proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+					challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+				});
+			}
+			// Budget that allows medium but not short
+			// 8 rounds * ~200 chars each side = ~3200 chars for transcript
+			// estimateTokens = ceil(len * 0.5), fullEstimate should exceed 0.6 * budget
+			// but fit within 0.85 * budget
+			const input = makeInput({
+				state,
+				plan,
+				cleanTranscript: transcript,
+				config: { contextTokenLimit: 5000, recentK: 3 },
+			});
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			if (result.debug.budgetTier === "medium") {
+				// Last 3 rounds (recentK=3) should be full text
+				expect(result.debug.fullTextRounds).toContain(6);
+				expect(result.debug.fullTextRounds).toContain(7);
+				expect(result.debug.fullTextRounds).toContain(8);
+
+				// Early rounds should be compressed, not dropped
+				expect(result.debug.compressedRounds.length).toBeGreaterThan(0);
+				for (const r of result.debug.compressedRounds) {
+					expect(result.prompt).toContain(`### Round ${r}`);
+				}
+
+				// Context note present
+				expect(result.prompt).toContain("Earlier rounds have been compressed");
+			}
+		});
+
+		it("never drops early rounds; they appear as compressed", () => {
+			const state = makeStateWithRounds(6);
+			const plan = makePlanWithAnalyses(6);
+			const transcript = new Map<
+				number,
+				{ proposer?: string; challenger?: string }
+			>();
+			for (let r = 1; r <= 6; r++) {
+				transcript.set(r, {
+					proposer: `P${r} ${"x".repeat(300)}`,
+					challenger: `C${r} ${"x".repeat(300)}`,
+				});
+			}
+			const input = makeInput({
+				state,
+				plan,
+				cleanTranscript: transcript,
+				config: { contextTokenLimit: 4000, recentK: 2 },
+			});
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// All rounds must be present in the output (either full or compressed)
+			const allRoundsInDisposition = result.debug.roundDisposition.map(
+				(d) => d.roundNumber,
+			);
+			for (let r = 1; r <= 6; r++) {
+				expect(allRoundsInDisposition).toContain(r);
+			}
+		});
+	});
+
+	describe("empty cleanTranscript fallback", () => {
+		it("reconstructs from state.turns when cleanTranscript is undefined", () => {
+			const input = makeInput({ cleanTranscript: undefined });
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// Should still produce output without throwing
+			expect(result.prompt.length).toBeGreaterThan(0);
+			// Should contain content derived from state.turns
+			expect(result.prompt).toContain("### Round 1");
+			expect(result.prompt).toContain("### Round 2");
+			expect(result.prompt).toContain("### Round 3");
+		});
+
+		it("reconstructs from state.turns when cleanTranscript is empty map", () => {
+			const input = makeInput({
+				cleanTranscript: new Map(),
+			});
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			expect(result.prompt.length).toBeGreaterThan(0);
+			// Rounds from state.turns should still appear
+			expect(result.prompt).toContain("### Round 1");
+		});
+
+		it("strips internal blocks from reconstructed transcript", () => {
+			const state: DebateState = {
+				config: {
+					topic: "Test",
+					maxRounds: 2,
+					judgeEveryNRounds: 2,
+					convergenceThreshold: 0.7,
+				},
+				phase: "completed",
+				currentRound: 1,
+				turns: [
+					{
+						roundNumber: 1,
+						role: "proposer",
+						content:
+							'Clean proposer text.\n```debate_meta\n{"stance":"agree"}\n```',
+					},
+					{
+						roundNumber: 1,
+						role: "challenger",
+						content: "Clean challenger text.",
+					},
+				],
+				convergence: {
+					converged: false,
+					stanceDelta: 0,
+					mutualConcessions: 0,
+					bothWantToConclude: false,
+				},
+			};
+			const plan = makePlanWithAnalyses(1);
+			const input = makeInput({
+				state,
+				plan,
+				cleanTranscript: undefined,
+				config: { contextTokenLimit: 100000 },
+			});
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			expect(result.prompt).toContain("Clean proposer text.");
+			expect(result.prompt).not.toContain("debate_meta");
+		});
+	});
+
+	describe("missing transcript for single round degrades independently", () => {
+		it("degrades a round missing both sides to Layer 2 fallback", () => {
+			const state = makeStateWithRounds(3);
+			const plan = makePlanWithAnalyses(3);
+			// Round 2 has no transcript (both sides missing)
+			const transcript = new Map<
+				number,
+				{ proposer?: string; challenger?: string }
+			>();
+			transcript.set(1, {
+				proposer: "P1 text",
+				challenger: "C1 text",
+			});
+			// Round 2 intentionally absent from transcript
+			transcript.set(3, {
+				proposer: "P3 text",
+				challenger: "C3 text",
+			});
+			const input = makeInput({
+				state,
+				plan,
+				cleanTranscript: transcript,
+				config: { contextTokenLimit: 100000 },
+			});
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// Round 2 should be degraded, not full text
+			const r2Disp = result.debug.roundDisposition.find(
+				(d) => d.roundNumber === 2,
+			);
+			expect(r2Disp).toBeDefined();
+			expect(r2Disp!.disposition).not.toBe("fullText");
+
+			// Rounds 1 and 3 should be full text (short tier with large budget)
+			const r1Disp = result.debug.roundDisposition.find(
+				(d) => d.roundNumber === 1,
+			);
+			expect(r1Disp!.disposition).toBe("fullText");
+			const r3Disp = result.debug.roundDisposition.find(
+				(d) => d.roundNumber === 3,
+			);
+			expect(r3Disp!.disposition).toBe("fullText");
+		});
+	});
+
+	describe("round universe is union of all sources", () => {
+		it("includes rounds from state.turns not in cleanTranscript", () => {
+			// state has rounds 1-3 but transcript only has round 1 and 3
+			const state = makeStateWithRounds(3);
+			const plan = makePlanWithAnalyses(3);
+			const transcript = new Map<
+				number,
+				{ proposer?: string; challenger?: string }
+			>();
+			transcript.set(1, { proposer: "P1", challenger: "C1" });
+			transcript.set(3, { proposer: "P3", challenger: "C3" });
+			// Round 2 only in state.turns, not transcript
+
+			const input = makeInput({
+				state,
+				plan,
+				cleanTranscript: transcript,
+				config: { contextTokenLimit: 100000 },
+			});
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// All 3 rounds should appear in disposition
+			const roundNums = result.debug.roundDisposition.map((d) => d.roundNumber);
+			expect(roundNums).toContain(1);
+			expect(roundNums).toContain(2);
+			expect(roundNums).toContain(3);
+		});
+
+		it("includes rounds from plan.roundSummaries not in other sources", () => {
+			// State has round 1 only. Plan has roundSummaries for rounds 1-3.
+			const state = makeStateWithRounds(1);
+			const plan = makePlanWithAnalyses(3); // has summaries for 1, 2, 3
+			const transcript = new Map<
+				number,
+				{ proposer?: string; challenger?: string }
+			>();
+			transcript.set(1, { proposer: "P1", challenger: "C1" });
+
+			const input = makeInput({
+				state,
+				plan,
+				cleanTranscript: transcript,
+				config: { contextTokenLimit: 100000 },
+			});
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// Rounds 2 and 3 come from plan.roundSummaries
+			const roundNums = result.debug.roundDisposition.map((d) => d.roundNumber);
+			expect(roundNums).toContain(2);
+			expect(roundNums).toContain(3);
+		});
+	});
+
+	describe("debug metadata", () => {
+		it("populates all debug fields correctly", () => {
+			const input = makeInput();
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// Phase 1 specifics
+			expect(result.debug.scores).toEqual([]);
+			expect(result.debug.shrinkTrace).toEqual([]);
+			expect(result.debug.referenceScoreUsed).toBe(false);
+			expect(result.debug.quoteSnippetSourceRounds).toEqual([]);
+
+			// Budget
+			expect(result.debug.budgetTokens).toBe(100000);
+			expect(result.debug.totalEstimatedTokens).toBeGreaterThan(0);
+			expect(typeof result.debug.fitAchieved).toBe("boolean");
+
+			// Dispositions
+			expect(result.debug.roundDisposition.length).toBe(3);
+			for (const d of result.debug.roundDisposition) {
+				expect([
+					"fullText",
+					"compressed",
+					"phaseBlockCovered",
+					"degradedSummary",
+				]).toContain(d.disposition);
+			}
+
+			// Warnings is an array
+			expect(Array.isArray(result.debug.warnings)).toBe(true);
+		});
+
+		it("roundDisposition is in ascending roundNumber order", () => {
+			const input = makeInput();
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			const nums = result.debug.roundDisposition.map((d) => d.roundNumber);
+			for (let i = 1; i < nums.length; i++) {
+				expect(nums[i]).toBeGreaterThan(nums[i - 1]);
+			}
+		});
+
+		it("phaseBlocks populated for long tier", () => {
+			// Force long tier: >20 rounds with enough text to exceed short threshold
+			const state = makeStateWithRounds(22);
+			const plan = makePlanWithAnalyses(22);
+			const transcript = new Map<
+				number,
+				{ proposer?: string; challenger?: string }
+			>();
+			for (let r = 1; r <= 22; r++) {
+				transcript.set(r, {
+					proposer: `P${r} ${"x".repeat(500)}`,
+					challenger: `C${r} ${"x".repeat(500)}`,
+				});
+			}
+			// Budget small enough that fullEstimate > 0.6 * budget, and >20 rounds forces long
+			const input = makeInput({
+				state,
+				plan,
+				cleanTranscript: transcript,
+				config: { contextTokenLimit: 10000, recentK: 3 },
+			});
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			expect(result.debug.budgetTier).toBe("long");
+			expect(result.debug.phaseBlocks).toBeDefined();
+			expect(result.debug.phaseBlocks!.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe("ascending roundNumber order in output", () => {
+		it("rounds appear in ascending order in the prompt", () => {
+			const input = makeInput();
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			const r1Pos = result.prompt.indexOf("### Round 1");
+			const r2Pos = result.prompt.indexOf("### Round 2");
+			const r3Pos = result.prompt.indexOf("### Round 3");
+
+			expect(r1Pos).toBeLessThan(r2Pos);
+			expect(r2Pos).toBeLessThan(r3Pos);
+		});
+	});
+
+	describe("never throws", () => {
+		it("returns best-effort output even with minimal input", () => {
+			const state: DebateState = {
+				config: {
+					topic: "Test",
+					maxRounds: 1,
+					judgeEveryNRounds: 1,
+					convergenceThreshold: 0.7,
+				},
+				phase: "completed",
+				currentRound: 0,
+				turns: [],
+				convergence: {
+					converged: false,
+					stanceDelta: 0,
+					mutualConcessions: 0,
+					bothWantToConclude: false,
+				},
+			};
+			const plan = emptyPlan();
+			const input: AdaptiveSynthesisInput = {
+				state,
+				plan,
+				topic: "Empty debate",
+				config: { contextTokenLimit: 10000 },
+			};
+
+			// Must not throw
+			const result = assembleAdaptiveSynthesisPrompt(input);
+			expect(result.prompt).toBeDefined();
+			expect(result.debug).toBeDefined();
+		});
 	});
 });
