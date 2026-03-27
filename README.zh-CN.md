@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="Crossfire Logo" width="600">
   <h1 align="center">Crossfire</h1>
   <p align="center">
-    <strong>AI 对抗辩论引擎</strong> — 让两个 AI 智能体进行结构化辩论，辅助更优决策。
+    <strong>面向可执行决策支持的多智能体辩论 CLI</strong> — 用结构化 AI 辩论生成行动计划、权衡取舍与风险清单。
   </p>
   <p align="center">
     中文&nbsp;&nbsp;|&nbsp;&nbsp;<a href="./README.md">English</a>
@@ -17,13 +17,15 @@
 
 ---
 
-Crossfire 编排 **提议者 vs. 挑战者** 之间的结构化辩论，支持 **Claude**、**Codex** 和 **Gemini** 智能体的任意组合。它实时追踪立场收敛，可选地调用裁判评估论点质量，并通过终端 UI 实时呈现整个辩论过程。
+Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决策支持。它运行 **提议者 vs. 挑战者** 的结构化辩论，支持 **Claude**、**Codex** 和 **Gemini** 的任意组合，并在辩论结束后综合生成 Markdown 和 HTML 格式的优先级行动计划。
 
-用它来压力测试方案、探索权衡取舍，或对任何主题生成高质量的分析——一切在终端中完成。
+你可以用它来压力测试架构方案、迁移计划、产品判断和事故应对。辩论只是手段；真正的主产物是最终行动计划，以及可追溯的 transcript 和事件日志。
 
 ## 目录
 
 - [特性亮点](#特性亮点)
+- [适用场景](#适用场景)
+- [你将得到什么](#你将得到什么)
 - [快速开始](#快速开始)
 - [终端 UI](#终端-ui)
 - [CLI 参考](#cli-参考)
@@ -32,18 +34,37 @@ Crossfire 编排 **提议者 vs. 挑战者** 之间的结构化辩论，支持 *
 - [配置文件](#配置文件)
 - [输出文件](#输出文件)
 - [工作原理](#工作原理)
+- [系统模型](#系统模型)
 - [架构概览](#架构概览)
+- [当前限制](#当前限制)
+- [扩展 Crossfire](#扩展-crossfire)
 - [贡献指南](#贡献指南)
 
 ## 特性亮点
 
+- **行动计划优先** — 主产物是 `action-plan.html` / `action-plan.md`，而不只是辩论记录
 - **多模型混战** — 自由组合 Claude（Agent SDK）、Codex（JSON-RPC）、Gemini（子进程）担任任意角色
 - **实时终端 UI** — 分屏面板，实时展示思考过程、工具调用、消息流和收敛指标
-- **事件溯源** — 所有事件持久化为 JSONL。支持中断恢复、任意速度回放
+- **事件溯源** — 所有事件持久化为 JSONL。支持中断恢复，并可从同一事实来源回放已完成辩论
 - **结构化提取** — 智能体通过 tool call 上报立场、置信度、关键论点和让步（Zod 校验）
 - **裁判仲裁** — 可选的裁判智能体评分论证、检测停滞、可提前终止辩论
+- **自适应最终综合** — 辩论结束后在独立综合会话中生成最终行动计划，模型综合失败时仍有本地回退
 - **增量提示词** — 第 1 轮发送完整上下文，第 2 轮起仅发送对手/裁判的新消息，利用提供商会话记忆实现每轮 ~O(1) token 开销
 - **配置文件系统** — YAML frontmatter + Markdown 系统提示词，按角色定制行为、模型和 MCP 服务器
+
+## 适用场景
+
+- **架构评审** — 压力测试设计提案、权衡点和迁移路径
+- **产品决策** — 在做路线图或重大判断前暴露隐藏假设
+- **风险发现** — 强制产出让步、反论点和未解决问题
+- **研究综合** — 在一个终端工作流里把对立观点收敛成结构化行动计划
+
+## 你将得到什么
+
+- **实时辩论界面** — 全屏终端 UI，按轮次展示推理过程、裁判反馈和收敛进度
+- **行动计划输出** — Markdown 和 HTML 两种格式的最终报告，便于分享、编辑和自动化处理
+- **完整 transcript** — Markdown 和 HTML 两种格式的人类可读辩论记录
+- **可回放审计轨迹** — 事件溯源 JSONL 日志与 `index.json` 元数据，支持回放、恢复和状态查看
 
 ## 前置要求
 
@@ -65,7 +86,7 @@ pnpm build
 ```bash
 pnpm setup                           # 确保 PNPM_HOME 在 PATH 中（执行后重启终端）
 pnpm -C packages/cli link --global   # 全局注册 `crossfire` 命令
-crossfire --version                   # 验证
+crossfire --version                  # 验证
 ```
 
 > 如果 `pnpm setup` 提示 "already up to date" 但 `crossfire` 仍找不到，需手动将 pnpm 全局目录加入 PATH：
@@ -84,13 +105,16 @@ node packages/cli/dist/index.js <command> [options]
 
 ## 快速开始
 
+第一次运行前，请确认你将要使用的 profile 对应的 agent CLI 已经安装、完成认证，并且能在当前 shell 中正常执行。
+
 ```bash
 # Claude 对战 Claude（裁判自动推断）
 crossfire start \
   --topic "Should we adopt microservices?" \
   --proposer claude/proposer \
   --challenger claude/challenger \
-  --max-rounds 5
+  --max-rounds 5 \
+  --output run_output/microservices
 
 # 跨模型对战：Claude vs Codex，Gemini 裁判
 crossfire start \
@@ -99,13 +123,15 @@ crossfire start \
   --challenger codex/challenger \
   --judge gemini/judge
 
-# 无界面模式（事件仍会持久化）
+# 无界面模式（完成信息仍输出到 stdout）
 crossfire start \
   --topic "Quick brainstorm" \
   --proposer claude/proposer \
   --challenger codex/challenger \
   --headless -v
 ```
+
+上面的示例之所以输出到 `run_output/microservices/`，是因为显式传入了 `--output run_output/microservices`。如果省略 `--output`，Crossfire 会写入默认目录 `run_output/debate-<ts>/`。随后优先查看其中的 `action-plan.html` 或 `action-plan.md`，也可以用 `crossfire status <output-dir>` 查看摘要，或用 `crossfire replay <output-dir>` 回放事件日志。
 
 ## 终端 UI
 
@@ -114,9 +140,9 @@ crossfire start \
 - **顶部栏** — 居中品牌标识、辩论 ID、轮次/阶段、提议者与挑战者的智能体信息、辩论主题
 - **可滚动内容区** — 按轮次展示智能体消息、思考过程和工具调用。支持方向键、`Ctrl+U`/`Ctrl+D`、`Home`/`End` 滚动
 - **指标栏** — 各智能体 token 用量与费用、收敛进度条与百分比、裁判判定、滚动状态（LIVE / SCROLLED）
-- **命令输入** — 根据上下文自动切换提示符（`>`、`approval>`、`replay>`），用于运行时命令
+- **命令输入** — 实时辩论中根据上下文切换提示符（`>`、`approval>`），用于运行时命令
 
-使用 `--headless` 跳过 UI。事件仍会持久化，可随后回放。
+使用 `--headless` 可跳过 UI。事件和综合输出仍会落盘，之后可以回放或审阅。
 
 ## CLI 参考
 
@@ -130,23 +156,21 @@ crossfire start \
 | `--topic-file <path>`         | 从文件读取主题（与 `--topic` 互斥） | —                        |
 | `--proposer <profile>`        | 提议者配置文件                      | _必填_                   |
 | `--challenger <profile>`      | 挑战者配置文件                      | _必填_                   |
-| `--judge <profile>`           | 裁判 profile（默认从 proposer 推断）                  | 自动推断                 |
-| `--max-rounds <n>`            | 辩论最大轮数，达到后强制终止                          | `10`                     |
-| `--judge-every-n-rounds <n>`  | 裁判每 N 轮介入一次（必须小于 max-rounds）            | `3`                      |
-| `--convergence-threshold <n>` | 立场距离 (0-1)，低于此值自动收敛                      | `0.3`                    |
+| `--judge <profile>`           | 裁判 profile（默认从 proposer 推断） | 自动推断                |
+| `--max-rounds <n>`            | 辩论最大轮数，达到后强制终止        | `10`                     |
+| `--judge-every-n-rounds <n>`  | 裁判每 N 轮介入一次（必须小于 max-rounds） | `3`                |
+| `--convergence-threshold <n>` | 立场距离 (0-1)，低于此值自动收敛    | `0.3`                    |
 | `--model <model>`             | 所有角色的模型覆盖                  | —                        |
 | `--proposer-model <model>`    | 提议者模型覆盖                      | —                        |
 | `--challenger-model <model>`  | 挑战者模型覆盖                      | —                        |
 | `--judge-model <model>`       | 裁判模型覆盖                        | —                        |
 | `--output <dir>`              | 输出目录                            | `run_output/debate-<ts>` |
-| `--headless`                  | 禁用 TUI（完成信息仍输出到 stdout）                  | `false`                  |
+| `--headless`                  | 禁用 TUI（完成信息仍输出到 stdout） | `false`                  |
 | `-v, --verbose`               | 详细日志                            | `false`                  |
 
-**模型优先级：** `--proposer-model` > `--model` > 配置文件 `model` 字段 > 模型提供商默认值。
+> **参数校验规则：** `--judge-every-n-rounds` 必须小于 `--max-rounds`。`--convergence-threshold` 必须在 0 到 1 之间。
 
-**参数校验规则：**
-- `--judge-every-n-rounds` 必须小于 `--max-rounds`，否则裁判永远不会介入。
-- `--convergence-threshold` 必须在 0 到 1 之间（含边界）。
+**模型优先级：** `--proposer-model` > `--model` > 配置文件 `model` 字段 > 提供商默认值。
 
 ### `crossfire resume <output-dir>`
 
@@ -157,7 +181,7 @@ crossfire start \
 | `--proposer <profile>`   | 覆盖提议者配置 | 来自 `index.json` |
 | `--challenger <profile>` | 覆盖挑战者配置 | 来自 `index.json` |
 | `--judge <profile>`      | 覆盖裁判配置   | 来自 `index.json` |
-| `--headless`             | 禁用终端 UI    | `false`          |
+| `--headless`             | 禁用 TUI       | `false`          |
 
 ### `crossfire replay <output-dir>`
 
@@ -168,11 +192,13 @@ crossfire start \
 | `--speed <n>`      | 回放速度倍率 | `1`    |
 | `--from-round <n>` | 从指定轮开始 | 开头   |
 
+> **当前行为：** `replay` 目前是 CLI 驱动、非交互式的回放流程。它会回放事件流，但不会暴露实时辩论里的命令解析器。
+
 ### `crossfire status <output-dir>`
 
 显示辩论状态摘要。加 `--json` 输出机器可读格式。
 
-```
+```text
 Debate Status
 =============
 
@@ -202,10 +228,10 @@ Configuration:
 
 ## 运行时命令
 
-辩论进行时，在 TUI 输入栏中输入命令：
+通过 `crossfire start` 启动实时辩论后，可在 TUI 输入栏中输入命令：
 
-| 命令                        | 效果                           | 状态    |
-| --------------------------- | ------------------------------ | ------- |
+| 命令                        | 效果                           | 状态     |
+| --------------------------- | ------------------------------ | -------- |
 | `/stop`                     | 立即停止                       | ✅       |
 | `/inject proposer <text>`   | 向提议者下一轮注入上下文       | ✅       |
 | `/inject challenger <text>` | 向挑战者下一轮注入上下文       | ✅       |
@@ -219,14 +245,7 @@ Configuration:
 
 **审批模式**（工具审批请求时自动激活）：`/approve`、`/deny` ✅
 
-**回放模式**（🚧 尚未接入）：
-
-| 命令              | 效果             | 状态      |
-| ----------------- | ---------------- | --------- |
-| `/speed <n>`      | 调整回放速度     | 🚧 未实现 |
-| `/jump round <n>` | 跳转到指定轮     | 🚧 未实现 |
-| `/pause`          | 暂停回放         | 🚧 未实现 |
-| `/resume`         | 恢复回放         | 🚧 未实现 |
+`crossfire resume` 目前虽然复用了同一套 TUI，但还没有接入 `crossfire start` 下可用的 inject / approval / stop 回调。
 
 ## 支持的智能体
 
@@ -271,11 +290,11 @@ Use the debate_meta tool to report your stance after each response.
 
 **搜索路径：** `./profiles/` → `~/.config/crossfire/profiles/`
 
-**裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（如 `claude/proposer` 默认使用 `claude/judge`）。
+**裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（例如 `claude/proposer` 默认使用 `claude/judge`）。
 
 内置配置文件：
 
-```
+```text
 profiles/
 ├── claude/    # proposer.md, challenger.md, judge.md
 ├── codex/     # proposer.md, challenger.md, judge.md
@@ -286,57 +305,77 @@ profiles/
 
 每次辩论在输出目录下产生以下文件：
 
-| 文件                 | 说明                                        |
-| -------------------- | ------------------------------------------- |
-| `action-plan.html`   | 最终综合行动计划（辩论结束后生成）          |
-| `transcript.html`    | HTML 格式的完整辩论记录                     |
-| `events.jsonl`       | 完整事件日志（每行一条 JSON）— 唯一事实来源 |
-| `index.json`         | 元数据、字节偏移、段清单、辩论配置          |
+| 文件                   | 说明                                                         |
+| ---------------------- | ------------------------------------------------------------ |
+| `action-plan.html`     | 主要最终报告的 HTML 版本                                     |
+| `action-plan.md`       | 同一份行动计划的 Markdown 版本                               |
+| `transcript.html`      | 完整辩论记录的 HTML 版本                                     |
+| `transcript.md`        | 同一份 transcript 的 Markdown 版本                           |
+| `events.jsonl`         | 完整事件日志（每行一条 JSON）— 唯一事实来源                  |
+| `index.json`           | 元数据、字节偏移、段清单、profile 信息和辩论配置             |
+| `synthesis-debug.json` | 综合提示词组装与综合结果的调试元数据，便于排查或分析输出质量 |
 
-恢复时会创建新的段文件（如 `events-resumed-<ts>.jsonl`），并在 `index.json` 中追踪。
+恢复时会创建新的段文件（例如 `events-resumed-<ts>.jsonl`），并在 `index.json` 中追踪。
+
+如果基于模型的最终综合失败，Crossfire 仍会写出一个可用的回退版行动计划。
 
 ## 工作原理
 
-1. **加载配置** — CLI 读取 YAML 配置文件，用 Zod 校验，将 `agent` 字段映射到适配器类型。
-
-2. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，将三种协议（SDK、JSON-RPC、子进程）统一为 `NormalizedEvent` 事件流（16 种事件）。
-
-3. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 均订阅此总线。
-
-4. **回合循环** — 编排器从投影状态构建提示词 → 发送给智能体 → 等待 `turn.completed` → 另一方重复。每次决策前都从事件重新投影状态（纯事件溯源）。
-
-5. **结构化提取** — 智能体调用 `debate_meta` 上报立场（5 级量表）、置信度、关键论点和让步。裁判调用 `judge_verdict` 给出评分和继续/停止建议。
-
-6. **增量提示词** — 第 1 轮发送完整系统提示词 + 主题 + 输出格式；后续轮次仅发送对手最新回复 + 可选裁判反馈。提供商原生会话/线程记忆管理历史，每轮 token 开销 ~O(1)。
-
-7. **收敛检测** — 基于立场差值 + 双方让步 + 双方希望结束意愿计算。收敛百分比超过阈值时辩论提前结束。
-
-8. **持久化** — 事件每 100ms 批量写入 JSONL（回合/辩论结束时同步写入）。完整事件日志支持确定性回放和恢复。
+1. **加载配置** — CLI 读取 YAML 配置文件，用 Zod 校验，并把 `agent` 字段映射到适配器类型。
+2. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，把提供商特定协议统一为共享事件流。
+3. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 都订阅这个总线。
+4. **回合循环** — 编排器从投影状态构建提示词，发送给当前智能体，等待 `turn.completed`，再轮到另一方。每次决策前都会从事件重新投影状态。
+5. **结构化提取** — 智能体调用 `debate_meta` 上报立场、置信度、关键论点和让步。裁判调用 `judge_verdict` 给出评分和继续/停止建议。
+6. **增量提示词** — 第 1 轮发送完整系统提示词、主题和输出格式；后续轮次仅发送对手最新回复和可选裁判反馈。
+7. **收敛检测** — Crossfire 跟踪立场差值、让步情况以及双方是否希望结束。达到阈值时可提前终止辩论。
+8. **持久化** — 事件每 100ms 批量写入 JSONL，并在回合或辩论完成时同步刷新。完整日志支持确定性回放和恢复。
+9. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，并记录综合调试元数据供审计使用。
 
 完整架构文档请从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 进入。
 
 > **注意：** 架构文档现在采用“入口页 + 子文档”结构。有疑问时以源码为准。
 
+## 系统模型
+
+Crossfire 围绕共享事件流构建，而不是围绕可变的运行时状态构建。
+
+- **事件日志是权威事实来源** — 回放、恢复、transcript 生成和状态查看都从持久化事件推导
+- **所有状态都通过投影获得** — 运行时状态通过 `projectState(events[])` 重建，从而保证回放和恢复的确定性
+- **纯核心 / 副作用外壳** — `-core` 包承载可测试逻辑，外围包负责 CLI、适配器、文件 I/O 和渲染
+
 ## 架构概览
 
-```
+```text
 packages/
-├── adapter-core/        # NormalizedEvent（16 种）、AgentAdapter 接口、Zod schema、契约测试
+├── adapter-core/        # 共享事件模型、AgentAdapter 接口、Zod schema、契约测试
 ├── adapter-claude/      # Claude Agent SDK 适配器（进程内异步生成器）
 ├── adapter-codex/       # Codex JSON-RPC 2.0 双向 stdio 适配器
 ├── adapter-gemini/      # Gemini 子进程适配器（A→B 降级）
-├── orchestrator-core/   # 纯逻辑：状态投影、收敛、上下文构建器、辩论记忆、导演
-├── orchestrator/        # 副作用：辩论运行器、DebateEventBus、EventStore（JSONL）、TranscriptWriter
+├── orchestrator-core/   # 纯逻辑：状态投影、收敛、提示词构建、导演
+├── orchestrator/        # 副作用：辩论运行器、DebateEventBus、EventStore、TranscriptWriter、综合流程
 ├── tui/                 # Ink（CLI 的 React）组件、TuiStore、EventSource/PlaybackClock
 └── cli/                 # Commander.js 入口、YAML 配置系统、组装工厂
 ```
 
-**核心设计原则：**
+分层说明：
 
-- **事件溯源** — 所有状态 = `projectState(events[])`。纯 reducer，确定性回放。
-- **纯核心 / 副作用外壳** — `-core` 包零 I/O 依赖。
-- **能力门控适配器** — `approve?`/`interrupt?` 不支持时为 `undefined`，而非空操作。
-- **增量会话记忆** — 第 1 轮完整上下文，第 2 轮起仅发送增量。提供商会话保持历史；通用 transcript 回退机制支持恢复。
+- **Adapters** 把不同提供商协议归一化为共享事件，并通过显式能力接口暴露差异
+- **Orchestrator core** 基于投影状态做可回放的纯决策
+- **Orchestrator** 负责运行辩论、持久化事件、写 transcript 和触发最终综合
+- **TUI** 使用与实时执行相同的事件流做实时渲染和回放
+
+## 当前限制
+
+- `crossfire replay` 目前是非交互式的，不暴露实时辩论中的命令解析器
+- `crossfire resume` 目前没有接入 `crossfire start` 那套 inject / approval / stop 回调
+- 有些 TUI 命令已经能解析，但尚未真正接入编排器行为
+- 在多段恢复后的运行中，`replay --from-round` 目前不可靠
+
+## 扩展 Crossfire
+
+如果要新增一个 provider，通常需要在新 package 中实现 `AgentAdapter`，把 provider 输出归一化为共享事件模型，跑通适配器契约测试，然后在 CLI 工厂层接好适配器创建逻辑，并补充对应 profiles。
+
+设计细节建议从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 开始，再看 **[docs/architecture/adapter-layer.md](docs/architecture/adapter-layer.md)** 和 **[docs/architecture/orchestrator.md](docs/architecture/orchestrator.md)**。
 
 ## 贡献指南
 

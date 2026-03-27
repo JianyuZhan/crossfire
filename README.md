@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="Crossfire Logo" width="600">
   <h1 align="center">Crossfire</h1>
   <p align="center">
-    <strong>AI Adversarial Debate Engine</strong> — Pit two AI agents against each other in structured debates for better decisions.
+    <strong>Multi-Agent Debate CLI for Actionable Decision Support</strong> — Turn structured AI debate into action plans, trade-offs, and risks.
   </p>
   <p align="center">
     <a href="./README.zh-CN.md">中文</a>&nbsp;&nbsp;|&nbsp;&nbsp;English
@@ -17,13 +17,15 @@
 
 ---
 
-Crossfire orchestrates structured **proposer vs. challenger** debates between any combination of **Claude**, **Codex**, and **Gemini** agents. It tracks stance convergence in real time, optionally invokes a judge to evaluate arguments, and renders everything in a rich terminal UI.
+Crossfire is a terminal-first **multi-agent debate orchestrator** for decision support. It runs structured **proposer vs. challenger** debates across **Claude**, **Codex**, and **Gemini**, then synthesizes the result into a prioritized action plan in Markdown and HTML.
 
-Use it to stress-test proposals, explore trade-offs, or generate high-quality analysis on any topic — all from a single terminal.
+Use it to stress-test architecture proposals, migration plans, product bets, and incident responses. The debate is the mechanism; the main deliverable is the final action plan, backed by transcripts and replayable event logs.
 
 ## Table of Contents
 
 - [Highlights](#highlights)
+- [Best For](#best-for)
+- [What You Get](#what-you-get)
 - [Quick Start](#quick-start)
 - [TUI](#tui)
 - [CLI Reference](#cli-reference)
@@ -32,18 +34,37 @@ Use it to stress-test proposals, explore trade-offs, or generate high-quality an
 - [Profiles](#profiles)
 - [Output Files](#output-files)
 - [How It Works](#how-it-works)
+- [System Model](#system-model)
 - [Architecture Overview](#architecture-overview)
+- [Current Limitations](#current-limitations)
+- [Extending Crossfire](#extending-crossfire)
 - [Contributing](#contributing)
 
 ## Highlights
 
+- **Action-plan first** — The primary output is `action-plan.html` / `action-plan.md`, not just a debate transcript
 - **Multi-provider** — Mix and match Claude (Agent SDK), Codex (JSON-RPC), and Gemini (subprocess) in any role
 - **Real-time TUI** — Split-panel terminal UI with live streaming, thinking indicators, tool-call traces, and convergence metrics
-- **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates, replay completed ones at any speed
+- **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates and replay completed ones from the same source of truth
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and can end debates early
+- **Adaptive final synthesis** — After the debate, Crossfire generates a final action plan in a fresh synthesis session with local fallback if model-backed synthesis fails
 - **Incremental prompts** — Turn 1 sends full context; Turn 2+ sends only new opponent/judge messages, leveraging provider session memory for ~O(1) per-turn cost
 - **Profiles** — YAML frontmatter + Markdown system prompts. Customize behavior, model, and MCP servers per role
+
+## Best For
+
+- **Architecture review** — Pressure-test design proposals, trade-offs, and migration plans
+- **Product decisions** — Surface hidden assumptions before committing to a roadmap or bet
+- **Risk discovery** — Force explicit concessions, counterarguments, and unresolved concerns
+- **Research synthesis** — Turn competing perspectives into a structured action plan in one terminal workflow
+
+## What You Get
+
+- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, judge feedback, and convergence tracking
+- **Action plan outputs** — Final report in Markdown and HTML for sharing, editing, or automation
+- **Full transcript** — Human-readable transcript in Markdown and HTML
+- **Replayable audit trail** — Event-sourced JSONL logs plus `index.json` metadata for replay, resume, and status inspection
 
 ## Prerequisites
 
@@ -65,7 +86,7 @@ pnpm build
 ```bash
 pnpm setup                           # ensures PNPM_HOME is in PATH (restart terminal after)
 pnpm -C packages/cli link --global   # makes `crossfire` available globally
-crossfire --version                   # verify
+crossfire --version                  # verify
 ```
 
 > If `pnpm setup` reports "already up to date" but `crossfire` is not found, add pnpm's global bin to your PATH manually:
@@ -84,13 +105,16 @@ node packages/cli/dist/index.js <command> [options]
 
 ## Quick Start
 
+Before your first run, make sure the agent CLI used by your selected profiles is installed, authenticated, and works in your shell.
+
 ```bash
 # Claude vs Claude (judge auto-inferred)
 crossfire start \
   --topic "Should we adopt microservices?" \
   --proposer claude/proposer \
   --challenger claude/challenger \
-  --max-rounds 5
+  --max-rounds 5 \
+  --output run_output/microservices
 
 # Cross-provider: Claude vs Codex with Gemini judge
 crossfire start \
@@ -107,6 +131,8 @@ crossfire start \
   --headless -v
 ```
 
+In the example above, output lands in `run_output/microservices/` because `--output run_output/microservices` is set explicitly. If you omit `--output`, Crossfire writes to the default `run_output/debate-<ts>/` directory. Inspect `action-plan.html` or `action-plan.md` there, use `crossfire status <output-dir>` for a summary, and `crossfire replay <output-dir>` to replay the event log.
+
 ## TUI
 
 The terminal UI is a full-screen Ink (React for CLI) application with four stacked regions:
@@ -114,9 +140,9 @@ The terminal UI is a full-screen Ink (React for CLI) application with four stack
 - **Header bar** — Centered branding, debate ID, round/phase, proposer & challenger agent info, and topic
 - **Scrollable content** — Round-by-round display of agent messages, thinking traces, and tool calls. Scroll with arrow keys, `Ctrl+U`/`Ctrl+D`, or `Home`/`End`
 - **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED)
-- **Command input** — Context-aware prompt (`>`, `approval>`, `replay>`) for runtime commands
+- **Command input** — Context-aware live prompt (`>`, `approval>`) for runtime commands
 
-Use `--headless` to skip the TUI. Events are still persisted for later replay.
+Use `--headless` to skip the TUI. Events and synthesis outputs are still persisted for later inspection.
 
 ## CLI Reference
 
@@ -150,12 +176,12 @@ Start a new debate.
 
 Resume an interrupted debate. State is reconstructed from persisted events.
 
-| Option                   | Description                 | Default          |
-| ------------------------ | --------------------------- | ---------------- |
+| Option                   | Description                 | Default           |
+| ------------------------ | --------------------------- | ----------------- |
 | `--proposer <profile>`   | Override proposer profile   | from `index.json` |
 | `--challenger <profile>` | Override challenger profile | from `index.json` |
 | `--judge <profile>`      | Override judge profile      | from `index.json` |
-| `--headless`             | Disable TUI                 | `false`          |
+| `--headless`             | Disable TUI                 | `false`           |
 
 ### `crossfire replay <output-dir>`
 
@@ -166,11 +192,13 @@ Replay a completed debate with time-scaled playback. No agent connections needed
 | `--speed <n>`      | Playback speed multiplier | `1`       |
 | `--from-round <n>` | Start from round          | beginning |
 
+> **Current behavior:** replay is currently CLI-driven and non-interactive. It replays the stored event stream, but does not expose the live command parser.
+
 ### `crossfire status <output-dir>`
 
 Show debate status summary. Add `--json` for machine-readable output.
 
-```
+```text
 Debate Status
 =============
 
@@ -200,31 +228,24 @@ Configuration:
 
 ## Runtime Commands
 
-During a live debate, type commands in the TUI input bar:
+During a live debate started with `crossfire start`, type commands in the TUI input bar:
 
-| Command                     | Effect                                           | Status  |
-| --------------------------- | ------------------------------------------------ | ------- |
+| Command                     | Effect                                           | Status   |
+| --------------------------- | ------------------------------------------------ | -------- |
 | `/stop`                     | Stop immediately                                 | ✅       |
 | `/inject proposer <text>`   | Add context to proposer's next prompt            | ✅       |
 | `/inject challenger <text>` | Add context to challenger's next prompt          | ✅       |
 | `/inject! proposer <text>`  | High-priority injection (must-address directive) | ✅       |
 | `/inject judge <text>`      | Trigger judge immediately with user instruction  | ✅       |
-| `/pause`                    | Pause the debate (finishes current turn)         | 🚧 NYI |
-| `/resume`                   | Resume a paused debate                           | 🚧 NYI |
-| `/extend <n>`               | Increase max rounds by N                         | 🚧 NYI |
+| `/pause`                    | Pause the debate (finishes current turn)         | 🚧 NYI   |
+| `/resume`                   | Resume a paused debate                           | 🚧 NYI   |
+| `/extend <n>`               | Increase max rounds by N                         | 🚧 NYI   |
 
 > 🚧 **NYI = Not Yet Implemented.** These commands are parsed by the TUI but not yet wired to the orchestrator.
 
 **Approval mode** (auto-activates on tool approval requests): `/approve`, `/deny` ✅
 
-**Replay mode** (🚧 not yet wired):
-
-| Command           | Effect                    | Status  |
-| ----------------- | ------------------------- | ------- |
-| `/speed <n>`      | Change playback speed     | 🚧 NYI |
-| `/jump round <n>` | Jump to specific round    | 🚧 NYI |
-| `/pause`          | Pause replay              | 🚧 NYI |
-| `/resume`         | Resume replay             | 🚧 NYI |
+`crossfire resume` currently reuses the TUI without wiring the same inject / approval / stop callbacks exposed by `crossfire start`.
 
 ## Supported Agents
 
@@ -269,11 +290,11 @@ Use the debate_meta tool to report your stance after each response.
 
 **Search paths:** `./profiles/` then `~/.config/crossfire/profiles/`
 
-**Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (e.g., `claude/proposer` defaults to `claude/judge`).
+**Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (for example, `claude/proposer` defaults to `claude/judge`).
 
 Built-in profiles:
 
-```
+```text
 profiles/
 ├── claude/    # proposer.md, challenger.md, judge.md
 ├── codex/     # proposer.md, challenger.md, judge.md
@@ -284,57 +305,77 @@ profiles/
 
 Each debate produces files in its output directory:
 
-| File               | Description                                              |
-| ------------------ | -------------------------------------------------------- |
-| `action-plan.html` | Final synthesized action plan (generated after debate)   |
-| `transcript.html`  | Full debate transcript in HTML format                    |
-| `events.jsonl`     | Complete event log (one JSON per line) — source of truth |
-| `index.json`       | Metadata, byte offsets, segment manifest, debate config  |
+| File                   | Description                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| `action-plan.html`     | Primary final report in HTML                                                     |
+| `action-plan.md`       | Same action plan in Markdown                                                     |
+| `transcript.html`      | Full debate transcript in HTML                                                   |
+| `transcript.md`        | Same transcript in Markdown                                                      |
+| `events.jsonl`         | Complete event log (one JSON per line) — source of truth                         |
+| `index.json`           | Metadata, byte offsets, segment manifest, profile info, and debate config        |
+| `synthesis-debug.json` | Prompt-assembly and synthesis debug metadata for inspecting or troubleshooting output |
 
-On resume, a new segment file is created (e.g., `events-resumed-<ts>.jsonl`) and tracked in `index.json`.
+On resume, a new segment file is created (for example, `events-resumed-<ts>.jsonl`) and tracked in `index.json`.
+
+If model-backed synthesis fails, Crossfire still writes a fallback action plan so the run produces a usable report.
 
 ## How It Works
 
-1. **Profile loading** — CLI reads YAML profiles, validates with Zod, maps `agent` to adapter type.
-
-2. **Adapter creation** — Each role gets an `AgentAdapter` wrapping three different protocols (SDK, JSON-RPC, subprocess) into a unified `NormalizedEvent` stream (16 event kinds).
-
+1. **Profile loading** — CLI reads YAML profiles, validates with Zod, and maps `agent` to adapter type.
+2. **Adapter creation** — Each role gets an `AgentAdapter` that normalizes provider-specific protocols into a shared event stream.
 3. **Event bus** — All events flow through `DebateEventBus`. The TUI, EventStore (JSONL persistence), and TranscriptWriter all subscribe here.
-
-4. **Turn loop** — The orchestrator builds prompts from projected state → sends to agent → waits for `turn.completed` → repeats for the other side. State is re-projected from events before every decision (pure event sourcing).
-
-5. **Structured extraction** — Agents call `debate_meta` to report stance (5-level), confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendation.
-
-6. **Incremental prompts** — Turn 1 sends the full system prompt + topic + output schema; subsequent turns send only the opponent's latest response + optional judge feedback. Provider-native session/thread memory handles history, keeping per-turn token cost ~O(1).
-
-7. **Convergence** — Computed from stance delta + mutual concessions + both agents wanting to conclude. When convergence exceeds the threshold, the debate ends early.
-
-8. **Persistence** — Events batch-flush to JSONL every 100ms (sync flush on turn/debate completion). The full log enables deterministic replay and resume.
+4. **Turn loop** — The orchestrator builds prompts from projected state, sends them to the active agent, waits for `turn.completed`, then continues with the other side. State is re-projected from events before every decision.
+5. **Structured extraction** — Agents call `debate_meta` to report stance, confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendations.
+6. **Incremental prompts** — Turn 1 sends the full system prompt, topic, and output schema; subsequent turns send only the opponent's latest response plus optional judge feedback.
+7. **Convergence** — Crossfire tracks stance delta, concessions, and whether both sides want to conclude. Debates can terminate early when convergence is high enough.
+8. **Persistence** — Events batch-flush to JSONL every 100ms, with sync flush on turn/debate completion. The full log enables deterministic replay and resume.
+9. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session and records synthesis metadata for auditing.
 
 For the architecture reference set, start at **[docs/architecture/overview.md](docs/architecture/overview.md)**.
 
 > **Note:** The architecture docs are maintained as an entry page plus linked subsystem references. When in doubt, the source code is authoritative.
 
+## System Model
+
+Crossfire is built around a shared event stream rather than mutable runtime state.
+
+- **Event log is authoritative** — Replay, resume, transcript generation, and status reporting all derive from persisted events
+- **All state is projected** — Runtime state is rebuilt through `projectState(events[])`, which keeps replay and recovery deterministic
+- **Pure core / effectful shell** — `-core` packages hold testable logic, while outer packages handle CLI, adapters, file I/O, and rendering
+
 ## Architecture Overview
 
-```
+```text
 packages/
-├── adapter-core/        # NormalizedEvent (16 kinds), AgentAdapter interface, Zod schemas, contract tests
+├── adapter-core/        # Shared event model, AgentAdapter interface, Zod schemas, contract tests
 ├── adapter-claude/      # Claude Agent SDK adapter (in-process async generator)
 ├── adapter-codex/       # Codex JSON-RPC 2.0 bidirectional stdio adapter
 ├── adapter-gemini/      # Gemini subprocess-per-turn adapter (A→B fallback)
-├── orchestrator-core/   # Pure logic: state projection, convergence, context-builder, debate-memory, director
-├── orchestrator/        # Side effects: debate runner, DebateEventBus, EventStore (JSONL), TranscriptWriter
+├── orchestrator-core/   # Pure logic: state projection, convergence, prompt building, director
+├── orchestrator/        # Side effects: debate runner, DebateEventBus, EventStore, TranscriptWriter, synthesis
 ├── tui/                 # Ink (React for CLI) components, TuiStore, EventSource/PlaybackClock
 └── cli/                 # Commander.js entry, YAML profile system, wiring factories
 ```
 
-**Key design principles:**
+Layer guide:
 
-- **Event sourcing** — All state = `projectState(events[])`. Pure reducer, deterministic replay.
-- **Pure core / effectful shell** — `-core` packages have zero I/O dependencies.
-- **Capability-gated adapters** — `approve?`/`interrupt?` are `undefined` when unsupported, not no-op.
-- **Incremental session memory** — Turn 1 full context, Turn 2+ delta-only. Provider sessions hold history; universal transcript fallback enables recovery.
+- **Adapters** normalize provider protocols into shared events with explicit capability surfaces
+- **Orchestrator core** makes replay-safe decisions from projected state
+- **Orchestrator** runs debates, persists events, writes transcripts, and triggers final synthesis
+- **TUI** renders the same event stream used by live execution and replay
+
+## Current Limitations
+
+- `crossfire replay` is currently non-interactive and does not expose the live command parser
+- `crossfire resume` does not currently wire inject / approval / stop callbacks like `crossfire start`
+- Some TUI commands are parsed but not yet wired to orchestrator behavior
+- `replay --from-round` is not reliable across resumed multi-segment runs today
+
+## Extending Crossfire
+
+To add a new provider, implement `AgentAdapter` in a new package, normalize provider output into the shared event model, run the adapter contract tests, then wire adapter creation in the CLI factory layer and add profiles for the new role set.
+
+For design details, start with **[docs/architecture/overview.md](docs/architecture/overview.md)** and then read **[docs/architecture/adapter-layer.md](docs/architecture/adapter-layer.md)** and **[docs/architecture/orchestrator.md](docs/architecture/orchestrator.md)**.
 
 ## Contributing
 
