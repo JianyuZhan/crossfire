@@ -51,14 +51,15 @@ RUN_INTEGRATION=1 pnpm --filter @crossfire/cli exec vitest run __tests__/smoke.i
 
 ## Architecture Documentation
 
-- `docs/architecture.md` is the single source of truth for system design ([TOC](docs/architecture.md#table-of-contents)).
-- **Any code change that alters types, interfaces, event kinds, component structure, CLI options, or data flow MUST update `docs/architecture.md` in the same commit.**
-- A pre-commit hook enforces this — if code changes touch types/interfaces/events, `docs/architecture.md` must be staged too.
-- Update TOC and cross-reference anchors when adding or renaming sections.
+- `docs/architecture/overview.md` is the architecture home page for the reference set.
+- Detailed architecture pages live under `docs/architecture/`, and together they form the source of truth for system design.
+- **Any code change that alters types, interfaces, event kinds, component structure, CLI options, or data flow MUST update the relevant architecture page(s) in `docs/architecture/` in the same commit.**
+- A pre-commit hook enforces architecture documentation updates for relevant code changes.
+- Update `docs/architecture/overview.md` when adding, removing, or renaming architecture pages.
 
 ## Critical Contracts
 
-- `sendTurn()` resolves when streaming BEGINS, not ends. Wait for `turn.completed` event.
+- `sendTurn()` does not mean the turn has finished. Wait for `turn.completed` event.
 - `onEvent()` delivers events from ALL sessions. Filter on `adapterSessionId`.
 - `approve()`/`interrupt()` are `undefined` when unsupported, not no-op.
 - Unknown event kinds MUST be ignored (forward compatibility).

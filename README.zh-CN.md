@@ -313,9 +313,9 @@ profiles/
 
 8. **持久化** — 事件每 100ms 批量写入 JSONL（回合/辩论结束时同步写入）。完整事件日志支持确定性回放和恢复。
 
-完整架构参考（含类型定义、接口和数据流图）请见 **[docs/architecture.md](docs/architecture.md)**。
+完整架构文档请从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 进入。
 
-> **注意：** `docs/architecture.md` 是综合设计参考文档，但可能与源码不完全同步。有疑问时以源码为准。
+> **注意：** 架构文档现在采用“入口页 + 子文档”结构。有疑问时以源码为准。
 
 ## 架构概览
 

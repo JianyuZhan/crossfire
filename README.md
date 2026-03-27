@@ -311,9 +311,9 @@ On resume, a new segment file is created (e.g., `events-resumed-<ts>.jsonl`) and
 
 8. **Persistence** — Events batch-flush to JSONL every 100ms (sync flush on turn/debate completion). The full log enables deterministic replay and resume.
 
-For the full architecture with type definitions, interfaces, and data flow diagrams, see **[docs/architecture.md](docs/architecture.md)**.
+For the architecture reference set, start at **[docs/architecture/overview.md](docs/architecture/overview.md)**.
 
-> **Note:** `docs/architecture.md` is a comprehensive design reference but may not be 100% in sync with the source code. When in doubt, the source code is authoritative.
+> **Note:** The architecture docs are maintained as an entry page plus linked subsystem references. When in doubt, the source code is authoritative.
 
 ## Architecture Overview
 

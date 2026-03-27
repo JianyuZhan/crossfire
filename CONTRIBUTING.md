@@ -54,9 +54,9 @@ packages/
 - **Capability-gated adapters** — `approve?`/`interrupt?` are `undefined` when unsupported, not no-op.
 - **Bounded session memory** — 4-layer prompt structure with extraction from `DebateState`, not raw transcript.
 
-For the full architecture with type definitions, interfaces, and data flow diagrams, see **[docs/architecture.md](docs/architecture.md)**.
+For the architecture reference set, start at **[docs/architecture/overview.md](docs/architecture/overview.md)**.
 
-> **Note:** `docs/architecture.md` is a comprehensive design reference but may not be 100% in sync with the source code. When in doubt, the source code is authoritative.
+> **Note:** The architecture docs are split across multiple pages. When in doubt, the source code is authoritative.
 
 ## Running Tests
 
@@ -97,12 +97,13 @@ RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.1-codex-mini HAVE_GEMINI=1 \
 
 | File                                                | What you'll find                                                    |
 | --------------------------------------------------- | ------------------------------------------------------------------- |
-| `docs/architecture.md`                              | Comprehensive architecture reference (types, interfaces, data flow) |
+| `docs/architecture/overview.md`                     | Architecture home page and document map                              |
+| `docs/architecture/`                                | Detailed subsystem architecture references                           |
 | `packages/adapter-core/src/types.ts`                | `NormalizedEvent`, `AgentAdapter` interface                         |
 | `packages/orchestrator-core/src/types.ts`           | `DebateState`, `DebateConfig`, debate types                         |
-| `packages/orchestrator-core/src/context-builder.ts` | 4-layer prompt construction                                         |
+| `packages/orchestrator-core/src/context-builder.ts` | Incremental debate prompt construction                              |
 | `packages/orchestrator/src/runner.ts`               | Main debate loop                                                    |
-| `packages/tui/src/store.ts`                         | TUI state projection                                                |
+| `packages/tui/src/state/tui-store.ts`               | TUI state projection                                                |
 | `packages/cli/src/commands/start.ts`                | CLI `start` command wiring                                          |
 
 ## Adding a New Adapter
