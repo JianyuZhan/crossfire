@@ -42,7 +42,7 @@ Use it to stress-test proposals, explore trade-offs, or generate high-quality an
 - **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates, replay completed ones at any speed
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and can end debates early
-- **Bounded prompts** — 4-layer prompt architecture keeps token usage roughly constant across rounds (no O(n²) growth)
+- **Incremental prompts** — Turn 1 sends full context; Turn 2+ sends only new opponent/judge messages, leveraging provider session memory for ~O(1) per-turn cost
 - **Profiles** — YAML frontmatter + Markdown system prompts. Customize behavior, model, and MCP servers per role
 
 ## Prerequisites
@@ -305,7 +305,7 @@ On resume, a new segment file is created (e.g., `events-resumed-<ts>.jsonl`) and
 
 5. **Structured extraction** — Agents call `debate_meta` to report stance (5-level), confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendation.
 
-6. **Bounded prompts** — A 4-layer prompt architecture (stable prefix, long-term memory, local window, turn instructions) keeps token usage roughly constant across rounds.
+6. **Incremental prompts** — Turn 1 sends the full system prompt + topic + output schema; subsequent turns send only the opponent's latest response + optional judge feedback. Provider-native session/thread memory handles history, keeping per-turn token cost ~O(1).
 
 7. **Convergence** — Computed from stance delta + mutual concessions + both agents wanting to conclude. When convergence exceeds the threshold, the debate ends early.
 
@@ -334,7 +334,7 @@ packages/
 - **Event sourcing** — All state = `projectState(events[])`. Pure reducer, deterministic replay.
 - **Pure core / effectful shell** — `-core` packages have zero I/O dependencies.
 - **Capability-gated adapters** — `approve?`/`interrupt?` are `undefined` when unsupported, not no-op.
-- **Bounded session memory** — 4-layer prompt structure with extraction from `DebateState`, not raw transcript.
+- **Incremental session memory** — Turn 1 full context, Turn 2+ delta-only. Provider sessions hold history; universal transcript fallback enables recovery.
 
 ## Contributing
 
