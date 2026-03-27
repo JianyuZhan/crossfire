@@ -1,15 +1,10 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AnyEvent, JudgeVerdict } from "@crossfire/orchestrator-core";
-
-/** Strip internal meta-tool blocks from text for human-readable output */
-function stripInternalBlocks(text: string): string {
-	return text
-		.replace(/```(?:debate_meta|judge_verdict)\s*[\s\S]*?```\s*/g, "")
-		.replace(/```(?:debate_meta|judge_verdict)[\s\S]*$/g, "")
-		.replace(/\n?(?:debate_meta|judge_verdict)\s*\n\s*\{[\s\S]*?\}\s*$/g, "")
-		.trim();
-}
+import {
+	type AnyEvent,
+	type JudgeVerdict,
+	stripInternalBlocks,
+} from "@crossfire/orchestrator-core";
 
 interface RoundData {
 	roundNumber: number;
@@ -91,8 +86,35 @@ export class TranscriptWriter {
 		}
 	}
 
+	/**
+	 * Return stripped per-speaker text keyed by round number.
+	 * Text is already stripped at ingestion time via stripInternalBlocks().
+	 */
+	getCleanTranscript(): Map<
+		number,
+		{ proposer?: string; challenger?: string }
+	> {
+		const result = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (const round of this.rounds) {
+			const entry: { proposer?: string; challenger?: string } = {};
+			for (const speaker of round.speakers) {
+				entry[speaker.role] = speaker.messageText;
+			}
+			result.set(round.roundNumber, entry);
+		}
+		return result;
+	}
+
 	async close(): Promise<void> {
 		writeFileSync(this.transcriptPath, this.renderHtml());
+		const mdPath = this.transcriptPath.replace(
+			/transcript\.html$/,
+			"transcript.md",
+		);
+		writeFileSync(mdPath, this.renderMarkdown());
 	}
 
 	private renderHtml(): string {
@@ -127,9 +149,9 @@ export class TranscriptWriter {
 						: "";
 					body += `<div class="judge-decision" style="color:${v.shouldContinue ? "#27ae60" : "#e74c3c"}">${decision}${score}</div>`;
 				}
-				body += `</div>\n`;
+				body += "</div>\n";
 			}
-			body += `</div>\n`;
+			body += "</div>\n";
 		}
 
 		return `<!DOCTYPE html>
@@ -154,5 +176,44 @@ h2{color:#2c5f8a;margin-top:2rem;border-bottom:1px solid #ddd;padding-bottom:.25
 <div class="meta">${t} · ${this.rounds.length} rounds</div>
 ${body}
 </body></html>`;
+	}
+
+	private renderMarkdown(): string {
+		const lines: string[] = [];
+		lines.push("# Debate Transcript");
+		lines.push("");
+		if (this.topic) {
+			lines.push(`**Topic:** ${this.topic}`);
+			lines.push("");
+		}
+		for (const round of this.rounds) {
+			lines.push(`## Round ${round.roundNumber}`);
+			lines.push("");
+			for (const speaker of round.speakers) {
+				const label = speaker.role === "proposer" ? "Proposer" : "Challenger";
+				lines.push(`### ${label}`);
+				lines.push("");
+				lines.push(speaker.messageText);
+				lines.push("");
+			}
+			if (round.judge) {
+				lines.push("### Judge");
+				lines.push("");
+				if (round.judge.messageText) {
+					lines.push(round.judge.messageText);
+					lines.push("");
+				}
+				if (round.judge.verdict) {
+					const v = round.judge.verdict;
+					const decision = v.shouldContinue ? "Continue" : "End";
+					const score = v.score
+						? ` | ${v.score.proposer}-${v.score.challenger}`
+						: "";
+					lines.push(`**Decision:** ${decision}${score}`);
+					lines.push("");
+				}
+			}
+		}
+		return lines.join("\n");
 	}
 }

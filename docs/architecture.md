@@ -1005,7 +1005,8 @@ Output files:
 
 - `events.jsonl` — all events, one JSON per line
 - `index.json` — unified metadata: byte offsets, segments manifest, config, profiles, versions (no separate `meta.json`). See [EventStore Resume Support](#eventstore-resume-support) for schema.
-- `transcript.html` — human-readable HTML (via TranscriptWriter, strips [`debate_meta`](#debatemeta-from-debate_meta-tool)/[`judge_verdict`](#judgeverdict-from-judge_verdict-tool) tool blocks)
+- `transcript.html` — human-readable HTML (via TranscriptWriter, strips [`debate_meta`](#debatemeta-from-debate_meta-tool)/[`judge_verdict`](#judgeverdict-from-judge_verdict-tool) tool blocks via `stripInternalBlocks()` from orchestrator-core)
+- `transcript.md` — plaintext markdown version of the transcript for local inspection (not for programmatic consumption by the synthesizer)
 - `action-plan.html` — primary deliverable: formatted debate action plan ([Action Plan Synthesis](#action-plan-synthesis))
 - `action-plan.md` — markdown version of the action plan
 

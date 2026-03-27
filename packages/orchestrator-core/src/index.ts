@@ -11,3 +11,4 @@ export * from "./draft-report.js";
 export * from "./report-renderer.js";
 export * from "./synthesis-prompt.js";
 export * from "./markdown-renderer.js";
+export * from "./strip-internal-blocks.js";
