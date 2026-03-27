@@ -133,6 +133,7 @@ export const resumeCommand = new Command("resume")
 					debateId,
 					outputDir,
 					resumeFromState: currentState,
+					transcriptWriter: busBundle.transcriptWriter,
 				});
 
 				// Always print completion info in non-TUI mode

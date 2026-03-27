@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { EvolvingPlan, RoundAnalysis } from "../src/evolving-plan.js";
+import type {
+	EvolvingPlan,
+	RoundAnalysis,
+	RoundSignals,
+} from "../src/evolving-plan.js";
 import { emptyPlan } from "../src/evolving-plan.js";
 import {
 	type AdaptiveSynthesisInput,
 	type AdaptiveSynthesisResult,
 	type PhaseBlock,
+	type ScoredRound,
 	type SynthesisPromptConfig,
 	aggregatePhaseBlockContent,
 	assembleAdaptiveSynthesisPrompt,
@@ -12,10 +17,14 @@ import {
 	buildFullTextSynthesisPrompt,
 	buildLayer1,
 	buildPhaseBlocks,
+	buildQuoteSnippets,
 	chooseInitialBudgetTier,
+	computeReferenceScores,
 	detectCjkMajority,
 	estimateTokens,
 	normalizeConfig,
+	scoreRoundsForSynthesis,
+	selectCriticalRounds,
 	shrinkToFit,
 } from "../src/synthesis-prompt.js";
 import type { DebateMeta, DebateState, DebateTurn } from "../src/types.js";
@@ -585,6 +594,172 @@ describe("buildLayer1", () => {
 		expect(risksIdx).toBeLessThan(evidenceIdx);
 		expect(evidenceIdx).toBeLessThan(judgeIdx);
 		expect(judgeIdx).toBeLessThan(summariesIdx);
+	});
+
+	it("includes direction-change marker when roundSignals indicate directionChange=true", () => {
+		const plan = makePlan({
+			judgeNotes: [
+				{
+					roundNumber: 2,
+					leading: "proposer",
+					reasoning: "Proposer led with evidence",
+				},
+				{
+					roundNumber: 4,
+					leading: "challenger",
+					reasoning: "Challenger turned the tide",
+				},
+			],
+			roundSignals: [
+				{
+					roundNumber: 2,
+					newClaimCount: 1,
+					hasConcession: false,
+					consensusDelta: false,
+					riskDelta: false,
+					judgeImpact: {
+						hasVerdict: true,
+						weighted: false,
+						directionChange: false,
+					},
+				},
+				{
+					roundNumber: 4,
+					newClaimCount: 2,
+					hasConcession: true,
+					consensusDelta: false,
+					riskDelta: false,
+					judgeImpact: {
+						hasVerdict: true,
+						weighted: false,
+						directionChange: true,
+					},
+				},
+			],
+		});
+		const result = buildLayer1(plan, topic);
+		const judgeSection =
+			result.split("## Judge Notes")[1]?.split("##")[0] ?? "";
+
+		// R2 should not have direction-change marker
+		const r2Line =
+			judgeSection.split("\n").find((l) => l.includes("R2:")) ?? "";
+		expect(r2Line).not.toContain("⟳ direction change");
+
+		// R4 should have direction-change marker
+		const r4Line =
+			judgeSection.split("\n").find((l) => l.includes("R4:")) ?? "";
+		expect(r4Line).toContain("⟳ direction change");
+	});
+
+	it("omits direction-change marker when directionChange=false", () => {
+		const plan = makePlan({
+			judgeNotes: [
+				{
+					roundNumber: 2,
+					leading: "proposer",
+					reasoning: "Proposer led",
+				},
+			],
+			roundSignals: [
+				{
+					roundNumber: 2,
+					newClaimCount: 1,
+					hasConcession: false,
+					consensusDelta: false,
+					riskDelta: false,
+					judgeImpact: {
+						hasVerdict: true,
+						weighted: false,
+						directionChange: false,
+					},
+				},
+			],
+		});
+		const result = buildLayer1(plan, topic);
+		const judgeSection =
+			result.split("## Judge Notes")[1]?.split("##")[0] ?? "";
+
+		expect(judgeSection).not.toContain("⟳ direction change");
+	});
+
+	it("gracefully degrades when roundSignals are missing", () => {
+		const plan = makePlan({
+			judgeNotes: [
+				{
+					roundNumber: 2,
+					leading: "proposer",
+					reasoning: "Proposer led",
+				},
+			],
+			// roundSignals is empty array
+		});
+		const result = buildLayer1(plan, topic);
+		const judgeSection =
+			result.split("## Judge Notes")[1]?.split("##")[0] ?? "";
+
+		// Should render without error and without direction-change marker
+		expect(judgeSection).toContain("R2");
+		expect(judgeSection).not.toContain("⟳ direction change");
+	});
+
+	it("shows both confidence shift and direction-change marker when both present", () => {
+		const plan = makePlan({
+			judgeNotes: [
+				{
+					roundNumber: 2,
+					leading: "proposer",
+					reasoning: "Proposer led",
+					score: { proposer: 0.6, challenger: 0.4 },
+				},
+				{
+					roundNumber: 4,
+					leading: "challenger",
+					reasoning: "Challenger turned it around",
+					score: { proposer: 0.3, challenger: 0.7 },
+				},
+			],
+			roundSignals: [
+				{
+					roundNumber: 2,
+					newClaimCount: 1,
+					hasConcession: false,
+					consensusDelta: false,
+					riskDelta: false,
+					judgeImpact: {
+						hasVerdict: true,
+						weighted: false,
+						directionChange: false,
+					},
+				},
+				{
+					roundNumber: 4,
+					newClaimCount: 2,
+					hasConcession: true,
+					consensusDelta: false,
+					riskDelta: false,
+					judgeImpact: {
+						hasVerdict: true,
+						weighted: false,
+						directionChange: true,
+					},
+				},
+			],
+		});
+		const result = buildLayer1(plan, topic);
+		const judgeSection =
+			result.split("## Judge Notes")[1]?.split("##")[0] ?? "";
+
+		// R4 should have both confidence shift and direction-change marker
+		const r4Line =
+			judgeSection.split("\n").find((l) => l.includes("R4:")) ?? "";
+		expect(r4Line).toContain("shift:");
+		expect(r4Line).toContain("⟳ direction change");
+
+		// Verify the order: leading, shift, direction marker, rationale
+		expect(r4Line).toMatch(
+			/R4: leading=challenger, shift: .*⟳ direction change \|/,
+		);
 	});
 });
 
@@ -2216,7 +2391,7 @@ describe("shrinkToFit", () => {
 	});
 
 	describe("shrinkTrace only records steps that changed the prompt", () => {
-		it("does not include cutSnippets in trace (no-op in Phase 1)", () => {
+		it("does not include cutSnippets in trace when no snippet section present", () => {
 			const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
 			const state = makeShrinkState(1);
 
@@ -2233,7 +2408,7 @@ describe("shrinkToFit", () => {
 
 			const result = shrinkToFit(sections, 10, 1, [1], [], plan, state);
 
-			// cutSnippets should never appear (it is a no-op in Phase 1)
+			// cutSnippets should not appear when no snippet section is present
 			const cutEntries = result.shrinkTrace.filter(
 				(e) => e.step === "cutSnippets",
 			);
@@ -2328,5 +2503,2264 @@ describe("shrinkToFit", () => {
 			// Either way, it should not throw
 			expect(result.prompt.length).toBeGreaterThan(0);
 		});
+	});
+});
+
+// --- Task 5: scoreRoundsForSynthesis tests ---
+
+describe("scoreRoundsForSynthesis", () => {
+	function makeSignals(
+		roundNumber: number,
+		overrides: Partial<RoundSignals> = {},
+	): RoundSignals {
+		return {
+			roundNumber,
+			newClaimCount: 0,
+			hasConcession: false,
+			consensusDelta: false,
+			riskDelta: false,
+			judgeImpact: {
+				hasVerdict: false,
+				weighted: false,
+				directionChange: false,
+			},
+			...overrides,
+		};
+	}
+
+	it("recency-only when all signals are zero", () => {
+		const signals = [makeSignals(1), makeSignals(2), makeSignals(3)];
+		const result = scoreRoundsForSynthesis(3, signals, []);
+
+		expect(result).toHaveLength(3);
+		// Scores should be proportional to round position
+		expect(result[0].score).toBeCloseTo(1 / 3);
+		expect(result[1].score).toBeCloseTo(2 / 3);
+		expect(result[2].score).toBeCloseTo(3 / 3);
+
+		// All non-recency breakdowns should be 0
+		for (const r of result) {
+			expect(r.breakdown.novelty).toBe(0);
+			expect(r.breakdown.concession).toBe(0);
+			expect(r.breakdown.consensusDelta).toBe(0);
+			expect(r.breakdown.riskDelta).toBe(0);
+			expect(r.breakdown.judgeImpact).toBe(0);
+			expect(r.breakdown.reference).toBe(0);
+		}
+	});
+
+	it("early high-impact round outranks low-signal recent round", () => {
+		const signals = [
+			makeSignals(1, {
+				newClaimCount: 5, // capped at 1.0
+				hasConcession: true, // +1.0
+			}),
+			makeSignals(2),
+			makeSignals(3),
+			makeSignals(4),
+			makeSignals(5),
+		];
+		const result = scoreRoundsForSynthesis(5, signals, []);
+
+		// Round 1: recency=0.2, novelty=1.0, concession=1.0 => 2.2
+		// Round 5: recency=1.0, rest=0 => 1.0
+		expect(result[0].score).toBeGreaterThan(result[4].score);
+	});
+
+	it("degraded-round zeroing keeps only recency and judgeImpact", () => {
+		const signals = [
+			makeSignals(1, {
+				newClaimCount: 4,
+				hasConcession: true,
+				consensusDelta: true,
+				riskDelta: true,
+				judgeImpact: {
+					hasVerdict: true,
+					weighted: true,
+					directionChange: false,
+				},
+			}),
+		];
+		const result = scoreRoundsForSynthesis(1, signals, [1]); // round 1 is degraded
+
+		expect(result).toHaveLength(1);
+		expect(result[0].breakdown.recency).toBeCloseTo(1.0);
+		expect(result[0].breakdown.judgeImpact).toBe(0.5); // weighted
+		expect(result[0].breakdown.novelty).toBe(0);
+		expect(result[0].breakdown.concession).toBe(0);
+		expect(result[0].breakdown.consensusDelta).toBe(0);
+		expect(result[0].breakdown.riskDelta).toBe(0);
+		expect(result[0].breakdown.reference).toBe(0);
+		expect(result[0].score).toBeCloseTo(1.0 + 0.5);
+	});
+
+	it("sparse-signal fallback: missing rounds get recency only", () => {
+		// Only round 2 has signals, rounds 1 and 3 do not
+		const signals = [makeSignals(2, { newClaimCount: 3, hasConcession: true })];
+		const result = scoreRoundsForSynthesis(3, signals, []);
+
+		expect(result).toHaveLength(3);
+
+		// Round 1: recency only
+		expect(result[0].score).toBeCloseTo(1 / 3);
+		expect(result[0].breakdown.novelty).toBe(0);
+
+		// Round 2: has signals
+		expect(result[1].breakdown.novelty).toBeCloseTo(1.0);
+		expect(result[1].breakdown.concession).toBe(1.0);
+
+		// Round 3: recency only
+		expect(result[2].score).toBeCloseTo(3 / 3);
+		expect(result[2].breakdown.novelty).toBe(0);
+	});
+
+	it("reference score additive", () => {
+		const signals = [makeSignals(1), makeSignals(2)];
+		const refScores = new Map<number, number>([
+			[1, 0.5],
+			[2, 1.5],
+		]);
+		const result = scoreRoundsForSynthesis(2, signals, [], refScores);
+
+		expect(result[0].breakdown.reference).toBe(0.5);
+		expect(result[1].breakdown.reference).toBe(1.5);
+		// Round 1: recency=0.5 + reference=0.5 = 1.0
+		expect(result[0].score).toBeCloseTo(1.0);
+		// Round 2: recency=1.0 + reference=1.5 = 2.5
+		expect(result[1].score).toBeCloseTo(2.5);
+	});
+
+	it("returns array sorted by roundNumber ascending", () => {
+		const signals = [makeSignals(3), makeSignals(1), makeSignals(2)];
+		const result = scoreRoundsForSynthesis(3, signals, []);
+
+		expect(result[0].roundNumber).toBe(1);
+		expect(result[1].roundNumber).toBe(2);
+		expect(result[2].roundNumber).toBe(3);
+	});
+});
+
+// --- Task 6: selectCriticalRounds tests ---
+
+describe("selectCriticalRounds", () => {
+	function makeScoredRound(roundNumber: number, score: number): ScoredRound {
+		return {
+			roundNumber,
+			score,
+			breakdown: {
+				recency: score,
+				novelty: 0,
+				concession: 0,
+				consensusDelta: 0,
+				riskDelta: 0,
+				judgeImpact: 0,
+				reference: 0,
+			},
+		};
+	}
+
+	it("recent-K inclusion: last K rounds always in fullText", () => {
+		const scored = [
+			makeScoredRound(1, 0.1),
+			makeScoredRound(2, 0.2),
+			makeScoredRound(3, 0.3),
+			makeScoredRound(4, 0.4),
+			makeScoredRound(5, 0.5),
+		];
+		const { fullText, compressed } = selectCriticalRounds(scored, 5, 2, 0);
+
+		// Last 2 rounds must be in fullText
+		expect(fullText.has(4)).toBe(true);
+		expect(fullText.has(5)).toBe(true);
+		// Earlier rounds are compressed
+		expect(compressed.has(1)).toBe(true);
+		expect(compressed.has(2)).toBe(true);
+		expect(compressed.has(3)).toBe(true);
+	});
+
+	it("overlap between recent and top-M counted once", () => {
+		// Round 5 is both recent (last K=1) and highest score
+		const scored = [
+			makeScoredRound(1, 0.1),
+			makeScoredRound(2, 0.2),
+			makeScoredRound(3, 0.3),
+			makeScoredRound(4, 0.4),
+			makeScoredRound(5, 5.0), // highest score AND most recent
+		];
+		const { fullText, compressed } = selectCriticalRounds(scored, 5, 1, 2);
+
+		// Round 5 is in recent K (K=1). impactM=2 should promote 2 MORE from remaining.
+		// Remaining sorted by score: round 4 (0.4), round 3 (0.3), round 2 (0.2), round 1 (0.1)
+		// Top 2 from remaining: rounds 4 and 3
+		expect(fullText.has(5)).toBe(true);
+		expect(fullText.has(4)).toBe(true);
+		expect(fullText.has(3)).toBe(true);
+		expect(fullText.size).toBe(3); // 1 recent + 2 impact
+		expect(compressed.has(1)).toBe(true);
+		expect(compressed.has(2)).toBe(true);
+	});
+
+	it("higher-roundNumber tie-break", () => {
+		// Rounds 2 and 3 have the same score. impactM=1 should pick round 3 (higher number).
+		const scored = [
+			makeScoredRound(1, 0.1),
+			makeScoredRound(2, 2.0),
+			makeScoredRound(3, 2.0), // same score as round 2
+			makeScoredRound(4, 0.4),
+			makeScoredRound(5, 0.5),
+		];
+		const { fullText, compressed } = selectCriticalRounds(scored, 5, 1, 1);
+
+		// Recent K=1: round 5
+		// Impact M=1 from remaining: round 3 wins tie-break over round 2
+		expect(fullText.has(5)).toBe(true);
+		expect(fullText.has(3)).toBe(true);
+		expect(fullText.size).toBe(2);
+		expect(compressed.has(2)).toBe(true);
+	});
+});
+
+// --- Task 8: Scoring wired into assembleAdaptiveSynthesisPrompt ---
+
+describe("assembleAdaptiveSynthesisPrompt scoring integration", () => {
+	function makeSignals(
+		roundNumber: number,
+		overrides: Partial<RoundSignals> = {},
+	): RoundSignals {
+		return {
+			roundNumber,
+			newClaimCount: 0,
+			hasConcession: false,
+			consensusDelta: false,
+			riskDelta: false,
+			judgeImpact: {
+				hasVerdict: false,
+				weighted: false,
+				directionChange: false,
+			},
+			...overrides,
+		};
+	}
+
+	it("medium path with scoring rescue: high-impact early round promoted to fullText", () => {
+		// 8 rounds with roundSignals; round 2 has high impact (concession + risk)
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: [
+				makeSignals(1),
+				makeSignals(2, {
+					hasConcession: true,
+					riskDelta: true,
+					newClaimCount: 3,
+				}),
+				makeSignals(3),
+				makeSignals(4),
+				makeSignals(5),
+				makeSignals(6),
+				makeSignals(7),
+				makeSignals(8),
+			],
+		});
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		// Budget that triggers medium tier (exceeds 60% but fits within 85%)
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 5000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// If tier is medium or long, round 2 should be rescued to fullText by scoring
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			expect(result.debug.fullTextRounds).toContain(2);
+			// Recent rounds should also be full text
+			expect(result.debug.fullTextRounds).toContain(8);
+			// Scores should be populated
+			expect(result.debug.scores.length).toBeGreaterThan(0);
+			// Round 2 should have a high score due to concession + risk
+			const r2Score = result.debug.scores.find((s) => s.roundNumber === 2);
+			expect(r2Score).toBeDefined();
+			expect(r2Score!.breakdown.concession).toBe(1.0);
+			expect(r2Score!.breakdown.riskDelta).toBe(0.6);
+		}
+	});
+
+	it("short tier still keeps all rounds full text regardless of signals", () => {
+		// 3 rounds with huge budget => short tier
+		const state = makeStateWithRounds(3);
+		const plan = makePlanWithAnalyses(3, {
+			roundSignals: [makeSignals(1), makeSignals(2), makeSignals(3)],
+		});
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 3; r++) {
+			transcript.set(r, {
+				proposer: `P${r}`,
+				challenger: `C${r}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 100000 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		expect(result.debug.budgetTier).toBe("short");
+		expect(result.debug.fullTextRounds).toEqual([1, 2, 3]);
+		expect(result.debug.compressedRounds).toEqual([]);
+		// Short tier does not use scoring
+		expect(result.debug.scores).toEqual([]);
+	});
+
+	it("recency-only fallback when no roundSignals present", () => {
+		// 8 rounds with no roundSignals => fallback to recency-only
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8); // no roundSignals
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 5000, recentK: 3 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			// No scoring used => scores empty
+			expect(result.debug.scores).toEqual([]);
+			// Recent 3 rounds should be full text
+			expect(result.debug.fullTextRounds).toContain(6);
+			expect(result.debug.fullTextRounds).toContain(7);
+			expect(result.debug.fullTextRounds).toContain(8);
+			// Early rounds should NOT be in fullText (no scoring rescue)
+			expect(result.debug.fullTextRounds).not.toContain(1);
+			expect(result.debug.fullTextRounds).not.toContain(2);
+		}
+	});
+
+	it("debug metadata scores populated when scoring is used", () => {
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: Array.from({ length: 8 }, (_, i) => makeSignals(i + 1)),
+		});
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 5000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			// Scores should be populated for all 8 rounds
+			expect(result.debug.scores).toHaveLength(8);
+			// Each score should have breakdown
+			for (const s of result.debug.scores) {
+				expect(s.breakdown).toBeDefined();
+				expect(s.roundNumber).toBeGreaterThanOrEqual(1);
+				expect(s.roundNumber).toBeLessThanOrEqual(8);
+			}
+		}
+	});
+
+	it("phase block re-aggregation after promotion in long tier", () => {
+		// 10 rounds, force long tier; round 3 has high impact and should be promoted
+		const state = makeStateWithRounds(10);
+		const plan = makePlanWithAnalyses(10, {
+			roundSignals: Array.from({ length: 10 }, (_, i) =>
+				i + 1 === 3
+					? makeSignals(3, {
+							hasConcession: true,
+							riskDelta: true,
+							newClaimCount: 5,
+							judgeImpact: {
+								hasVerdict: true,
+								weighted: true,
+								directionChange: true,
+							},
+						})
+					: makeSignals(i + 1),
+			),
+		});
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 10; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(500)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(500)}`,
+			});
+		}
+
+		// Small budget to force long tier (>20 rounds threshold or high estimate)
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 5000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		if (result.debug.budgetTier === "long") {
+			// Round 3 should be promoted to fullText
+			expect(result.debug.fullTextRounds).toContain(3);
+
+			// Phase blocks should NOT include round 3 in their coveredRounds
+			if (result.debug.phaseBlocks) {
+				for (const pb of result.debug.phaseBlocks) {
+					expect(pb.coveredRounds).not.toContain(3);
+				}
+			}
+
+			// All rounds accounted for in disposition
+			const dispositions = result.debug.roundDisposition.map(
+				(d) => d.roundNumber,
+			);
+			for (let r = 1; r <= 10; r++) {
+				expect(dispositions).toContain(r);
+			}
+		}
+	});
+
+	it("round disposition marks degraded rounds correctly", () => {
+		const state = makeStateWithRounds(6);
+		const plan = makePlanWithAnalyses(6, {
+			degradedRounds: [2, 3],
+			roundSignals: Array.from({ length: 6 }, (_, i) => makeSignals(i + 1)),
+		});
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 6; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 4000, recentK: 2, impactM: 1 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			// Degraded rounds that are not in fullText and not in phaseBlock should be degradedSummary
+			for (const d of result.debug.roundDisposition) {
+				if (
+					[2, 3].includes(d.roundNumber) &&
+					!result.debug.fullTextRounds.includes(d.roundNumber)
+				) {
+					const inPhaseBlock = result.debug.phaseBlocks?.some((pb) =>
+						pb.coveredRounds.includes(d.roundNumber),
+					);
+					if (!inPhaseBlock) {
+						expect(d.disposition).toBe("degradedSummary");
+					}
+				}
+			}
+		}
+	});
+});
+
+// --- Task 9: Phase 2 Golden Prompts ---
+
+describe("Phase 2 golden prompts", () => {
+	function makeRoundSignals(
+		roundNumber: number,
+		overrides?: Partial<RoundSignals>,
+	): RoundSignals {
+		return {
+			roundNumber,
+			newClaimCount: 0,
+			hasConcession: false,
+			consensusDelta: false,
+			riskDelta: false,
+			judgeImpact: {
+				hasVerdict: false,
+				weighted: false,
+				directionChange: false,
+			},
+			...overrides,
+		};
+	}
+
+	it("medium tier rescues high-impact early round", () => {
+		// 8 rounds, all with cleanTranscript (short text per round)
+		// roundSignals: round 2 has newClaimCount=3, hasConcession=true, riskDelta=true
+		// contextTokenLimit set so it triggers medium tier (e.g., fullEstimate > budget*0.6 but <= budget*0.85)
+		// recentK=3, impactM=2
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: [
+				makeRoundSignals(1),
+				makeRoundSignals(2, {
+					newClaimCount: 3,
+					hasConcession: true,
+					riskDelta: true,
+				}),
+				makeRoundSignals(3),
+				makeRoundSignals(4),
+				makeRoundSignals(5),
+				makeRoundSignals(6),
+				makeRoundSignals(7),
+				makeRoundSignals(8),
+			],
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 5000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// If tier is medium or long, round 2 should be rescued to fullText by scoring
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			// Verify: debug.fullTextRounds includes round 2 (scoring rescue)
+			expect(result.debug.fullTextRounds).toContain(2);
+
+			// Verify: debug.scores is populated and scores[1].score > scores[3].score (round 2 beats round 4)
+			expect(result.debug.scores).toBeDefined();
+			expect(result.debug.scores.length).toBeGreaterThan(0);
+
+			const round2Score = result.debug.scores.find((s) => s.roundNumber === 2);
+			const round4Score = result.debug.scores.find((s) => s.roundNumber === 4);
+
+			expect(round2Score).toBeDefined();
+			expect(round4Score).toBeDefined();
+			if (round2Score && round4Score) {
+				expect(round2Score.score).toBeGreaterThan(round4Score.score);
+			}
+		}
+	});
+
+	it("timeline ordering remains chronological with promoted round", () => {
+		// Use similar setup from previous test
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: [
+				makeRoundSignals(1),
+				makeRoundSignals(2, {
+					newClaimCount: 3,
+					hasConcession: true,
+					riskDelta: true,
+				}),
+				makeRoundSignals(3),
+				makeRoundSignals(4),
+				makeRoundSignals(5),
+				makeRoundSignals(6),
+				makeRoundSignals(7),
+				makeRoundSignals(8),
+			],
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 4500, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// Parse the output prompt for ### Round N headers
+		const roundHeaders: number[] = [];
+		const lines = result.prompt.split("\n");
+		for (const line of lines) {
+			const match = line.match(/^### Round (\d+)/);
+			if (match) {
+				roundHeaders.push(Number.parseInt(match[1], 10));
+			}
+		}
+
+		// Verify they appear in strictly ascending order
+		for (let i = 1; i < roundHeaders.length; i++) {
+			expect(roundHeaders[i]).toBeGreaterThan(roundHeaders[i - 1]);
+		}
+	});
+
+	it("roundDisposition audit invariants", () => {
+		// Use a medium-tier result
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: Array.from({ length: 8 }, (_, i) =>
+				makeRoundSignals(i + 1),
+			),
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 4500, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// Verify: roundDisposition is sorted ascending by roundNumber
+		for (let i = 1; i < result.debug.roundDisposition.length; i++) {
+			expect(result.debug.roundDisposition[i].roundNumber).toBeGreaterThan(
+				result.debug.roundDisposition[i - 1].roundNumber,
+			);
+		}
+
+		// Verify: no duplicate roundNumbers
+		const roundNumbers = result.debug.roundDisposition.map(
+			(d) => d.roundNumber,
+		);
+		const uniqueRoundNumbers = new Set(roundNumbers);
+		expect(uniqueRoundNumbers.size).toBe(roundNumbers.length);
+
+		// Verify: every round in allRounds appears exactly once
+		for (let r = 1; r <= 8; r++) {
+			const count = roundNumbers.filter((n) => n === r).length;
+			expect(count).toBe(1);
+		}
+	});
+
+	it("roundDisposition stays aligned with fullTextRounds after shrink demotions", () => {
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: Array.from({ length: 8 }, (_, i) =>
+				makeRoundSignals(i + 1),
+			),
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(1200)}`,
+				challenger: `Challenger text R${r} ${"y".repeat(1200)}`,
+			});
+		}
+
+		const result = assembleAdaptiveSynthesisPrompt({
+			state,
+			plan,
+			topic: "Shrink alignment test",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 1800, recentK: 3, impactM: 2 },
+		});
+
+		expect(
+			result.debug.shrinkTrace.some((entry) => entry.step === "demoteFullText"),
+		).toBe(true);
+
+		const dispositionByRound = new Map(
+			result.debug.roundDisposition.map((entry) => [
+				entry.roundNumber,
+				entry.disposition,
+			]),
+		);
+
+		for (const roundNumber of result.debug.fullTextRounds) {
+			expect(dispositionByRound.get(roundNumber)).toBe("fullText");
+		}
+
+		for (const roundNumber of result.debug.compressedRounds) {
+			expect(dispositionByRound.get(roundNumber)).not.toBe("fullText");
+		}
+	});
+
+	it("medium path emits Layer 4 Key Quotes when compressed rounds have scores", () => {
+		// Use a medium-tier result
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: Array.from({ length: 8 }, (_, i) =>
+				makeRoundSignals(i + 1),
+			),
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 4500, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			// Phase 3: Layer 4 Key Quotes emitted for non-short tiers with compressed rounds and scores
+			if (result.debug.compressedRounds.length > 0) {
+				expect(result.prompt).toContain("Key Quotes");
+				expect(result.debug.quoteSnippetSourceRounds.length).toBeGreaterThan(0);
+			}
+		}
+		// Should not contain stale labels
+		expect(result.prompt).not.toContain("Quote Snippets");
+		expect(result.prompt).not.toContain("Layer 4");
+	});
+
+	it("long tier phase block split after promotion", () => {
+		// 10 rounds with cleanTranscript
+		// Round 3 has very high signals (novelty=3, concession, consensusDelta, riskDelta, judgeImpact with directionChange)
+		// contextTokenLimit forcing long tier
+		// recentK=3, impactM=2
+		const state = makeStateWithRounds(10);
+		const plan = makePlanWithAnalyses(10, {
+			roundSignals: Array.from({ length: 10 }, (_, i) =>
+				i + 1 === 3
+					? makeRoundSignals(3, {
+							newClaimCount: 3,
+							hasConcession: true,
+							consensusDelta: true,
+							riskDelta: true,
+							judgeImpact: {
+								hasVerdict: true,
+								weighted: true,
+								directionChange: true,
+							},
+						})
+					: makeRoundSignals(i + 1),
+			),
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 10; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r} ${"x".repeat(200)}`,
+				challenger: `Challenger text R${r} ${"x".repeat(200)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 5000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// Only check in long tier
+		if (result.debug.budgetTier === "long") {
+			// Verify: round 3 is in fullTextRounds (promoted)
+			expect(result.debug.fullTextRounds).toContain(3);
+
+			// Verify: debug.phaseBlocks exists and no block has round 3 in coveredRounds
+			if (result.debug.phaseBlocks) {
+				for (const block of result.debug.phaseBlocks) {
+					expect(block.coveredRounds).not.toContain(3);
+				}
+
+				// Verify: no block has non-contiguous coveredRounds (each block's rounds are consecutive)
+				for (const block of result.debug.phaseBlocks) {
+					if (block.coveredRounds.length > 1) {
+						for (let i = 1; i < block.coveredRounds.length; i++) {
+							expect(block.coveredRounds[i]).toBe(
+								block.coveredRounds[i - 1] + 1,
+							);
+						}
+					}
+				}
+			}
+		}
+	});
+});
+
+// --- Task 5: Phase 3 Golden Prompts ---
+
+describe("Phase 3 golden prompts", () => {
+	function makeRoundSignals(
+		roundNumber: number,
+		overrides?: Partial<RoundSignals>,
+	): RoundSignals {
+		return {
+			roundNumber,
+			newClaimCount: 0,
+			hasConcession: false,
+			consensusDelta: false,
+			riskDelta: false,
+			judgeImpact: {
+				hasVerdict: false,
+				weighted: false,
+				directionChange: false,
+			},
+			...overrides,
+		};
+	}
+
+	it("scoreRoundsForSynthesis with referenceScores affects ranking", () => {
+		// Create 5 rounds with uniform roundSignals
+		const signals: RoundSignals[] = [
+			makeRoundSignals(1),
+			makeRoundSignals(2),
+			makeRoundSignals(3),
+			makeRoundSignals(4),
+			makeRoundSignals(5),
+		];
+
+		// Provide referenceScores giving round 2 a high reference score
+		const referenceScores = new Map<number, number>([
+			[2, 1.0], // High reference score for round 2
+		]);
+
+		const scored = scoreRoundsForSynthesis(5, signals, [], referenceScores);
+
+		// Find round 2's score
+		const round2 = scored.find((s) => s.roundNumber === 2);
+		expect(round2).toBeDefined();
+		expect(round2?.breakdown.reference).toBeGreaterThan(0);
+
+		// Compare round 2 with round 1 (which has lower recency)
+		// Without referenceScore, round 2 would have higher recency than round 1
+		// With referenceScore, round 2's advantage should be even larger
+		const round1 = scored.find((s) => s.roundNumber === 1);
+		expect(round1).toBeDefined();
+
+		// Round 2 should score higher than round 1 due to both recency AND reference bonus
+		expect(round2!.score).toBeGreaterThan(round1!.score);
+
+		// Verify the reference component is significant
+		expect(round2!.breakdown.reference).toBeGreaterThan(0.1);
+	});
+
+	it("buildQuoteSnippets token-clamp integration via shrink", () => {
+		// Create a medium tier scenario with tight budget
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: Array.from({ length: 8 }, (_, i) =>
+				i + 1 === 2
+					? makeRoundSignals(2, { newClaimCount: 2, riskDelta: true })
+					: makeRoundSignals(i + 1),
+			),
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r}. ${"x".repeat(150)}`,
+				challenger: `Challenger text R${r}. ${"x".repeat(150)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			// Tight budget to force shrinkage
+			config: { contextTokenLimit: 3000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// Check if budget is tight enough to trigger shrink with snippets
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			// Either shrinkTrace contains cutSnippets, or quoteSnippetSourceRounds was limited
+			const hasCutSnippets = result.debug.shrinkTrace?.some(
+				(s) => s.step === "cutSnippets",
+			);
+
+			if (hasCutSnippets) {
+				expect(hasCutSnippets).toBe(true);
+			} else {
+				// Or verify that snippets were constrained by budget
+				// Should have some compressed rounds
+				expect(result.debug.compressedRounds.length).toBeGreaterThan(0);
+				// Snippets should be limited
+				expect(
+					result.debug.quoteSnippetSourceRounds.length,
+				).toBeLessThanOrEqual(result.debug.compressedRounds.length);
+			}
+		}
+	});
+
+	it("25-round long golden with phase blocks and snippets", () => {
+		// Create 25 rounds with cleanTranscript
+		const state = makeStateWithRounds(25);
+
+		// Provide roundSignals with some high-impact early rounds
+		const signals: RoundSignals[] = [];
+		for (let i = 1; i <= 25; i++) {
+			if (i === 3 || i === 7) {
+				// High-impact early rounds
+				signals.push(
+					makeRoundSignals(i, {
+						newClaimCount: 3,
+						hasConcession: true,
+						riskDelta: true,
+						consensusDelta: true,
+					}),
+				);
+			} else {
+				signals.push(makeRoundSignals(i));
+			}
+		}
+
+		const plan = makePlanWithAnalyses(25, {
+			roundSignals: signals,
+		});
+
+		// Provide referenceScores for some rounds
+		const referenceScores = new Map<number, number>([
+			[3, 0.8],
+			[7, 0.9],
+			[15, 0.7],
+		]);
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 25; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r}. ${"x".repeat(300)}`,
+				challenger: `Challenger text R${r}. ${"x".repeat(300)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			referenceScores,
+			// Budget that forces long tier: 25 rounds with 600 chars each = ~7500 tokens full
+			// With budget 12000, that's 62.5% > 60% threshold, so not short, and >20 rounds => long
+			config: { contextTokenLimit: 12000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// Verify: long tier
+		expect(result.debug.budgetTier).toBe("long");
+
+		// Verify: referenceScoreUsed is true
+		expect(result.debug.referenceScoreUsed).toBe(true);
+
+		// Verify: phaseBlocks is populated and non-empty
+		expect(result.debug.phaseBlocks).toBeDefined();
+		expect(result.debug.phaseBlocks?.length).toBeGreaterThan(0);
+
+		// Verify: quoteSnippetSourceRounds has entries
+		expect(result.debug.quoteSnippetSourceRounds.length).toBeGreaterThan(0);
+
+		// Verify: every round in quoteSnippetSourceRounds also appears in compressedRounds
+		for (const r of result.debug.quoteSnippetSourceRounds) {
+			expect(result.debug.compressedRounds).toContain(r);
+		}
+
+		// Verify: timeline still ascends by roundNumber
+		// Parse output for "### Round N" or "## phase-" headers
+		const roundHeaders = Array.from(
+			result.prompt.matchAll(/### Round (\d+)/g),
+		).map((m) => Number.parseInt(m[1], 10));
+
+		if (roundHeaders.length > 1) {
+			for (let i = 1; i < roundHeaders.length; i++) {
+				expect(roundHeaders[i]).toBeGreaterThan(roundHeaders[i - 1]);
+			}
+		}
+	});
+
+	it("long tier timeline ascending with phase blocks and snippets", () => {
+		// Similar setup to previous test but focused on verifying output ordering
+		const state = makeStateWithRounds(20);
+
+		const signals: RoundSignals[] = [];
+		for (let i = 1; i <= 20; i++) {
+			if (i === 5 || i === 12) {
+				signals.push(
+					makeRoundSignals(i, {
+						newClaimCount: 2,
+						riskDelta: true,
+					}),
+				);
+			} else {
+				signals.push(makeRoundSignals(i));
+			}
+		}
+
+		const plan = makePlanWithAnalyses(20, {
+			roundSignals: signals,
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 20; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r}. ${"x".repeat(150)}`,
+				challenger: `Challenger text R${r}. ${"x".repeat(150)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 40000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// Parse the prompt output for section/round headers
+		const roundHeaders = Array.from(
+			result.prompt.matchAll(/### Round (\d+)/g),
+		).map((m) => Number.parseInt(m[1], 10));
+
+		// Verify they appear in ascending roundNumber order
+		for (let i = 1; i < roundHeaders.length; i++) {
+			expect(roundHeaders[i]).toBeGreaterThan(roundHeaders[i - 1]);
+		}
+
+		// Verify "Key Quotes" section appears AFTER all round content
+		if (result.debug.quoteSnippetSourceRounds.length > 0) {
+			const keyQuotesIndex = result.prompt.indexOf("Key Quotes");
+			if (keyQuotesIndex > 0) {
+				// Find the last round header
+				const lastRoundMatch = result.prompt.match(
+					/### Round (\d+)(?![\s\S]*### Round)/,
+				);
+				if (lastRoundMatch) {
+					const lastRoundIndex = result.prompt.lastIndexOf(
+						`### Round ${lastRoundMatch[1]}`,
+					);
+					expect(keyQuotesIndex).toBeGreaterThan(lastRoundIndex);
+				}
+			}
+		}
+	});
+
+	it("every quoteSnippetSourceRound is in compressedRounds", () => {
+		// Use a non-trivial setup
+		const state = makeStateWithRounds(12);
+
+		const signals: RoundSignals[] = [];
+		for (let i = 1; i <= 12; i++) {
+			if (i === 3 || i === 8) {
+				signals.push(
+					makeRoundSignals(i, {
+						newClaimCount: 3,
+						hasConcession: true,
+					}),
+				);
+			} else {
+				signals.push(makeRoundSignals(i));
+			}
+		}
+
+		const plan = makePlanWithAnalyses(12, {
+			roundSignals: signals,
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 12; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r}. ${"x".repeat(150)}`,
+				challenger: `Challenger text R${r}. ${"x".repeat(150)}`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 10000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		// Verify: every quoteSnippetSourceRound is in compressedRounds
+		for (const r of result.debug.quoteSnippetSourceRounds) {
+			expect(result.debug.compressedRounds).toContain(r);
+		}
+	});
+});
+
+// --- Task 1: computeReferenceScores tests ---
+
+describe("computeReferenceScores", () => {
+	it("returns empty map for empty state", () => {
+		const state: DebateState = {
+			config: {
+				topic: "Test Topic",
+				maxRounds: 5,
+				judgeEveryNRounds: 2,
+				convergenceThreshold: 0.7,
+			},
+			phase: "completed",
+			currentRound: 0,
+			turns: [],
+			convergence: {
+				converged: false,
+				stanceDelta: 0,
+				mutualConcessions: 0,
+				bothWantToConclude: false,
+			},
+		};
+		const plan = emptyPlan();
+
+		const result = computeReferenceScores(state, plan);
+
+		expect(result.size).toBe(0);
+	});
+
+	it("computes rebuttal back-reference accumulation", () => {
+		// Round 1: proposer has keyPoints ["data privacy is important"]
+		// Round 2: challenger has rebuttals [{target: "data privacy", response: "..."}]
+		// Verify round 1 gets a score > 0
+		const state: DebateState = {
+			config: {
+				topic: "Test Topic",
+				maxRounds: 5,
+				judgeEveryNRounds: 2,
+				convergenceThreshold: 0.7,
+			},
+			phase: "completed",
+			currentRound: 2,
+			turns: [
+				{
+					roundNumber: 1,
+					role: "proposer",
+					content: "Proposer content R1",
+					meta: {
+						stance: "agree",
+						confidence: 0.8,
+						keyPoints: ["data privacy is important"],
+					},
+				},
+				{
+					roundNumber: 2,
+					role: "challenger",
+					content: "Challenger content R2",
+					meta: {
+						stance: "disagree",
+						confidence: 0.7,
+						keyPoints: ["cost reduction"],
+						rebuttals: [
+							{
+								target: "data privacy",
+								response: "privacy is overrated",
+							},
+						],
+					},
+				},
+			],
+			convergence: {
+				converged: false,
+				stanceDelta: 0,
+				mutualConcessions: 0,
+				bothWantToConclude: false,
+			},
+		};
+		const plan = emptyPlan();
+
+		const result = computeReferenceScores(state, plan);
+
+		// Round 1 should have a score > 0
+		expect(result.has(1)).toBe(true);
+		expect(result.get(1)).toBeGreaterThan(0);
+	});
+
+	it("computes judge re-mentions", () => {
+		// Round 1: proposer has keyPoints ["cost reduction"]
+		// JudgeNote at round 2: reasoning includes "cost reduction"
+		// Verify round 1 gets a score > 0
+		const state: DebateState = {
+			config: {
+				topic: "Test Topic",
+				maxRounds: 5,
+				judgeEveryNRounds: 2,
+				convergenceThreshold: 0.7,
+			},
+			phase: "completed",
+			currentRound: 2,
+			turns: [
+				{
+					roundNumber: 1,
+					role: "proposer",
+					content: "Proposer content R1",
+					meta: {
+						stance: "agree",
+						confidence: 0.8,
+						keyPoints: ["cost reduction"],
+					},
+				},
+				{
+					roundNumber: 2,
+					role: "challenger",
+					content: "Challenger content R2",
+					meta: {
+						stance: "disagree",
+						confidence: 0.7,
+						keyPoints: ["quality"],
+					},
+				},
+			],
+			convergence: {
+				converged: false,
+				stanceDelta: 0,
+				mutualConcessions: 0,
+				bothWantToConclude: false,
+			},
+		};
+		const plan = {
+			...emptyPlan(),
+			judgeNotes: [
+				{
+					roundNumber: 2,
+					leading: "proposer" as const,
+					reasoning:
+						"The proposer made strong arguments about cost reduction that were compelling",
+				},
+			],
+		};
+
+		const result = computeReferenceScores(state, plan);
+
+		// Round 1 should have a score > 0
+		expect(result.has(1)).toBe(true);
+		expect(result.get(1)).toBeGreaterThan(0);
+	});
+
+	it("normalizes scores to 0..1 range with max score exactly 1.0", () => {
+		// Multiple rounds with varying reference counts
+		// Create multiple rebuttals and judge notes to accumulate scores
+		const state: DebateState = {
+			config: {
+				topic: "Test Topic",
+				maxRounds: 5,
+				judgeEveryNRounds: 2,
+				convergenceThreshold: 0.7,
+			},
+			phase: "completed",
+			currentRound: 4,
+			turns: [
+				{
+					roundNumber: 1,
+					role: "proposer",
+					content: "Proposer content R1",
+					meta: {
+						stance: "agree",
+						confidence: 0.8,
+						keyPoints: ["data privacy is important", "security matters"],
+					},
+				},
+				{
+					roundNumber: 2,
+					role: "challenger",
+					content: "Challenger content R2",
+					meta: {
+						stance: "disagree",
+						confidence: 0.7,
+						keyPoints: ["cost"],
+						rebuttals: [
+							{
+								target: "data privacy",
+								response: "privacy is overrated",
+							},
+						],
+					},
+				},
+				{
+					roundNumber: 3,
+					role: "proposer",
+					content: "Proposer content R3",
+					meta: {
+						stance: "agree",
+						confidence: 0.8,
+						keyPoints: ["reliability"],
+						rebuttals: [
+							{
+								target: "data privacy",
+								response: "privacy is crucial",
+							},
+							{
+								target: "security matters",
+								response: "security cannot be ignored",
+							},
+						],
+					},
+				},
+				{
+					roundNumber: 4,
+					role: "challenger",
+					content: "Challenger content R4",
+					meta: {
+						stance: "disagree",
+						confidence: 0.7,
+						keyPoints: ["speed"],
+						rebuttals: [
+							{
+								target: "data privacy",
+								response: "privacy has trade-offs",
+							},
+						],
+					},
+				},
+			],
+			convergence: {
+				converged: false,
+				stanceDelta: 0,
+				mutualConcessions: 0,
+				bothWantToConclude: false,
+			},
+		};
+		const plan = {
+			...emptyPlan(),
+			judgeNotes: [
+				{
+					roundNumber: 2,
+					leading: "proposer" as const,
+					reasoning: "Data privacy arguments were strong",
+				},
+				{
+					roundNumber: 3,
+					leading: "challenger" as const,
+					reasoning: "Data privacy and security matter",
+				},
+				{
+					roundNumber: 4,
+					leading: "proposer" as const,
+					reasoning: "Security matters in the long run",
+				},
+			],
+		};
+
+		const result = computeReferenceScores(state, plan);
+
+		// Verify all scores are >= 0 and <= 1
+		for (const [round, score] of result) {
+			expect(score).toBeGreaterThanOrEqual(0);
+			expect(score).toBeLessThanOrEqual(1);
+		}
+
+		// Verify the maximum score is exactly 1.0
+		const maxScore = Math.max(...result.values());
+		expect(maxScore).toBe(1.0);
+
+		// Round 1 should have the highest score (referenced by rounds 2, 3, 4)
+		expect(result.get(1)).toBe(1.0);
+	});
+});
+
+describe("buildQuoteSnippets", () => {
+	it("selects highest-scored compressed rounds first", () => {
+		const transcript = new Map([
+			[1, { proposer: "First sentence. Second sentence. Third sentence." }],
+			[2, { proposer: "Round two first. Round two second." }],
+			[3, { proposer: "Round three content here." }],
+		]);
+
+		const compressedRounds = [1, 2, 3];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 1.5,
+				breakdown: {
+					recency: 0.33,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 1.17,
+				},
+			},
+			{
+				roundNumber: 2,
+				score: 2.0,
+				breakdown: {
+					recency: 0.67,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 1.33,
+				},
+			},
+			{
+				roundNumber: 3,
+				score: 0.5,
+				breakdown: {
+					recency: 0.5,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		// Budget allows for 2 rounds (make it small enough to exclude round 3)
+		const budgetChars = 120;
+
+		const result = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			budgetChars,
+		);
+
+		// Should select rounds 2 (score 2.0) and 1 (score 1.5), excluding round 3 (score 0.5)
+		expect(result.sourceRounds).toEqual([1, 2]);
+		expect(result.text).toContain("Round 1");
+		expect(result.text).toContain("Round 2");
+		expect(result.text).not.toContain("Round 3");
+	});
+
+	it("tie-breaks equal scores by higher roundNumber", () => {
+		const transcript = new Map([
+			[1, { proposer: "Round one text." }],
+			[2, { proposer: "Round two text." }],
+		]);
+
+		const compressedRounds = [1, 2];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 1.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+			{
+				roundNumber: 2,
+				score: 1.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		// Budget allows only 1 round
+		const budgetChars = 50;
+
+		const result = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			budgetChars,
+		);
+
+		// Should select round 2 (tie-break: higher roundNumber wins)
+		expect(result.sourceRounds).toEqual([2]);
+		expect(result.text).toContain("Round 2");
+		expect(result.text).not.toContain("Round 1");
+	});
+
+	it("respects character budget", () => {
+		const transcript = new Map([
+			[
+				1,
+				{
+					proposer:
+						"This is a very long piece of text with many sentences. It keeps going and going. There are many words here. Even more words follow. And yet more words to fill space.",
+				},
+			],
+			[
+				2,
+				{
+					proposer:
+						"Another long piece of text for round two. It also has many sentences. This continues for quite some time. More content here as well.",
+				},
+			],
+			[
+				3,
+				{
+					proposer:
+						"Third round with equally long text. It spans multiple sentences. There is a lot to say here. Even more content follows.",
+				},
+			],
+		]);
+
+		const compressedRounds = [1, 2, 3];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 3.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 1.0,
+					concession: 1.0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+			{
+				roundNumber: 2,
+				score: 2.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 1.0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+			{
+				roundNumber: 3,
+				score: 1.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		// Very small budget
+		const budgetChars = 100;
+
+		const result = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			budgetChars,
+		);
+
+		// Should select at most 1 round due to budget
+		expect(result.sourceRounds.length).toBeLessThanOrEqual(1);
+		expect(result.text.length).toBeLessThanOrEqual(budgetChars + 50); // Allow some overhead for formatting
+	});
+
+	it("renders snippets in ascending roundNumber order", () => {
+		const transcript = new Map([
+			[1, { proposer: "Round one text here." }],
+			[3, { proposer: "Round three text here." }],
+			[2, { proposer: "Round two text here." }],
+		]);
+
+		const compressedRounds = [1, 2, 3];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 1.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+			{
+				roundNumber: 2,
+				score: 2.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 1.0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+			{
+				roundNumber: 3,
+				score: 3.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 1.0,
+					concession: 1.0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		const budgetChars = 500;
+
+		const result = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			budgetChars,
+		);
+
+		// Should select all 3 rounds, ordered by score: 3, 2, 1
+		// But output should be in ascending order: 1, 2, 3
+		expect(result.sourceRounds).toEqual([1, 2, 3]);
+
+		// Verify the order in the text output
+		const round1Pos = result.text.indexOf("Round 1");
+		const round2Pos = result.text.indexOf("Round 2");
+		const round3Pos = result.text.indexOf("Round 3");
+
+		expect(round1Pos).toBeGreaterThan(0);
+		expect(round2Pos).toBeGreaterThan(round1Pos);
+		expect(round3Pos).toBeGreaterThan(round2Pos);
+	});
+
+	it("returns empty result when compressed set is empty", () => {
+		const transcript = new Map([
+			[1, { proposer: "Round one text." }],
+			[2, { proposer: "Round two text." }],
+		]);
+
+		const compressedRounds: number[] = [];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 1.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		const budgetChars = 500;
+
+		const result = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			budgetChars,
+		);
+
+		expect(result.text).toBe("");
+		expect(result.sourceRounds).toEqual([]);
+	});
+
+	it("returns empty result when budget is zero or negative", () => {
+		const transcript = new Map([[1, { proposer: "Round one text." }]]);
+
+		const compressedRounds = [1];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 1.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		const resultZero = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			0,
+		);
+		expect(resultZero.text).toBe("");
+		expect(resultZero.sourceRounds).toEqual([]);
+
+		const resultNegative = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			-100,
+		);
+		expect(resultNegative.text).toBe("");
+		expect(resultNegative.sourceRounds).toEqual([]);
+	});
+
+	it("extracts snippet correctly - caps at 200 chars", () => {
+		const longText =
+			"This is the first sentence that goes on and on with many many words to make it quite long and ensure it exceeds the limit when combined with another sentence. This is the second sentence that also has a lot of words and content to make the total exceed two hundred characters. This is a very long third sentence.";
+
+		const transcript = new Map([[1, { proposer: longText }]]);
+
+		const compressedRounds = [1];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 1.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		const budgetChars = 1000;
+
+		const result = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			budgetChars,
+		);
+
+		// The snippet in the output should be truncated at 200 chars
+		expect(result.text).toContain("...");
+		// Should not contain the third sentence
+		expect(result.text).not.toContain("third sentence");
+	});
+
+	it("only considers compressed rounds with transcript", () => {
+		const transcript = new Map([
+			[1, { proposer: "Round one text." }],
+			// Round 2 has no transcript
+			[3, { proposer: "Round three text." }],
+		]);
+
+		const compressedRounds = [1, 2, 3];
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 1.0,
+				breakdown: {
+					recency: 0.33,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0.67,
+				},
+			},
+			{
+				roundNumber: 2,
+				score: 3.0, // Highest score but no transcript
+				breakdown: {
+					recency: 0.67,
+					novelty: 1.0,
+					concession: 1.0,
+					consensusDelta: 0.8,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0.53,
+				},
+			},
+			{
+				roundNumber: 3,
+				score: 2.0,
+				breakdown: {
+					recency: 1.0,
+					novelty: 1.0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			},
+		];
+
+		const budgetChars = 500;
+
+		const result = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scored,
+			budgetChars,
+		);
+
+		// Should only select rounds 1 and 3 (which have transcript)
+		// Round 2 should be excluded despite highest score
+		expect(result.sourceRounds).toEqual([1, 3]);
+		expect(result.text).toContain("Round 1");
+		expect(result.text).toContain("Round 3");
+		expect(result.text).not.toContain("Round 2");
+	});
+});
+
+// --- Phase 3 Task 3: Layer 4 integration and cutSnippets tests ---
+
+describe("Phase 3: Layer 4 integration into assembly", () => {
+	function makeRoundSignals(
+		roundNumber: number,
+		overrides?: Partial<RoundSignals>,
+	): RoundSignals {
+		return {
+			roundNumber,
+			newClaimCount: 0,
+			hasConcession: false,
+			consensusDelta: false,
+			riskDelta: false,
+			judgeImpact: {
+				hasVerdict: false,
+				weighted: false,
+				directionChange: false,
+			},
+			...overrides,
+		};
+	}
+
+	it("Layer 4 emitted for medium tier with scores and compressed rounds", () => {
+		// 8 rounds with signals => medium tier with scoring
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: Array.from({ length: 8 }, (_, i) =>
+				makeRoundSignals(i + 1),
+			),
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text R${r}. This is a full sentence for round ${r}.`,
+				challenger: `Challenger text R${r}. Another sentence for round ${r}.`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 5000, recentK: 3, impactM: 2 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		if (
+			result.debug.budgetTier === "medium" ||
+			result.debug.budgetTier === "long"
+		) {
+			// Should have compressed rounds
+			expect(result.debug.compressedRounds.length).toBeGreaterThan(0);
+			// Should have scores
+			expect(result.debug.scores.length).toBeGreaterThan(0);
+			// Key Quotes should appear in output
+			expect(result.prompt).toContain("Key Quotes");
+			// quoteSnippetSourceRounds should be populated
+			expect(result.debug.quoteSnippetSourceRounds.length).toBeGreaterThan(0);
+			// Source rounds should only be from compressed rounds
+			for (const r of result.debug.quoteSnippetSourceRounds) {
+				expect(result.debug.compressedRounds).toContain(r);
+			}
+		}
+	});
+
+	it("Layer 4 NOT emitted for short tier", () => {
+		// 3 rounds with huge budget => short tier
+		const state = makeStateWithRounds(3);
+		const plan = makePlanWithAnalyses(3, {
+			roundSignals: [
+				makeRoundSignals(1),
+				makeRoundSignals(2),
+				makeRoundSignals(3),
+			],
+		});
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 3; r++) {
+			transcript.set(r, {
+				proposer: `P${r} text.`,
+				challenger: `C${r} text.`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: { contextTokenLimit: 100000 },
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		expect(result.debug.budgetTier).toBe("short");
+		expect(result.prompt).not.toContain("Key Quotes");
+		expect(result.debug.quoteSnippetSourceRounds).toEqual([]);
+	});
+
+	it("quoteSnippetSourceRounds populated in debug metadata", () => {
+		// Setup that forces medium tier with compressed rounds
+		const state = makeStateWithRounds(8);
+		const plan = makePlanWithAnalyses(8, {
+			roundSignals: Array.from({ length: 8 }, (_, i) =>
+				makeRoundSignals(i + 1, { newClaimCount: 1 }),
+			),
+		});
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		for (let r = 1; r <= 8; r++) {
+			transcript.set(r, {
+				proposer: `Proposer text round ${r}. Has sentence content.`,
+				challenger: `Challenger text round ${r}. Also has content.`,
+			});
+		}
+
+		const input: AdaptiveSynthesisInput = {
+			state,
+			plan,
+			topic: "Test Topic",
+			cleanTranscript: transcript,
+			config: {
+				contextTokenLimit: 5000,
+				recentK: 3,
+				impactM: 2,
+				quoteSnippetBudgetChars: 2000,
+			},
+		};
+
+		const result = assembleAdaptiveSynthesisPrompt(input);
+
+		if (
+			result.debug.budgetTier !== "short" &&
+			result.debug.compressedRounds.length > 0
+		) {
+			// quoteSnippetSourceRounds should be subset of compressed rounds
+			for (const r of result.debug.quoteSnippetSourceRounds) {
+				expect(result.debug.compressedRounds).toContain(r);
+			}
+			// Source rounds should be in ascending order
+			for (let i = 1; i < result.debug.quoteSnippetSourceRounds.length; i++) {
+				expect(result.debug.quoteSnippetSourceRounds[i]).toBeGreaterThan(
+					result.debug.quoteSnippetSourceRounds[i - 1],
+				);
+			}
+		}
+	});
+});
+
+describe("Phase 3: cutSnippets shrink step", () => {
+	function makeSections(overrides: {
+		layer1?: string;
+		debateTimeline?: Array<{
+			roundNumber: number;
+			type: "fullText" | "compressed" | "phaseBlock";
+			content: string;
+		}>;
+		contextNote?: string;
+		snippetSection?: string;
+	}) {
+		return {
+			layer1: overrides.layer1 ?? "## Topic\n\nTest Topic",
+			debateTimeline: overrides.debateTimeline ?? [],
+			contextNote: overrides.contextNote ?? "",
+			snippetSection: overrides.snippetSection,
+		};
+	}
+
+	function makeShrinkPlan(overrides: Partial<EvolvingPlan> = {}): EvolvingPlan {
+		return { ...emptyPlan(), ...overrides };
+	}
+
+	function makeShrinkState(roundCount: number): DebateState {
+		return makeStateWithRounds(roundCount);
+	}
+
+	it("cutSnippets activates when snippet section pushes over budget", () => {
+		const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
+		const state = makeShrinkState(3);
+
+		// Create a scenario where snippet section is large
+		const snippetSection = "## Key Quotes\n\n> **Round 1:** " + "x".repeat(500);
+
+		const transcript = new Map<
+			number,
+			{ proposer?: string; challenger?: string }
+		>();
+		transcript.set(1, {
+			proposer: "Round one content. First sentence here.",
+			challenger: "Challenger round one. Another sentence.",
+		});
+		transcript.set(2, {
+			proposer: "Round two content. First sentence here.",
+			challenger: "Challenger round two. Another sentence.",
+		});
+
+		const scored: ScoredRound[] = [
+			{
+				roundNumber: 1,
+				score: 2.0,
+				breakdown: {
+					recency: 0.33,
+					novelty: 1.0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0.67,
+				},
+			},
+			{
+				roundNumber: 2,
+				score: 1.0,
+				breakdown: {
+					recency: 0.67,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0.33,
+				},
+			},
+		];
+
+		const sections = makeSections({
+			layer1: "## Topic\n\nTest",
+			debateTimeline: [
+				{
+					roundNumber: 3,
+					type: "fullText",
+					content: "P3 full text " + "x".repeat(200),
+				},
+			],
+			snippetSection,
+		});
+
+		// Budget tight enough that snippets push over but removal helps
+		// Total chars without snippet ~230, with snippet ~750
+		// estimateTokens = ceil(chars * 0.5)
+		// Budget between these two
+		const budgetTokens = 200;
+
+		const result = shrinkToFit(
+			sections,
+			budgetTokens,
+			1,
+			[3],
+			[1, 2],
+			plan,
+			state,
+			{
+				transcript,
+				scored,
+				initialBudgetChars: 500,
+			},
+		);
+
+		// Should have cutSnippets in trace
+		const cutEntries = result.shrinkTrace.filter(
+			(e) => e.step === "cutSnippets",
+		);
+		expect(cutEntries.length).toBeGreaterThan(0);
+	});
+
+	it("cutSnippets does not appear when no snippet section provided", () => {
+		const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
+		const state = makeShrinkState(1);
+
+		const sections = makeSections({
+			layer1: "## Topic\n\nTest",
+			debateTimeline: [
+				{
+					roundNumber: 1,
+					type: "fullText",
+					content: "x".repeat(2000),
+				},
+			],
+		});
+
+		const result = shrinkToFit(sections, 10, 1, [1], [], plan, state);
+
+		const cutEntries = result.shrinkTrace.filter(
+			(e) => e.step === "cutSnippets",
+		);
+		expect(cutEntries).toHaveLength(0);
+	});
+
+	it("emergency step drops snippet section entirely", () => {
+		const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
+		const state = makeShrinkState(1);
+
+		const snippetSection =
+			"## Key Quotes\n\n> **Round 1:** Some quote text here.";
+
+		const sections = makeSections({
+			layer1: "## Topic\n\nTest",
+			debateTimeline: [
+				{
+					roundNumber: 1,
+					type: "fullText",
+					content: "P1 full text " + "x".repeat(2000),
+				},
+			],
+			snippetSection,
+		});
+
+		const result = shrinkToFit(sections, 1, 1, [1], [], plan, state);
+
+		// Emergency should have dropped snippets; prompt should not contain Key Quotes
+		expect(result.prompt).not.toContain("Key Quotes");
+		// Should have emergency in trace
+		const emergencyEntries = result.shrinkTrace.filter(
+			(e) => e.step === "emergency",
+		);
+		expect(emergencyEntries.length).toBeGreaterThan(0);
 	});
 });

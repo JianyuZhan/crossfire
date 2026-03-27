@@ -30,6 +30,7 @@ export interface EvolvingPlan {
 	roundSummaries: string[];
 	degradedRounds: number[];
 	roundAnalyses?: RoundAnalysis[];
+	roundSignals: RoundSignals[];
 }
 
 export interface RoundAnalysis {
@@ -59,6 +60,24 @@ export interface RoundAnalysis {
 	roundSummary: string;
 }
 
+export interface RoundSignals {
+	roundNumber: number;
+	/** Count of newly introduced claims (historical dedup preferred) */
+	newClaimCount: number;
+	/** Round contains explicit concessions from either side (NOT consensus) */
+	hasConcession: boolean;
+	/** consensus[] content changed after this round vs before (shallow set diff) */
+	consensusDelta: boolean;
+	/** risks[] content changed after this round vs before (shallow set diff on risk/severity) */
+	riskDelta: boolean;
+	/** Judge verdict relationship to this round */
+	judgeImpact: {
+		hasVerdict: boolean;
+		weighted: boolean;
+		directionChange: boolean;
+	};
+}
+
 // --- Factory ---
 
 export function emptyPlan(): EvolvingPlan {
@@ -72,6 +91,7 @@ export function emptyPlan(): EvolvingPlan {
 		roundSummaries: [],
 		degradedRounds: [],
 		roundAnalyses: [],
+		roundSignals: [],
 	};
 }
 

@@ -1,4 +1,8 @@
-import type { EvolvingPlan, RoundAnalysis } from "./evolving-plan.js";
+import type {
+	EvolvingPlan,
+	RoundAnalysis,
+	RoundSignals,
+} from "./evolving-plan.js";
 import { emptyPlan } from "./evolving-plan.js";
 import { stripInternalBlocks } from "./strip-internal-blocks.js";
 import type { DebateState } from "./types.js";
@@ -41,11 +45,363 @@ export function normalizeConfig(
 	};
 }
 
-/** Placeholder for Phase 2 scored round data */
+/** Scored round data with Tier-1 signal breakdown */
 export interface ScoredRound {
 	roundNumber: number;
 	score: number;
-	breakdown: Record<string, number>;
+	breakdown: {
+		recency: number;
+		novelty: number;
+		concession: number;
+		consensusDelta: number;
+		riskDelta: number;
+		judgeImpact: number;
+		reference: number;
+	};
+}
+
+/**
+ * Scores rounds for synthesis using Tier-1 signals.
+ *
+ * For each round 1..totalRounds:
+ * - If RoundSignals exists and round is NOT degraded: full formula
+ * - If RoundSignals exists and round IS degraded: zero novelty/concession/consensusDelta/riskDelta/reference, keep recency + judgeImpact
+ * - If RoundSignals is missing: recency only (+ judgeImpact if available)
+ *
+ * referenceScores is an optional additive input (Phase 3), defaults to 0.
+ */
+export function scoreRoundsForSynthesis(
+	totalRounds: number,
+	roundSignals: RoundSignals[],
+	degradedRounds: number[],
+	referenceScores?: Map<number, number>,
+): ScoredRound[] {
+	const signalsMap = new Map<number, RoundSignals>();
+	for (const s of roundSignals) {
+		signalsMap.set(s.roundNumber, s);
+	}
+	const degradedSet = new Set(degradedRounds);
+
+	const scored: ScoredRound[] = [];
+
+	for (let roundNumber = 1; roundNumber <= totalRounds; roundNumber++) {
+		const recency = roundNumber / totalRounds;
+		const signals = signalsMap.get(roundNumber);
+		const isDegraded = degradedSet.has(roundNumber);
+
+		if (signals && !isDegraded) {
+			// Full formula
+			const novelty = Math.min(signals.newClaimCount / 3, 1.0);
+			const concession = signals.hasConcession ? 1.0 : 0;
+			const consensusDelta = signals.consensusDelta ? 0.8 : 0;
+			const riskDelta = signals.riskDelta ? 0.6 : 0;
+			const judgeImpact = signals.judgeImpact.directionChange
+				? 1.0
+				: signals.judgeImpact.weighted
+					? 0.5
+					: signals.judgeImpact.hasVerdict
+						? 0.3
+						: 0;
+			const reference = referenceScores?.get(roundNumber) ?? 0;
+
+			const score =
+				recency +
+				novelty +
+				concession +
+				consensusDelta +
+				riskDelta +
+				judgeImpact +
+				reference;
+
+			scored.push({
+				roundNumber,
+				score,
+				breakdown: {
+					recency,
+					novelty,
+					concession,
+					consensusDelta,
+					riskDelta,
+					judgeImpact,
+					reference,
+				},
+			});
+		} else if (signals && isDegraded) {
+			// Degraded: zero novelty, concession, consensusDelta, riskDelta, reference; keep recency + judgeImpact
+			const judgeImpact = signals.judgeImpact.directionChange
+				? 1.0
+				: signals.judgeImpact.weighted
+					? 0.5
+					: signals.judgeImpact.hasVerdict
+						? 0.3
+						: 0;
+
+			const score = recency + judgeImpact;
+
+			scored.push({
+				roundNumber,
+				score,
+				breakdown: {
+					recency,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact,
+					reference: 0,
+				},
+			});
+		} else {
+			// Missing signals: recency only
+			scored.push({
+				roundNumber,
+				score: recency,
+				breakdown: {
+					recency,
+					novelty: 0,
+					concession: 0,
+					consensusDelta: 0,
+					riskDelta: 0,
+					judgeImpact: 0,
+					reference: 0,
+				},
+			});
+		}
+	}
+
+	// Return sorted by roundNumber ascending
+	scored.sort((a, b) => a.roundNumber - b.roundNumber);
+	return scored;
+}
+
+/**
+ * Selects which rounds get full text vs compressed.
+ *
+ * 1. Always include the most recent recentK rounds
+ * 2. From remaining, promote top impactM by score (tie-break: higher roundNumber)
+ * 3. Everything else is compressed
+ */
+export function selectCriticalRounds(
+	scored: ScoredRound[],
+	totalRounds: number,
+	recentK: number,
+	impactM: number,
+): { fullText: Set<number>; compressed: Set<number> } {
+	const allRounds = scored.map((s) => s.roundNumber);
+	const fullText = new Set<number>();
+
+	// 1. Recent K: last recentK round numbers
+	const sortedByNumber = [...allRounds].sort((a, b) => a - b);
+	const recentStart = Math.max(0, sortedByNumber.length - recentK);
+	for (let i = recentStart; i < sortedByNumber.length; i++) {
+		fullText.add(sortedByNumber[i]);
+	}
+
+	// 2. Top M by score from remaining (tie-break: higher roundNumber)
+	const remaining = scored
+		.filter((s) => !fullText.has(s.roundNumber))
+		.sort((a, b) => {
+			if (b.score !== a.score) return b.score - a.score;
+			return b.roundNumber - a.roundNumber; // higher roundNumber wins tie
+		});
+
+	for (let i = 0; i < Math.min(impactM, remaining.length); i++) {
+		fullText.add(remaining[i].roundNumber);
+	}
+
+	// 3. Everything else compressed
+	const compressed = new Set<number>();
+	for (const r of allRounds) {
+		if (!fullText.has(r)) {
+			compressed.add(r);
+		}
+	}
+
+	return { fullText, compressed };
+}
+
+/**
+ * Computes Tier-2 reference centrality scores for each round.
+ *
+ * Heuristics (spec Section 4.2):
+ * 1. Rebuttal back-references: count how many later rounds' rebuttals[].target
+ *    match this round's keyPoints (substring match, case-insensitive, first 30 chars)
+ * 2. Judge re-mentions: count later judge notes whose reasoning references
+ *    this round's key disputes (substring match)
+ *
+ * Normalizes result to 0..1 range.
+ *
+ * Data sources: state.turns[].meta for rebuttals/keyPoints, plan.judgeNotes for judge.
+ * NOT in PlanAccumulator — computed at synthesis time.
+ */
+export function computeReferenceScores(
+	state: DebateState,
+	plan: EvolvingPlan,
+): Map<number, number> {
+	const rawScores = new Map<number, number>();
+
+	// Collect keyPoints per round (from turns with meta)
+	const roundKeyPoints = new Map<number, string[]>();
+	for (const turn of state.turns) {
+		if (!turn.meta) continue;
+		const existing = roundKeyPoints.get(turn.roundNumber) ?? [];
+		existing.push(...turn.meta.keyPoints);
+		roundKeyPoints.set(turn.roundNumber, existing);
+	}
+
+	if (roundKeyPoints.size === 0) return rawScores;
+
+	// Heuristic 1: Rebuttal back-references
+	// For each round's rebuttals, check if the target matches any earlier round's keyPoints
+	for (const turn of state.turns) {
+		if (!turn.meta?.rebuttals) continue;
+		for (const rebuttal of turn.meta.rebuttals) {
+			const targetNorm = rebuttal.target.toLowerCase().trim().slice(0, 30);
+			if (targetNorm.length === 0) continue;
+
+			// Check all earlier rounds' keyPoints
+			for (const [earlierRound, keyPoints] of roundKeyPoints) {
+				if (earlierRound >= turn.roundNumber) continue;
+				for (const kp of keyPoints) {
+					const kpNorm = kp.toLowerCase().trim().slice(0, 30);
+					if (kpNorm.includes(targetNorm) || targetNorm.includes(kpNorm)) {
+						rawScores.set(earlierRound, (rawScores.get(earlierRound) ?? 0) + 1);
+						break; // Only count once per rebuttal per round
+					}
+				}
+			}
+		}
+	}
+
+	// Heuristic 2: Judge re-mentions
+	// For each judge note, check if reasoning references earlier rounds' key disputes
+	for (const note of plan.judgeNotes) {
+		const reasoningLower = note.reasoning.toLowerCase();
+		if (reasoningLower.length === 0) continue;
+
+		for (const [roundNum, keyPoints] of roundKeyPoints) {
+			if (roundNum >= note.roundNumber) continue;
+			for (const kp of keyPoints) {
+				const kpNorm = kp.toLowerCase().trim().slice(0, 30);
+				if (kpNorm.length > 0 && reasoningLower.includes(kpNorm)) {
+					rawScores.set(roundNum, (rawScores.get(roundNum) ?? 0) + 1);
+					break; // Only count once per judge note per round
+				}
+			}
+		}
+	}
+
+	// Normalize to 0..1
+	if (rawScores.size === 0) return rawScores;
+
+	const maxRaw = Math.max(...rawScores.values());
+	if (maxRaw === 0) return rawScores;
+
+	const normalized = new Map<number, number>();
+	for (const [round, score] of rawScores) {
+		normalized.set(round, score / maxRaw);
+	}
+
+	return normalized;
+}
+
+/**
+ * Builds Layer 4 quote snippets from compressed rounds.
+ *
+ * Selection rules (spec Section 4.3):
+ * - Only consider compressed rounds that have transcript data
+ * - Rank candidates by score descending
+ * - Equal scores: higher roundNumber wins (tie-break)
+ * - Render chosen snippets in ascending roundNumber order
+ * - Respect char budget heuristically
+ * - Deterministic output
+ */
+export function buildQuoteSnippets(
+	cleanTranscript: Map<number, { proposer?: string; challenger?: string }>,
+	compressedRounds: number[],
+	scored: ScoredRound[],
+	budgetChars: number,
+): { text: string; sourceRounds: number[] } {
+	if (compressedRounds.length === 0 || budgetChars <= 0) {
+		return { text: "", sourceRounds: [] };
+	}
+
+	const compressedSet = new Set(compressedRounds);
+
+	// Filter scored rounds to only compressed ones with transcript
+	const candidates = scored
+		.filter(
+			(s) =>
+				compressedSet.has(s.roundNumber) && cleanTranscript.has(s.roundNumber),
+		)
+		.sort((a, b) => {
+			if (b.score !== a.score) return b.score - a.score;
+			return b.roundNumber - a.roundNumber; // tie-break: higher round wins
+		});
+
+	if (candidates.length === 0) {
+		return { text: "", sourceRounds: [] };
+	}
+
+	// Select candidates within budget
+	const selected: Array<{ roundNumber: number; snippet: string }> = [];
+	let usedChars = 0;
+
+	for (const candidate of candidates) {
+		const entry = cleanTranscript.get(candidate.roundNumber);
+		if (!entry) continue;
+
+		// Extract a 1-2 sentence excerpt (best-effort)
+		const snippet = extractSnippet(entry);
+		if (snippet.length === 0) continue;
+
+		// Header overhead: "> **Round N:** " + snippet + "\n\n"
+		const headerOverhead = `> **Round ${candidate.roundNumber}:** `.length;
+		const entryChars = headerOverhead + snippet.length + 2; // +2 for newlines
+
+		if (usedChars + entryChars > budgetChars) break;
+
+		selected.push({ roundNumber: candidate.roundNumber, snippet });
+		usedChars += entryChars;
+	}
+
+	if (selected.length === 0) {
+		return { text: "", sourceRounds: [] };
+	}
+
+	// Render in ascending roundNumber order
+	selected.sort((a, b) => a.roundNumber - b.roundNumber);
+
+	const sourceRounds = selected.map((s) => s.roundNumber);
+	const lines = selected.map(
+		(s) => `> **Round ${s.roundNumber}:** ${s.snippet}`,
+	);
+	const text = `## Key Quotes\n\n${lines.join("\n\n")}`;
+
+	return { text, sourceRounds };
+}
+
+/**
+ * Extracts a best-effort 1-2 sentence snippet from a round's transcript.
+ * Takes the first available side's text, extracts the first 1-2 sentences.
+ */
+function extractSnippet(entry: {
+	proposer?: string;
+	challenger?: string;
+}): string {
+	const text = entry.proposer || entry.challenger || "";
+	if (text.length === 0) return "";
+
+	// Extract first 1-2 sentences
+	const sentences = text.match(/[^.!?]+[.!?]+/g);
+	if (sentences && sentences.length > 0) {
+		const excerpt = sentences.slice(0, 2).join("").trim();
+		// Cap at 200 chars
+		return excerpt.length > 200 ? excerpt.slice(0, 197) + "..." : excerpt;
+	}
+
+	// No sentence boundaries found — use first 200 chars
+	return text.length > 200 ? text.slice(0, 197) + "..." : text.trim();
 }
 
 /** Debug metadata returned alongside the adaptive synthesis prompt */
@@ -181,6 +537,7 @@ export function buildLayer1(plan: EvolvingPlan, topic: string): string {
 
 	// Compressed judge notes
 	if (plan.judgeNotes.length > 0) {
+		const signals = plan.roundSignals ?? [];
 		const lines: string[] = [];
 		for (let i = 0; i < plan.judgeNotes.length; i++) {
 			const note = plan.judgeNotes[i];
@@ -204,9 +561,16 @@ export function buildLayer1(plan: EvolvingPlan, topic: string): string {
 				shiftPart = `, shift: ${sign}${formatted}`;
 			}
 
+			// Direction-change marker from RoundSignals (Phase 2)
+			let directionPart = "";
+			const sig = signals.find((s) => s.roundNumber === note.roundNumber);
+			if (sig?.judgeImpact.directionChange) {
+				directionPart = " ⟳ direction change";
+			}
+
 			const rationale = note.reasoning.replace(/\n/g, " ").trim();
 			lines.push(
-				`- R${note.roundNumber}: leading=${note.leading}${shiftPart} | ${rationale}`,
+				`- R${note.roundNumber}: leading=${note.leading}${shiftPart}${directionPart} | ${rationale}`,
 			);
 		}
 		sections.push(`## Judge Notes\n\n${lines.join("\n")}`);
@@ -815,6 +1179,7 @@ function assembleAdaptiveSynthesisPromptInner(
 	// --- Determine full-text vs compressed per round ---
 	const fullTextRounds: number[] = [];
 	const compressedRounds: number[] = [];
+	let scoredRounds: ScoredRound[] = [];
 
 	if (tier === "short") {
 		// All rounds with transcript get full text; others degrade
@@ -826,18 +1191,48 @@ function assembleAdaptiveSynthesisPromptInner(
 			}
 		}
 	} else {
-		// medium / long: recency-only, last recentK rounds get full text
-		const recentK = norm.recentK;
-		const recentCutoff =
-			allRounds.length >= recentK
-				? allRounds[allRounds.length - recentK]
-				: allRounds[0];
+		// medium / long: use scoring when roundSignals available, fallback to recency-only
+		const signals = plan.roundSignals ?? [];
 
-		for (const r of allRounds) {
-			if (r >= recentCutoff && hasTranscript(r)) {
-				fullTextRounds.push(r);
-			} else {
-				compressedRounds.push(r);
+		if (signals.length > 0) {
+			// Scoring-aware path
+			const scores = scoreRoundsForSynthesis(
+				totalRounds,
+				signals,
+				plan.degradedRounds,
+				input.referenceScores,
+			);
+			const selection = selectCriticalRounds(
+				scores,
+				totalRounds,
+				norm.recentK,
+				norm.impactM,
+			);
+
+			// Populate scored rounds for debug metadata
+			scoredRounds = scores;
+
+			for (const r of allRounds) {
+				if (selection.fullText.has(r) && hasTranscript(r)) {
+					fullTextRounds.push(r);
+				} else {
+					compressedRounds.push(r);
+				}
+			}
+		} else {
+			// Recency-only fallback (Phase 1 behavior)
+			const recentK = norm.recentK;
+			const recentCutoff =
+				allRounds.length >= recentK
+					? allRounds[allRounds.length - recentK]
+					: allRounds[0];
+
+			for (const r of allRounds) {
+				if (r >= recentCutoff && hasTranscript(r)) {
+					fullTextRounds.push(r);
+				} else {
+					compressedRounds.push(r);
+				}
 			}
 		}
 	}
@@ -873,8 +1268,35 @@ function assembleAdaptiveSynthesisPromptInner(
 	}
 
 	// Render rounds in ascending order
-	const fullTextSet = new Set(fullTextRounds);
+	let fullTextSet = new Set(fullTextRounds);
 	const phaseBlockCoveredRounds = new Set<number>();
+
+	// Compute promoted rounds from earliest compressed region for debug metadata
+	const earliestCompressedMax =
+		tier === "long" && compressedRounds.length > 0
+			? (() => {
+					const firstFullText =
+						fullTextRounds.length > 0
+							? fullTextRounds[0]
+							: Number.POSITIVE_INFINITY;
+					const earliest = compressedRounds.filter((r) => r < firstFullText);
+					return earliest.length > 0 ? Math.max(...earliest) : 0;
+				})()
+			: 0;
+	const earliestCompressedMin =
+		tier === "long" && compressedRounds.length > 0
+			? (() => {
+					const firstFullText =
+						fullTextRounds.length > 0
+							? fullTextRounds[0]
+							: Number.POSITIVE_INFINITY;
+					const earliest = compressedRounds.filter((r) => r < firstFullText);
+					return earliest.length > 0 ? Math.min(...earliest) : 0;
+				})()
+			: 0;
+	const promotedFromEarliest = fullTextRounds.filter(
+		(r) => r >= earliestCompressedMin && r <= earliestCompressedMax,
+	);
 
 	if (phaseBlocks && phaseBlocks.length > 0) {
 		// Render phase blocks in order, then remaining compressed/full rounds
@@ -882,9 +1304,20 @@ function assembleAdaptiveSynthesisPromptInner(
 			for (const r of block.coveredRounds) {
 				phaseBlockCoveredRounds.add(r);
 			}
+
+			// Track which rounds were promoted out of this block's window
+			const blockMin = block.coveredRounds[0];
+			const blockMax = block.coveredRounds[block.coveredRounds.length - 1];
+			const excludedPromoted = promotedFromEarliest.filter(
+				(r) => r >= blockMin && r <= blockMax,
+			);
+
 			phaseBlockDebug.push({
 				phaseId: block.phaseId,
 				coveredRounds: block.coveredRounds,
+				...(excludedPromoted.length > 0
+					? { excludedPromotedRounds: excludedPromoted }
+					: {}),
 			});
 			promptParts.push(
 				`## ${block.phaseId} (Rounds ${block.coveredRounds[0]}-${block.coveredRounds[block.coveredRounds.length - 1]})\n\n${block.content}`,
@@ -902,6 +1335,30 @@ function assembleAdaptiveSynthesisPromptInner(
 			promptParts.push(renderFullTextRound(r, entry));
 		} else {
 			promptParts.push(buildCompressedRound(r, plan, state));
+		}
+	}
+
+	// --- Layer 4: Quote snippets (Phase 3) ---
+	let snippetText = "";
+	let quoteSnippetSourceRounds: number[] = [];
+	const currentSnippetBudget = norm.quoteSnippetBudgetChars;
+
+	if (
+		tier !== "short" &&
+		compressedRounds.length > 0 &&
+		scoredRounds.length > 0
+	) {
+		const snippetResult = buildQuoteSnippets(
+			transcript,
+			compressedRounds,
+			scoredRounds,
+			currentSnippetBudget,
+		);
+		snippetText = snippetResult.text;
+		quoteSnippetSourceRounds = snippetResult.sourceRounds;
+
+		if (snippetText.length > 0) {
+			promptParts.push(snippetText);
 		}
 	}
 
@@ -935,6 +1392,7 @@ function assembleAdaptiveSynthesisPromptInner(
 				tier === "medium" || tier === "long"
 					? "Note: Earlier rounds have been compressed to fit the context window. The most recent rounds are shown in full."
 					: "",
+			snippetSection: snippetText.length > 0 ? snippetText : undefined,
 		};
 
 		// Add phase block entries to the timeline
@@ -956,6 +1414,14 @@ function assembleAdaptiveSynthesisPromptInner(
 			compressedRounds,
 			plan,
 			state,
+			// Snippet context for cutSnippets step
+			snippetText.length > 0
+				? {
+						transcript,
+						scored: scoredRounds,
+						initialBudgetChars: currentSnippetBudget,
+					}
+				: undefined,
 		);
 
 		prompt = shrinkResult.prompt;
@@ -967,10 +1433,16 @@ function assembleAdaptiveSynthesisPromptInner(
 		fullTextRounds.push(...shrinkResult.updatedFullTextRounds);
 		compressedRounds.length = 0;
 		compressedRounds.push(...shrinkResult.updatedCompressedRounds);
+		fullTextSet = new Set(fullTextRounds);
+		// Update snippet source rounds from shrink result
+		if (shrinkResult.updatedSnippetSourceRounds) {
+			quoteSnippetSourceRounds = shrinkResult.updatedSnippetSourceRounds;
+		}
 	}
 
 	// --- Build round disposition ---
 	const roundDisposition: SynthesisDebugMetadata["roundDisposition"] = [];
+	const degradedSet = new Set(plan.degradedRounds);
 	for (const r of allRounds) {
 		let disposition:
 			| "fullText"
@@ -979,6 +1451,8 @@ function assembleAdaptiveSynthesisPromptInner(
 			| "degradedSummary";
 		if (fullTextSet.has(r)) {
 			disposition = "fullText";
+		} else if (degradedSet.has(r) && !phaseBlockCoveredRounds.has(r)) {
+			disposition = "degradedSummary";
 		} else if (phaseBlockCoveredRounds.has(r)) {
 			disposition = "phaseBlockCovered";
 		} else if (!hasTranscript(r) && tier === "short") {
@@ -996,15 +1470,16 @@ function assembleAdaptiveSynthesisPromptInner(
 			budgetTier: tier,
 			totalEstimatedTokens,
 			budgetTokens,
-			scores: [],
+			scores: scoredRounds,
 			fullTextRounds,
 			compressedRounds,
 			roundDisposition,
 			fitAchieved,
 			warnings,
 			shrinkTrace,
-			referenceScoreUsed: false,
-			quoteSnippetSourceRounds: [],
+			referenceScoreUsed:
+				(input.referenceScores?.size ?? 0) > 0 && scoredRounds.length > 0,
+			quoteSnippetSourceRounds,
 			phaseBlocks: phaseBlockDebug.length > 0 ? phaseBlockDebug : undefined,
 		},
 	};
@@ -1020,6 +1495,7 @@ export interface ShrinkSections {
 		content: string;
 	}>;
 	contextNote: string;
+	snippetSection?: string;
 }
 
 export interface ShrinkResult {
@@ -1028,6 +1504,8 @@ export interface ShrinkResult {
 	fitAchieved: boolean;
 	updatedFullTextRounds: number[];
 	updatedCompressedRounds: number[];
+	updatedSnippetText?: string;
+	updatedSnippetSourceRounds?: number[];
 }
 
 /**
@@ -1044,12 +1522,19 @@ export function shrinkToFit(
 	compressedRounds: number[],
 	plan: EvolvingPlan,
 	state: DebateState,
+	snippetContext?: {
+		transcript: Map<number, { proposer?: string; challenger?: string }>;
+		scored: ScoredRound[];
+		initialBudgetChars: number;
+	},
 ): ShrinkResult {
 	const trace: SynthesisDebugMetadata["shrinkTrace"] = [];
 	let currentLayer1 = sections.layer1;
 	const currentTimeline = sections.debateTimeline.map((e) => ({ ...e }));
 	let currentFullText = [...fullTextRounds];
 	let currentCompressed = [...compressedRounds];
+	let currentSnippetSection = sections.snippetSection ?? "";
+	let currentSnippetSourceRounds: number[] | undefined;
 	// Mutable copy of plan for summary truncation
 	let currentPlan = {
 		...plan,
@@ -1062,6 +1547,7 @@ export function shrinkToFit(
 		for (const entry of currentTimeline) {
 			parts.push(entry.content);
 		}
+		if (currentSnippetSection) parts.push(currentSnippetSection);
 		return parts.join("\n\n");
 	}
 
@@ -1084,8 +1570,50 @@ export function shrinkToFit(
 		};
 	}
 
-	// --- Step 1: cutSnippets (no-op in Phase 1) ---
-	// Layer 4 is not emitted in Phase 1, so this is structurally present but skipped.
+	// --- Step 1: cutSnippets ---
+	// Halve snippet budget and rebuild Layer 4 until fit or budget exhausted
+	if (currentSnippetSection.length > 0 && snippetContext) {
+		let snippetBudget = snippetContext.initialBudgetChars;
+		const maxCuts = 3;
+		for (let cut = 0; cut < maxCuts && !fits(); cut++) {
+			const before = currentTokens();
+			snippetBudget = Math.floor(snippetBudget / 2);
+
+			if (snippetBudget <= 0) {
+				currentSnippetSection = "";
+				currentSnippetSourceRounds = [];
+				const after = currentTokens();
+				if (after < before) {
+					trace.push({
+						step: "cutSnippets",
+						beforeTokens: before,
+						afterTokens: after,
+						detail: "budget exhausted, removed all snippets",
+					});
+				}
+				break;
+			}
+
+			const newSnippets = buildQuoteSnippets(
+				snippetContext.transcript,
+				currentCompressed,
+				snippetContext.scored,
+				snippetBudget,
+			);
+			currentSnippetSection = newSnippets.text;
+			currentSnippetSourceRounds = newSnippets.sourceRounds;
+
+			const after = currentTokens();
+			if (after < before) {
+				trace.push({
+					step: "cutSnippets",
+					beforeTokens: before,
+					afterTokens: after,
+					detail: `budget halved to ${snippetBudget}`,
+				});
+			}
+		}
+	}
 
 	if (fits()) {
 		return buildResult();
@@ -1256,10 +1784,17 @@ export function shrinkToFit(
 	if (fits()) return buildResult();
 
 	// --- Step 5: emergency ---
-	// Drop Layer 4 entirely (no-op in Phase 1) and truncate Layer 2 blocks to 2 lines each.
+	// Drop Layer 4 entirely and truncate Layer 2 blocks to 2 lines each.
 	{
 		const before = currentTokens();
 		let changed = false;
+
+		// Drop any remaining snippet section
+		if (currentSnippetSection.length > 0) {
+			currentSnippetSection = "";
+			currentSnippetSourceRounds = [];
+			changed = true;
+		}
 
 		for (let i = 0; i < currentTimeline.length; i++) {
 			const entry = currentTimeline[i];
@@ -1334,6 +1869,8 @@ export function shrinkToFit(
 			fitAchieved: fits(),
 			updatedFullTextRounds: currentFullText,
 			updatedCompressedRounds: currentCompressed,
+			updatedSnippetText: currentSnippetSection || undefined,
+			updatedSnippetSourceRounds: currentSnippetSourceRounds,
 		};
 	}
 }

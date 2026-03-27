@@ -7,6 +7,7 @@ import {
 export interface BusBundle {
 	bus: DebateEventBus;
 	eventStore?: EventStore;
+	transcriptWriter?: TranscriptWriter;
 	close(): Promise<void>;
 }
 
@@ -33,6 +34,7 @@ export function createBus(options: {
 	return {
 		bus,
 		eventStore,
+		transcriptWriter,
 		async close() {
 			if (eventStore) await eventStore.close();
 			if (transcriptWriter) await transcriptWriter.close();

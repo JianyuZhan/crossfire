@@ -319,6 +319,7 @@ export const startCommand = new Command("start")
 					bus: busBundle.bus,
 					debateId,
 					outputDir,
+					transcriptWriter: busBundle.transcriptWriter,
 				});
 
 				if (inkInstance) {
