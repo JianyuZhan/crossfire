@@ -570,6 +570,7 @@ export async function runDebate(
 		let synthesisDebug: SynthesisAuditSummary | undefined;
 		let fullDebugMetadata: SynthesisDebugMetadata | undefined;
 		let synthRunResult: SynthesisRunResult | undefined;
+		let submittedSynthesisPromptCharLength = 0;
 		const synthesisStartTime = Date.now();
 
 		if (options?.outputDir) {
@@ -607,7 +608,7 @@ export async function runDebate(
 							budgetTier: result.debug.budgetTier,
 							totalEstimatedTokens: result.debug.totalEstimatedTokens,
 							budgetTokens: result.debug.budgetTokens,
-							promptCharLength: result.prompt.length,
+							promptCharLength: 0,
 							fullTextRounds: result.debug.fullTextRounds,
 							compressedRounds: result.debug.compressedRounds,
 							shrinkTrace: result.debug.shrinkTrace,
@@ -619,6 +620,8 @@ export async function runDebate(
 							buildInstructions(result.debug.budgetTier) +
 							"\n\n" +
 							result.prompt;
+						submittedSynthesisPromptCharLength = prompt.length;
+						synthesisDebug.promptCharLength = submittedSynthesisPromptCharLength;
 						synthRunResult = await runFinalSynthesis(
 							synthesisAdapter,
 							prompt,
@@ -703,9 +706,7 @@ export async function runDebate(
 					const debugArtifact = {
 						synthesisPath: synthesisQuality,
 						durationMs: Date.now() - synthesisStartTime,
-						promptCharLength: fullDebugMetadata
-							? fullDebugMetadata.totalEstimatedTokens
-							: 0,
+						promptCharLength: submittedSynthesisPromptCharLength,
 						...(fullDebugMetadata ?? {}),
 						llmResult: synthRunResult
 							? {
@@ -720,8 +721,13 @@ export async function runDebate(
 						join(options.outputDir, "synthesis-debug.json"),
 						JSON.stringify(debugArtifact, null, 2) + "\n",
 					);
-				} catch {
-					// Debug file write failure is truly non-fatal
+				} catch (err) {
+					bus.push({
+						kind: "synthesis.error",
+						phase: "file-write",
+						message: `Failed to write synthesis-debug.json: ${err instanceof Error ? err.message : String(err)}`,
+						timestamp: Date.now(),
+					});
 				}
 			} catch (err) {
 				bus.push({
