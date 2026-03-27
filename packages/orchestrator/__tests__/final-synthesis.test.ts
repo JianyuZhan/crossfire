@@ -61,7 +61,7 @@ describe("runFinalSynthesis", () => {
 			"test prompt",
 			10_000,
 		);
-		expect(result).toContain("Executive Summary");
+		expect(result.markdown).toContain("Executive Summary");
 		expect(mockAdapter.close).toHaveBeenCalled();
 	});
 
@@ -74,7 +74,7 @@ describe("runFinalSynthesis", () => {
 			"test prompt",
 			100,
 		);
-		expect(result).toBeUndefined();
+		expect(result.markdown).toBeUndefined();
 		expect(mockAdapter.close).toHaveBeenCalled();
 	});
 
@@ -105,7 +105,7 @@ describe("runFinalSynthesis", () => {
 			"test prompt",
 			10_000,
 		);
-		expect(result).toContain("Report from deltas");
+		expect(result.markdown).toContain("Report from deltas");
 	});
 
 	it("keeps the longest message.final when multiple are emitted", async () => {
@@ -157,6 +157,61 @@ describe("runFinalSynthesis", () => {
 			"test prompt",
 			10_000,
 		);
-		expect(result).toBe(longText);
+		expect(result.markdown).toBe(longText);
+	});
+
+	describe("runFinalSynthesis structured result", () => {
+		it("returns structured result with markdown and durationMs on success", async () => {
+			const mockAdapter = createMockAdapter([
+				{
+					kind: "message.final",
+					turnId: "synthesis-final",
+					adapterSessionId: adapterSessionId,
+					text: "# Final Report",
+					timestamp: Date.now(),
+				},
+				{
+					kind: "turn.completed",
+					turnId: "synthesis-final",
+					adapterSessionId: adapterSessionId,
+					timestamp: Date.now(),
+				},
+			]);
+
+			const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+			const result = await runFinalSynthesis(
+				mockAdapter as any,
+				"prompt",
+				5000,
+			);
+			expect(result.markdown).toBe("# Final Report");
+			expect(result.durationMs).toBeGreaterThanOrEqual(0);
+			expect(result.error).toBeUndefined();
+			expect(result.rawDeltaLength).toBeGreaterThanOrEqual(0);
+		});
+
+		it("returns error info on timeout without throwing", async () => {
+			const mockAdapter = createMockAdapter([]); // never completes
+			const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+			const result = await runFinalSynthesis(mockAdapter as any, "prompt", 50);
+			expect(result.markdown).toBeUndefined();
+			expect(result.error).toBe("synthesis timeout");
+			expect(result.durationMs).toBeGreaterThanOrEqual(50);
+		});
+
+		it("returns error info on adapter failure", async () => {
+			const mockAdapter = createMockAdapter([]);
+			mockAdapter.startSession = vi
+				.fn()
+				.mockRejectedValue(new Error("connection refused"));
+			const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+			const result = await runFinalSynthesis(
+				mockAdapter as any,
+				"prompt",
+				5000,
+			);
+			expect(result.markdown).toBeUndefined();
+			expect(result.error).toBe("connection refused");
+		});
 	});
 });

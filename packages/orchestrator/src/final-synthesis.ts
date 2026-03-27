@@ -4,6 +4,13 @@ import type {
 	SessionHandle,
 } from "@crossfire/adapter-core";
 
+export interface SynthesisRunResult {
+	markdown: string | undefined;
+	durationMs: number;
+	rawDeltaLength: number;
+	error?: string;
+}
+
 /**
  * Run final synthesis in a new isolated adapter session.
  * Creates session, subscribes directly to adapter events (not via bus to avoid
@@ -15,7 +22,8 @@ export async function runFinalSynthesis(
 	adapter: AgentAdapter,
 	prompt: string,
 	timeoutMs: number,
-): Promise<string | undefined> {
+): Promise<SynthesisRunResult> {
+	const startTime = Date.now();
 	let session: SessionHandle | undefined;
 	let eventUnsub: (() => void) | undefined;
 
@@ -74,9 +82,19 @@ export async function runFinalSynthesis(
 			if (timeoutId) clearTimeout(timeoutId);
 		}
 
-		return longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined);
-	} catch {
-		return undefined;
+		return {
+			markdown:
+				longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined),
+			durationMs: Date.now() - startTime,
+			rawDeltaLength: deltaBuffer.length,
+		};
+	} catch (err) {
+		return {
+			markdown: undefined,
+			durationMs: Date.now() - startTime,
+			rawDeltaLength: 0,
+			error: err instanceof Error ? err.message : String(err),
+		};
 	} finally {
 		if (eventUnsub) eventUnsub();
 		if (session) {
