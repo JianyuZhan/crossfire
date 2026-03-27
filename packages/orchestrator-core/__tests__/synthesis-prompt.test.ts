@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { EvolvingPlan } from "../src/evolving-plan.js";
+import type { EvolvingPlan, RoundAnalysis } from "../src/evolving-plan.js";
 import { emptyPlan } from "../src/evolving-plan.js";
 import {
 	type SynthesisPromptConfig,
+	buildCompressedRound,
 	buildFullTextSynthesisPrompt,
 	buildLayer1,
 	detectCjkMajority,
 	estimateTokens,
 	normalizeConfig,
 } from "../src/synthesis-prompt.js";
-import type { DebateState, DebateTurn } from "../src/types.js";
+import type { DebateMeta, DebateState, DebateTurn } from "../src/types.js";
 
 describe("estimateTokens", () => {
 	it("returns 0 for empty string", () => {
@@ -576,5 +577,299 @@ describe("buildLayer1", () => {
 		expect(risksIdx).toBeLessThan(evidenceIdx);
 		expect(evidenceIdx).toBeLessThan(judgeIdx);
 		expect(judgeIdx).toBeLessThan(summariesIdx);
+	});
+});
+
+describe("buildCompressedRound", () => {
+	function makeState(turns: DebateTurn[]): DebateState {
+		return {
+			config: {
+				topic: "Test Topic",
+				maxRounds: 5,
+				judgeEveryNRounds: 2,
+				convergenceThreshold: 0.7,
+			},
+			phase: "completed",
+			currentRound:
+				turns.length > 0 ? Math.max(...turns.map((t) => t.roundNumber)) : 0,
+			turns,
+			convergence: {
+				converged: false,
+				stanceDelta: 0,
+				mutualConcessions: 0,
+				bothWantToConclude: false,
+			},
+		};
+	}
+
+	function makePlan(overrides: Partial<EvolvingPlan> = {}): EvolvingPlan {
+		return { ...emptyPlan(), ...overrides };
+	}
+
+	const richAnalysis: RoundAnalysis = {
+		roundNumber: 2,
+		newArguments: [
+			{
+				side: "proposer",
+				argument: "Microservices improve scalability",
+				strength: "strong",
+			},
+			{
+				side: "challenger",
+				argument: "Monolith is simpler to deploy",
+				strength: "moderate",
+			},
+		],
+		challengedArguments: [
+			{
+				argument: "Monolith scales fine",
+				challengedBy: "proposer",
+				outcome: "weakened",
+			},
+		],
+		risksIdentified: [
+			{
+				risk: "Network latency between services",
+				severity: "high",
+				raisedBy: "proposer",
+			},
+		],
+		evidenceCited: [
+			{
+				claim: "Netflix migrated successfully",
+				source: "Netflix tech blog",
+				side: "proposer",
+			},
+		],
+		newConsensus: ["API gateway is needed"],
+		newDivergence: ["Database strategy remains contested"],
+		roundSummary:
+			"Proposer pushed scalability; challenger defended simplicity.",
+	};
+
+	it("renders rich compressed output from RoundAnalysis", () => {
+		const turns: DebateTurn[] = [
+			{
+				roundNumber: 2,
+				role: "proposer",
+				content: "Proposer content R2",
+				meta: {
+					stance: "agree",
+					confidence: 0.8,
+					keyPoints: ["scalability"],
+				},
+			},
+			{
+				roundNumber: 2,
+				role: "challenger",
+				content: "Challenger content R2",
+				meta: {
+					stance: "disagree",
+					confidence: 0.7,
+					keyPoints: ["simplicity"],
+				},
+			},
+		];
+		const state = makeState(turns);
+		const plan = makePlan({ roundAnalyses: [richAnalysis] });
+
+		const result = buildCompressedRound(2, plan, state);
+
+		// Should contain round header
+		expect(result).toContain("Round 2");
+		// New claims
+		expect(result).toContain("Microservices improve scalability");
+		expect(result).toContain("Monolith is simpler to deploy");
+		expect(result).toContain("strong");
+		expect(result).toContain("moderate");
+		// Challenged arguments
+		expect(result).toContain("Monolith scales fine");
+		expect(result).toContain("weakened");
+		// Consensus
+		expect(result).toContain("API gateway is needed");
+		// Divergence
+		expect(result).toContain("Database strategy remains contested");
+		// Risks
+		expect(result).toContain("Network latency between services");
+		expect(result).toContain("high");
+		// Evidence
+		expect(result).toContain("Netflix migrated successfully");
+		expect(result).toContain("Netflix tech blog");
+		// Round summary
+		expect(result).toContain(
+			"Proposer pushed scalability; challenger defended simplicity.",
+		);
+		// Stance/confidence from meta
+		expect(result).toContain("agree");
+		expect(result).toContain("0.8");
+		expect(result).toContain("disagree");
+		expect(result).toContain("0.7");
+	});
+
+	it("falls back to roundSummaries when RoundAnalysis is missing", () => {
+		const turns: DebateTurn[] = [
+			{ roundNumber: 1, role: "proposer", content: "Proposer content R1" },
+			{ roundNumber: 1, role: "challenger", content: "Challenger content R1" },
+		];
+		const state = makeState(turns);
+		const plan = makePlan({
+			roundSummaries: ["Round 1 opening positions established"],
+			roundAnalyses: [], // no analysis for round 1
+		});
+
+		const result = buildCompressedRound(1, plan, state);
+
+		expect(result).toContain("Round 1");
+		expect(result).toContain("Round 1 opening positions established");
+		// Should NOT have rich sections
+		expect(result).not.toContain("New Claims");
+		expect(result).not.toContain("Challenged");
+	});
+
+	it("falls back to stripped transcript when RoundAnalysis and roundSummary are both missing", () => {
+		const turns: DebateTurn[] = [
+			{
+				roundNumber: 3,
+				role: "proposer",
+				content:
+					'Here is my argument.\n```debate_meta\n{"stance":"agree"}\n```',
+			},
+			{
+				roundNumber: 3,
+				role: "challenger",
+				content: "Here is my rebuttal.",
+			},
+		];
+		const state = makeState(turns);
+		const plan = makePlan({
+			roundSummaries: [], // no summary for round 3
+			roundAnalyses: [],
+		});
+
+		const result = buildCompressedRound(3, plan, state);
+
+		expect(result).toContain("Round 3");
+		expect(result).toContain("Here is my argument.");
+		expect(result).toContain("Here is my rebuttal.");
+		// Must NOT contain meta-tool blocks
+		expect(result).not.toContain("debate_meta");
+		expect(result).not.toContain("judge_verdict");
+	});
+
+	it("renders degraded round with summary, no rich data", () => {
+		const turns: DebateTurn[] = [
+			{
+				roundNumber: 2,
+				role: "proposer",
+				content: "Proposer content R2",
+				meta: {
+					stance: "agree",
+					confidence: 0.8,
+					keyPoints: ["scalability"],
+				},
+			},
+			{
+				roundNumber: 2,
+				role: "challenger",
+				content: "Challenger content R2",
+				meta: {
+					stance: "disagree",
+					confidence: 0.7,
+					keyPoints: ["simplicity"],
+				},
+			},
+		];
+		const state = makeState(turns);
+		const plan = makePlan({
+			degradedRounds: [2],
+			roundAnalyses: [richAnalysis], // has analysis but round is degraded
+		});
+
+		const result = buildCompressedRound(2, plan, state);
+
+		expect(result).toContain("Round 2");
+		// Should use roundSummary from analysis
+		expect(result).toContain(
+			"Proposer pushed scalability; challenger defended simplicity.",
+		);
+		// Must NOT contain rich sections
+		expect(result).not.toContain("New Claims");
+		expect(result).not.toContain("Challenged");
+		expect(result).not.toContain("Consensus");
+		expect(result).not.toContain("Risks");
+		expect(result).not.toContain("Evidence");
+	});
+
+	it("renders degraded round with transcript fallback when no summary exists", () => {
+		const turns: DebateTurn[] = [
+			{
+				roundNumber: 4,
+				role: "proposer",
+				content: 'My proposer point.\n```debate_meta\n{"stance":"agree"}\n```',
+			},
+			{
+				roundNumber: 4,
+				role: "challenger",
+				content:
+					'My challenger rebuttal.\n```judge_verdict\n{"leading":"tie"}\n```',
+			},
+		];
+		const state = makeState(turns);
+		const plan = makePlan({
+			degradedRounds: [4],
+			roundAnalyses: [], // no analysis at all
+		});
+
+		const result = buildCompressedRound(4, plan, state);
+
+		expect(result).toContain("Round 4");
+		expect(result).toContain("My proposer point.");
+		expect(result).toContain("My challenger rebuttal.");
+		// Internal blocks must be stripped
+		expect(result).not.toContain("debate_meta");
+		expect(result).not.toContain("judge_verdict");
+	});
+
+	it("handles partial transcript with only one side available", () => {
+		const turns: DebateTurn[] = [
+			{
+				roundNumber: 5,
+				role: "proposer",
+				content: "Only the proposer spoke this round.",
+			},
+			// No challenger turn
+		];
+		const state = makeState(turns);
+		const plan = makePlan({
+			roundAnalyses: [], // no analysis
+			roundSummaries: [], // no summary
+		});
+
+		const result = buildCompressedRound(5, plan, state);
+
+		expect(result).toContain("Round 5");
+		expect(result).toContain("Only the proposer spoke this round.");
+		// Should not crash or show undefined
+		expect(result).not.toContain("undefined");
+	});
+
+	it("looks up RoundAnalysis by roundNumber, not array index", () => {
+		// Put analysis for round 3 at array index 0
+		const analysisR3: RoundAnalysis = {
+			...richAnalysis,
+			roundNumber: 3,
+			roundSummary: "Round 3 specific summary",
+		};
+		const turns: DebateTurn[] = [
+			{ roundNumber: 3, role: "proposer", content: "P3" },
+			{ roundNumber: 3, role: "challenger", content: "C3" },
+		];
+		const state = makeState(turns);
+		const plan = makePlan({ roundAnalyses: [analysisR3] });
+
+		const result = buildCompressedRound(3, plan, state);
+
+		expect(result).toContain("Round 3 specific summary");
+		expect(result).toContain("Microservices improve scalability");
 	});
 });

@@ -1,4 +1,5 @@
-import type { EvolvingPlan } from "./evolving-plan.js";
+import type { EvolvingPlan, RoundAnalysis } from "./evolving-plan.js";
+import { stripInternalBlocks } from "./strip-internal-blocks.js";
 import type { DebateState } from "./types.js";
 
 export interface SynthesisPromptConfig {
@@ -473,4 +474,149 @@ function buildTruncatedPrompt(
 	}
 
 	return fixedContent;
+}
+
+/**
+ * Builds a compressed representation of a single debate round for Layer 2.
+ *
+ * Rendering strategy:
+ * 1. If round is degraded (in plan.degradedRounds): use roundSummary from
+ *    RoundAnalysis if available, otherwise stripped transcript excerpt. No rich data.
+ * 2. If RoundAnalysis exists and round is not degraded: rich rendering with
+ *    new claims, challenged arguments, consensus, divergence, risks, evidence,
+ *    summary, and stance/confidence from state.turns[].meta.
+ * 3. If no RoundAnalysis exists: fall back to plan.roundSummaries[roundNumber-1],
+ *    or stripped transcript excerpt if that is also missing.
+ */
+export function buildCompressedRound(
+	roundNumber: number,
+	plan: EvolvingPlan,
+	state: DebateState,
+): string {
+	const isDegraded = plan.degradedRounds.includes(roundNumber);
+	const analysis = (plan.roundAnalyses ?? []).find(
+		(a) => a.roundNumber === roundNumber,
+	);
+	const roundTurns = state.turns.filter((t) => t.roundNumber === roundNumber);
+
+	const sections: string[] = [];
+	sections.push(`### Round ${roundNumber}`);
+
+	if (isDegraded) {
+		// Degraded: summary only, no rich data
+		const summary = analysis?.roundSummary;
+		if (summary) {
+			sections.push(summary);
+		} else {
+			sections.push(buildTranscriptExcerpt(roundTurns));
+		}
+		return sections.join("\n\n");
+	}
+
+	if (analysis) {
+		// Rich rendering from RoundAnalysis
+		sections.push(buildRichContent(analysis, roundTurns));
+		return sections.join("\n\n");
+	}
+
+	// Fallback: roundSummaries or transcript
+	const summaryText = plan.roundSummaries[roundNumber - 1];
+	if (summaryText && summaryText.length > 0) {
+		sections.push(summaryText);
+	} else {
+		sections.push(buildTranscriptExcerpt(roundTurns));
+	}
+
+	return sections.join("\n\n");
+}
+
+/** Renders rich compressed content from a RoundAnalysis and turn metadata. */
+function buildRichContent(
+	analysis: RoundAnalysis,
+	roundTurns: DebateState["turns"],
+): string {
+	const parts: string[] = [];
+
+	// New claims
+	if (analysis.newArguments.length > 0) {
+		const items = analysis.newArguments
+			.map((a) => `- [${a.side}] (${a.strength}) ${a.argument}`)
+			.join("\n");
+		parts.push(`**New Claims:**\n${items}`);
+	}
+
+	// Challenged arguments
+	if (analysis.challengedArguments.length > 0) {
+		const items = analysis.challengedArguments
+			.map(
+				(a) =>
+					`- ${a.argument} — challenged by ${a.challengedBy}, outcome: ${a.outcome}`,
+			)
+			.join("\n");
+		parts.push(`**Challenged Arguments:**\n${items}`);
+	}
+
+	// Consensus
+	if (analysis.newConsensus.length > 0) {
+		const items = analysis.newConsensus.map((c) => `- ${c}`).join("\n");
+		parts.push(`**New Consensus:**\n${items}`);
+	}
+
+	// Divergence
+	if (analysis.newDivergence.length > 0) {
+		const items = analysis.newDivergence.map((d) => `- ${d}`).join("\n");
+		parts.push(`**New Divergence:**\n${items}`);
+	}
+
+	// Risks
+	if (analysis.risksIdentified.length > 0) {
+		const items = analysis.risksIdentified
+			.map((r) => `- [${r.severity}] ${r.risk} (raised by ${r.raisedBy})`)
+			.join("\n");
+		parts.push(`**Risks:**\n${items}`);
+	}
+
+	// Evidence
+	if (analysis.evidenceCited.length > 0) {
+		const items = analysis.evidenceCited
+			.map((e) => `- ${e.claim} (source: ${e.source}, side: ${e.side})`)
+			.join("\n");
+		parts.push(`**Evidence:**\n${items}`);
+	}
+
+	// Round summary
+	if (analysis.roundSummary) {
+		parts.push(`**Summary:** ${analysis.roundSummary}`);
+	}
+
+	// Stance/confidence from turn metadata
+	const stanceLines: string[] = [];
+	for (const turn of roundTurns) {
+		if (turn.meta) {
+			const role = turn.role === "proposer" ? "Proposer" : "Challenger";
+			stanceLines.push(
+				`- ${role}: stance=${turn.meta.stance}, confidence=${turn.meta.confidence}`,
+			);
+		}
+	}
+	if (stanceLines.length > 0) {
+		parts.push(`**Stance/Confidence:**\n${stanceLines.join("\n")}`);
+	}
+
+	return parts.join("\n\n");
+}
+
+/** Builds a stripped transcript excerpt from turns, removing internal blocks. */
+function buildTranscriptExcerpt(roundTurns: DebateState["turns"]): string {
+	if (roundTurns.length === 0) {
+		return "*No transcript available.*";
+	}
+
+	const parts: string[] = [];
+	for (const turn of roundTurns) {
+		const role = turn.role === "proposer" ? "Proposer" : "Challenger";
+		const cleaned = stripInternalBlocks(turn.content);
+		parts.push(`**${role}:** ${cleaned}`);
+	}
+	return parts.join("\n\n");
 }
