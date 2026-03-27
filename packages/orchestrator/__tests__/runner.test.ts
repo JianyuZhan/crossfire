@@ -1188,3 +1188,223 @@ describe("recoveryContext wiring", () => {
 		);
 	});
 });
+
+describe("synthesis audit logging", () => {
+	it("synthesis.completed includes debug metadata when outputDir is set", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "crossfire-audit-"));
+		try {
+			const { DebateEventBus } = await import("../src/event-bus.js");
+			const bus = new DebateEventBus();
+			const collected: AnyEvent[] = [];
+			bus.subscribe((e) => collected.push(e));
+
+			const smallConfig: DebateConfig = { ...config, maxRounds: 1 };
+			const proposer = createScriptedAdapter("claude", {
+				"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["A"],
+				}),
+			});
+			const challenger = createScriptedAdapter("codex", {
+				"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+					stance: "disagree",
+					confidence: 0.7,
+					key_points: ["B"],
+				}),
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			};
+
+			await runDebate(smallConfig, adapters, { bus, outputDir: tmpDir });
+
+			const completedEvent = collected.find(
+				(e) => e.kind === "synthesis.completed",
+			);
+			expect(completedEvent).toBeDefined();
+			const debug = (completedEvent as any).debug;
+			expect(debug).toBeDefined();
+			expect(debug.budgetTier).toBeDefined();
+			expect(typeof debug.totalEstimatedTokens).toBe("number");
+			expect(typeof debug.budgetTokens).toBe("number");
+			expect(typeof debug.promptCharLength).toBe("number");
+			expect(Array.isArray(debug.fullTextRounds)).toBe(true);
+			expect(Array.isArray(debug.compressedRounds)).toBe(true);
+			expect(typeof debug.fitAchieved).toBe("boolean");
+			expect(typeof debug.durationMs).toBe("number");
+			expect(debug.durationMs).toBeGreaterThanOrEqual(0);
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
+	it("synthesis.completed has no debug when outputDir is not set", async () => {
+		const { DebateEventBus } = await import("../src/event-bus.js");
+		const bus = new DebateEventBus();
+		const collected: AnyEvent[] = [];
+		bus.subscribe((e) => collected.push(e));
+
+		const smallConfig: DebateConfig = { ...config, maxRounds: 1 };
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+				stance: "agree",
+				confidence: 0.7,
+				key_points: ["A"],
+			}),
+		});
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+				stance: "disagree",
+				confidence: 0.7,
+				key_points: ["B"],
+			}),
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		await runDebate(smallConfig, adapters, { bus });
+
+		const completedEvent = collected.find(
+			(e) => e.kind === "synthesis.completed",
+		);
+		expect(completedEvent).toBeDefined();
+		expect((completedEvent as any).debug).toBeUndefined();
+	});
+
+	it("emits synthesis.error with phase 'file-write' when outputDir write fails", async () => {
+		const { DebateEventBus } = await import("../src/event-bus.js");
+		const bus = new DebateEventBus();
+		const collected: AnyEvent[] = [];
+		bus.subscribe((e) => collected.push(e));
+
+		const smallConfig: DebateConfig = { ...config, maxRounds: 1 };
+		const proposer = createScriptedAdapter("claude", {
+			"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+				stance: "agree",
+				confidence: 0.7,
+				key_points: ["A"],
+			}),
+		});
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+				stance: "disagree",
+				confidence: 0.7,
+				key_points: ["B"],
+			}),
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer,
+				session: await proposer.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		// Use a non-existent nested directory to trigger file-write error
+		const badDir = "/nonexistent/path/that/will/fail";
+		const result = await runDebate(smallConfig, adapters, {
+			bus,
+			outputDir: badDir,
+		});
+
+		// Debate should still complete despite write failure
+		expect(result.phase).toBe("completed");
+
+		const errorEvents = collected.filter((e) => e.kind === "synthesis.error");
+		expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+		const fileWriteError = errorEvents.find(
+			(e) => (e as any).phase === "file-write",
+		);
+		expect(fileWriteError).toBeDefined();
+		expect((fileWriteError as any).message).toBeTruthy();
+	});
+
+	it("writes synthesis-debug.json to outputDir", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "crossfire-test-"));
+		try {
+			const smallConfig: DebateConfig = { ...config, maxRounds: 1 };
+			const proposer = createScriptedAdapter("claude", {
+				"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["A"],
+				}),
+			});
+			const challenger = createScriptedAdapter("codex", {
+				"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+					stance: "disagree",
+					confidence: 0.7,
+					key_points: ["B"],
+				}),
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			};
+
+			await runDebate(smallConfig, adapters, { outputDir: tmpDir });
+
+			const debugPath = join(tmpDir, "synthesis-debug.json");
+			expect(existsSync(debugPath)).toBe(true);
+			const debug = JSON.parse(readFileSync(debugPath, "utf-8"));
+			expect(debug).toHaveProperty("synthesisPath");
+			expect(debug).toHaveProperty("durationMs");
+			expect(typeof debug.durationMs).toBe("number");
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+});

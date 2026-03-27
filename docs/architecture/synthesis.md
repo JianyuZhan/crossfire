@@ -2,7 +2,7 @@
 
 > Final report generation and adaptive prompt assembly.
 
-Back to the entry page: [docs/architecture.md](../architecture.md)
+Back to the overview: [overview.md](./overview.md)
 
 See also:
 
@@ -15,6 +15,7 @@ The action plan is the primary output of a debate. The synthesis system generate
 
 - `action-plan.md`
 - `action-plan.html`
+- `synthesis-debug.json` (full-fidelity debug metadata including prompt assembly details, LLM call results, and quality metrics)
 
 The preferred path is LLM-backed final synthesis in an isolated adapter session. Local fallbacks guarantee output even when synthesis fails.
 
@@ -35,6 +36,7 @@ debate ends
 The runner emits:
 
 - `synthesis.started`
+- `synthesis.error`
 - `synthesis.completed`
 
 ## 4-Layer Adaptive Prompt
@@ -123,7 +125,7 @@ If the assembled prompt is still too large, `shrinkToFit()` applies ordered shri
 2. demote full-text rounds
 3. trim summaries
 4. compact Layer 1
-5. emergency Layer 2 compression
+5. emergency debate-timeline compression
 6. excerpt recent full-text rounds
 
 `shrinkTrace` records only steps that actually reduced estimated size.
@@ -144,9 +146,12 @@ The debug payload includes:
 - round disposition
 - shrink trace
 - quote source rounds
+- warnings
+- `referenceScoreUsed`
 - optional phase-block metadata
 
 `roundDisposition` is intended to describe the final post-shrink state.
+The runner projects this richer metadata down to a lighter `SynthesisAuditSummary` before attaching it to `synthesis.completed.debug`.
 
 ## Quality Tiers
 
@@ -156,7 +161,7 @@ Output quality tiers:
 - `local-structured`
 - `local-degraded`
 
-These tiers are surfaced in `synthesis.completed` and drive warning treatment in rendered output.
+These tiers are surfaced in `synthesis.completed`, but rendering differs by output path: the markdown renderer shows notice treatment for `local-*` results, while the local fallback report renderer maps to its own `draft-filled` / `legacy-fallback` badges.
 
 ## Component Responsibilities
 
@@ -202,6 +207,7 @@ The current runner:
 - uses a `128_000` token budget for prompt assembly
 - prefixes the adaptive prompt with `buildInstructions()`
 - passes `180_000ms` as synthesis timeout
+- emits `synthesis.error` for `judge-final`, `prompt-assembly`, `llm-synthesis`, and `file-write` failures
 - writes markdown and HTML when synthesis succeeds
 - falls back to local report rendering when it does not
-
+- includes `quality` plus optional lightweight debug audit data on `synthesis.completed`

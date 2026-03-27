@@ -26,14 +26,22 @@ import {
 } from "@crossfire/orchestrator-core";
 import {
 	type MarkdownReportMeta,
-	buildFullTextSynthesisPrompt,
+	type SynthesisAuditSummary,
+	type SynthesisDebugMetadata,
+	assembleAdaptiveSynthesisPrompt,
+	buildInstructions,
+	computeReferenceScores,
 	renderMarkdownToHtml,
 } from "@crossfire/orchestrator-core";
 import type { AnyEvent } from "@crossfire/orchestrator-core";
 import { DebateEventBus } from "./event-bus.js";
-import { runFinalSynthesis } from "./final-synthesis.js";
+import {
+	type SynthesisRunResult,
+	runFinalSynthesis,
+} from "./final-synthesis.js";
 import { runJudgeTurn } from "./judge.js";
 import { PlanAccumulator } from "./plan-accumulator.js";
+import type { TranscriptWriter } from "./transcript-writer.js";
 
 export interface AdapterMap {
 	proposer: { adapter: AgentAdapter; session: SessionHandle };
@@ -46,6 +54,7 @@ export interface RunDebateOptions {
 	bus?: DebateEventBus;
 	resumeFromState?: DebateState;
 	debateId?: string;
+	transcriptWriter?: TranscriptWriter;
 }
 
 /**
@@ -533,8 +542,13 @@ export async function runDebate(
 					verdict: finalVerdict,
 					timestamp: Date.now(),
 				});
-			} catch {
-				/* Judge failure is non-fatal */
+			} catch (err) {
+				bus.push({
+					kind: "synthesis.error",
+					phase: "judge-final",
+					message: err instanceof Error ? err.message : String(err),
+					timestamp: Date.now(),
+				});
 			}
 		}
 
@@ -553,6 +567,10 @@ export async function runDebate(
 		);
 		let synthesisQuality: "llm-full" | "local-structured" | "local-degraded" =
 			"local-degraded";
+		let synthesisDebug: SynthesisAuditSummary | undefined;
+		let fullDebugMetadata: SynthesisDebugMetadata | undefined;
+		let synthRunResult: SynthesisRunResult | undefined;
+		const synthesisStartTime = Date.now();
 
 		if (options?.outputDir) {
 			try {
@@ -567,19 +585,65 @@ export async function runDebate(
 					try {
 						const synthesisAdapter =
 							adapters.judge?.adapter ?? adapters.proposer.adapter;
-						const prompt = buildFullTextSynthesisPrompt(
+						const cleanTranscript =
+							options?.transcriptWriter?.getCleanTranscript();
+						const referenceScores = computeReferenceScores(
 							preCompleteState,
-							plan.judgeNotes,
-							{ contextTokenLimit: 128_000 },
-							plan.roundSummaries,
+							plan,
 						);
-						markdownResult = await runFinalSynthesis(
+						const result = assembleAdaptiveSynthesisPrompt({
+							state: preCompleteState,
+							plan,
+							topic: preCompleteState.config.topic,
+							cleanTranscript,
+							config: { contextTokenLimit: 128_000 },
+							referenceScores:
+								referenceScores.size > 0 ? referenceScores : undefined,
+						});
+
+						fullDebugMetadata = result.debug;
+
+						synthesisDebug = {
+							budgetTier: result.debug.budgetTier,
+							totalEstimatedTokens: result.debug.totalEstimatedTokens,
+							budgetTokens: result.debug.budgetTokens,
+							promptCharLength: result.prompt.length,
+							fullTextRounds: result.debug.fullTextRounds,
+							compressedRounds: result.debug.compressedRounds,
+							shrinkTrace: result.debug.shrinkTrace,
+							fitAchieved: result.debug.fitAchieved,
+							durationMs: 0, // updated after LLM call
+						};
+
+						const prompt =
+							buildInstructions(result.debug.budgetTier) +
+							"\n\n" +
+							result.prompt;
+						synthRunResult = await runFinalSynthesis(
 							synthesisAdapter,
 							prompt,
 							180_000,
 						);
-					} catch {
-						/* non-fatal */
+
+						synthesisDebug.durationMs = synthRunResult.durationMs;
+
+						if (synthRunResult.error) {
+							bus.push({
+								kind: "synthesis.error",
+								phase: "llm-synthesis",
+								message: synthRunResult.error,
+								timestamp: Date.now(),
+							});
+						}
+
+						markdownResult = synthRunResult.markdown;
+					} catch (err) {
+						bus.push({
+							kind: "synthesis.error",
+							phase: "prompt-assembly",
+							message: err instanceof Error ? err.message : String(err),
+							timestamp: Date.now(),
+						});
 					}
 				}
 
@@ -633,8 +697,39 @@ export async function runDebate(
 						renderActionPlanMarkdown(report, fallbackMeta),
 					);
 				}
-			} catch {
-				/* non-fatal */
+
+				// Write full-fidelity synthesis debug artifact
+				try {
+					const debugArtifact = {
+						synthesisPath: synthesisQuality,
+						durationMs: Date.now() - synthesisStartTime,
+						promptCharLength: fullDebugMetadata
+							? fullDebugMetadata.totalEstimatedTokens
+							: 0,
+						...(fullDebugMetadata ?? {}),
+						llmResult: synthRunResult
+							? {
+									durationMs: synthRunResult.durationMs,
+									rawDeltaLength: synthRunResult.rawDeltaLength,
+									hadMarkdown: !!synthRunResult.markdown,
+									error: synthRunResult.error,
+								}
+							: undefined,
+					};
+					writeFileSync(
+						join(options.outputDir, "synthesis-debug.json"),
+						JSON.stringify(debugArtifact, null, 2) + "\n",
+					);
+				} catch {
+					// Debug file write failure is truly non-fatal
+				}
+			} catch (err) {
+				bus.push({
+					kind: "synthesis.error",
+					phase: "file-write",
+					message: err instanceof Error ? err.message : String(err),
+					timestamp: Date.now(),
+				});
 			}
 
 			// transcript.html is written by TranscriptWriter.close()
@@ -644,6 +739,9 @@ export async function runDebate(
 			kind: "synthesis.completed",
 			quality: synthesisQuality,
 			timestamp: Date.now(),
+			debug: synthesisDebug
+				? { ...synthesisDebug, durationMs: Date.now() - synthesisStartTime }
+				: undefined,
 		});
 
 		// Push debate.completed LAST
