@@ -1046,9 +1046,69 @@ function assembleAdaptiveSynthesisPromptInner(
 		}
 	}
 
-	const prompt = promptParts.join("\n\n");
-	const totalEstimatedTokens = estimateTokens(prompt);
-	const fitAchieved = totalEstimatedTokens <= budgetTokens;
+	let prompt = promptParts.join("\n\n");
+	let totalEstimatedTokens = estimateTokens(prompt);
+	let fitAchieved = totalEstimatedTokens <= budgetTokens;
+	let shrinkTrace: SynthesisDebugMetadata["shrinkTrace"] = [];
+
+	// --- Shrink if over budget ---
+	if (!fitAchieved) {
+		const shrinkSections: ShrinkSections = {
+			layer1: layer1Text,
+			debateTimeline: allRounds
+				.filter((r) => !phaseBlockCoveredRounds.has(r))
+				.map((r) => {
+					if (fullTextSet.has(r)) {
+						const entry = transcript.get(r)!;
+						return {
+							roundNumber: r,
+							type: "fullText" as const,
+							content: renderFullTextRound(r, entry),
+						};
+					}
+					return {
+						roundNumber: r,
+						type: "compressed" as const,
+						content: buildCompressedRound(r, plan, state),
+					};
+				}),
+			contextNote:
+				tier === "medium" || tier === "long"
+					? "Note: Earlier rounds have been compressed to fit the context window. The most recent rounds are shown in full."
+					: "",
+		};
+
+		// Add phase block entries to the timeline
+		if (phaseBlocks && phaseBlocks.length > 0) {
+			for (const block of phaseBlocks) {
+				shrinkSections.debateTimeline.unshift({
+					roundNumber: block.coveredRounds[0],
+					type: "phaseBlock",
+					content: `## ${block.phaseId} (Rounds ${block.coveredRounds[0]}-${block.coveredRounds[block.coveredRounds.length - 1]})\n\n${block.content}`,
+				});
+			}
+		}
+
+		const shrinkResult = shrinkToFit(
+			shrinkSections,
+			budgetTokens,
+			norm.recentK,
+			fullTextRounds,
+			compressedRounds,
+			plan,
+			state,
+		);
+
+		prompt = shrinkResult.prompt;
+		totalEstimatedTokens = estimateTokens(prompt);
+		fitAchieved = shrinkResult.fitAchieved;
+		shrinkTrace = shrinkResult.shrinkTrace;
+		// Update fullTextRounds/compressedRounds from shrink result
+		fullTextRounds.length = 0;
+		fullTextRounds.push(...shrinkResult.updatedFullTextRounds);
+		compressedRounds.length = 0;
+		compressedRounds.push(...shrinkResult.updatedCompressedRounds);
+	}
 
 	// --- Build round disposition ---
 	const roundDisposition: SynthesisDebugMetadata["roundDisposition"] = [];
@@ -1083,12 +1143,366 @@ function assembleAdaptiveSynthesisPromptInner(
 			roundDisposition,
 			fitAchieved,
 			warnings,
-			shrinkTrace: [],
+			shrinkTrace,
 			referenceScoreUsed: false,
 			quoteSnippetSourceRounds: [],
 			phaseBlocks: phaseBlockDebug.length > 0 ? phaseBlockDebug : undefined,
 		},
 	};
+}
+
+// --- Shrink algorithm (Task 8) ---
+
+export interface ShrinkSections {
+	layer1: string;
+	debateTimeline: Array<{
+		roundNumber: number;
+		type: "fullText" | "compressed" | "phaseBlock";
+		content: string;
+	}>;
+	contextNote: string;
+}
+
+export interface ShrinkResult {
+	prompt: string;
+	shrinkTrace: SynthesisDebugMetadata["shrinkTrace"];
+	fitAchieved: boolean;
+	updatedFullTextRounds: number[];
+	updatedCompressedRounds: number[];
+}
+
+/**
+ * Iteratively shrinks an assembled prompt until it fits within the token budget.
+ *
+ * Steps are applied in strict order; each step is only recorded in shrinkTrace
+ * if it actually reduced the token count. Stops as soon as fit is achieved.
+ */
+export function shrinkToFit(
+	sections: ShrinkSections,
+	budgetTokens: number,
+	recentK: number,
+	fullTextRounds: number[],
+	compressedRounds: number[],
+	plan: EvolvingPlan,
+	state: DebateState,
+): ShrinkResult {
+	const trace: SynthesisDebugMetadata["shrinkTrace"] = [];
+	let currentLayer1 = sections.layer1;
+	const currentTimeline = sections.debateTimeline.map((e) => ({ ...e }));
+	let currentFullText = [...fullTextRounds];
+	let currentCompressed = [...compressedRounds];
+	// Mutable copy of plan for summary truncation
+	let currentPlan = {
+		...plan,
+		roundSummaries: [...plan.roundSummaries],
+	};
+
+	function assemble(): string {
+		const parts: string[] = [currentLayer1];
+		if (sections.contextNote) parts.push(sections.contextNote);
+		for (const entry of currentTimeline) {
+			parts.push(entry.content);
+		}
+		return parts.join("\n\n");
+	}
+
+	function currentTokens(): number {
+		return estimateTokens(assemble());
+	}
+
+	function fits(): boolean {
+		return currentTokens() <= budgetTokens;
+	}
+
+	// Already fits? Return immediately.
+	if (fits()) {
+		return {
+			prompt: assemble(),
+			shrinkTrace: [],
+			fitAchieved: true,
+			updatedFullTextRounds: currentFullText,
+			updatedCompressedRounds: currentCompressed,
+		};
+	}
+
+	// --- Step 1: cutSnippets (no-op in Phase 1) ---
+	// Layer 4 is not emitted in Phase 1, so this is structurally present but skipped.
+
+	if (fits()) {
+		return buildResult();
+	}
+
+	// --- Step 2: demoteFullText ---
+	// Iteratively demote the lowest-numbered full-text round (excluding recentK).
+	let demotionOccurred = true;
+	while (!fits() && demotionOccurred) {
+		demotionOccurred = false;
+		const allSorted = [...currentFullText].sort((a, b) => a - b);
+		// Protected: the last recentK rounds
+		const protectedCutoff =
+			allSorted.length > recentK
+				? allSorted[allSorted.length - recentK]
+				: Number.NEGATIVE_INFINITY;
+
+		const demotable = allSorted.filter((r) => r < protectedCutoff);
+		if (demotable.length === 0) break;
+
+		const target = demotable[0]; // lowest round number
+		const before = currentTokens();
+
+		// Re-render as compressed
+		const compressed = buildCompressedRound(target, currentPlan, state);
+		const idx = currentTimeline.findIndex(
+			(e) => e.roundNumber === target && e.type === "fullText",
+		);
+		if (idx >= 0) {
+			currentTimeline[idx] = {
+				roundNumber: target,
+				type: "compressed",
+				content: compressed,
+			};
+		}
+		currentFullText = currentFullText.filter((r) => r !== target);
+		currentCompressed = [...currentCompressed, target].sort((a, b) => a - b);
+
+		const after = currentTokens();
+		if (after < before) {
+			trace.push({
+				step: "demoteFullText",
+				beforeTokens: before,
+				afterTokens: after,
+				detail: `demoted round ${target}`,
+			});
+			demotionOccurred = true;
+		}
+
+		if (fits()) return buildResult();
+	}
+
+	// --- Step 3: trimSummaries ---
+	// Sub-step 1: truncate to 80 chars
+	{
+		const before = currentTokens();
+		let changed = false;
+		for (let i = 0; i < currentPlan.roundSummaries.length; i++) {
+			if (currentPlan.roundSummaries[i].length > 80) {
+				currentPlan.roundSummaries[i] =
+					currentPlan.roundSummaries[i].slice(0, 77) + "...";
+				changed = true;
+			}
+		}
+		if (changed) {
+			// Re-render Layer 1
+			currentLayer1 = buildLayer1(currentPlan, extractTopic(currentLayer1));
+			const after = currentTokens();
+			if (after < before) {
+				trace.push({
+					step: "trimSummaries",
+					beforeTokens: before,
+					afterTokens: after,
+					detail: "truncated to 80 chars",
+				});
+			}
+		}
+	}
+
+	if (fits()) return buildResult();
+
+	// Sub-step 2: truncate to 40 chars
+	{
+		const before = currentTokens();
+		let changed = false;
+		for (let i = 0; i < currentPlan.roundSummaries.length; i++) {
+			if (currentPlan.roundSummaries[i].length > 40) {
+				currentPlan.roundSummaries[i] =
+					currentPlan.roundSummaries[i].slice(0, 37) + "...";
+				changed = true;
+			}
+		}
+		if (changed) {
+			currentLayer1 = buildLayer1(currentPlan, extractTopic(currentLayer1));
+			const after = currentTokens();
+			if (after < before) {
+				trace.push({
+					step: "trimSummaries",
+					beforeTokens: before,
+					afterTokens: after,
+					detail: "truncated to 40 chars",
+				});
+			}
+		}
+	}
+
+	if (fits()) return buildResult();
+
+	// --- Step 4: compactLayer1 ---
+	{
+		const topic = extractTopic(currentLayer1);
+		const before = currentTokens();
+		let compactedPlan = { ...currentPlan };
+
+		// 4.1: evidence — keep only top 5 by recency (highest round number)
+		if (compactedPlan.evidence.length > 5) {
+			compactedPlan = {
+				...compactedPlan,
+				evidence: [...compactedPlan.evidence]
+					.sort((a, b) => b.round - a.round)
+					.slice(0, 5),
+			};
+		}
+
+		// 4.2: judgeNotes — reduce to terse marker (round + leading only)
+		compactedPlan = {
+			...compactedPlan,
+			judgeNotes: compactedPlan.judgeNotes.map((jn) => ({
+				...jn,
+				reasoning: `${jn.leading}`,
+			})),
+		};
+
+		// 4.3: unresolved/risks — keep only text/risk + severity + round; drop extended descriptions
+		compactedPlan = {
+			...compactedPlan,
+			unresolved: compactedPlan.unresolved.map((u) =>
+				u.length > 60 ? u.slice(0, 57) + "..." : u,
+			),
+			risks: compactedPlan.risks.map((r) => ({
+				risk: r.risk.length > 40 ? r.risk.slice(0, 37) + "..." : r.risk,
+				severity: r.severity,
+				round: r.round,
+			})),
+		};
+
+		// 4.4: consensus — truncate each item to 80 chars
+		compactedPlan = {
+			...compactedPlan,
+			consensus: compactedPlan.consensus.map((c) =>
+				c.length > 80 ? c.slice(0, 77) + "..." : c,
+			),
+		};
+
+		currentPlan = compactedPlan;
+		currentLayer1 = buildLayer1(currentPlan, topic);
+
+		const after = currentTokens();
+		if (after < before) {
+			trace.push({
+				step: "compactLayer1",
+				beforeTokens: before,
+				afterTokens: after,
+			});
+		}
+	}
+
+	if (fits()) return buildResult();
+
+	// --- Step 5: emergency ---
+	// Drop Layer 4 entirely (no-op in Phase 1) and truncate Layer 2 blocks to 2 lines each.
+	{
+		const before = currentTokens();
+		let changed = false;
+
+		for (let i = 0; i < currentTimeline.length; i++) {
+			const entry = currentTimeline[i];
+			const lines = entry.content.split("\n");
+			if (lines.length > 2) {
+				currentTimeline[i] = {
+					...entry,
+					content: lines.slice(0, 2).join("\n"),
+				};
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			const after = currentTokens();
+			if (after < before) {
+				trace.push({
+					step: "emergency",
+					beforeTokens: before,
+					afterTokens: after,
+				});
+			}
+		}
+	}
+
+	if (fits()) return buildResult();
+
+	// --- Step 6: excerptRecent ---
+	const excerptConfigs = [
+		{ first: 500, last: 200 },
+		{ first: 250, last: 100 },
+		{ first: 100, last: 50 },
+	];
+
+	for (const cfg of excerptConfigs) {
+		if (fits()) return buildResult();
+
+		const before = currentTokens();
+		let changed = false;
+
+		for (let i = 0; i < currentTimeline.length; i++) {
+			const entry = currentTimeline[i];
+			if (entry.type !== "fullText") continue;
+
+			// Excerpt each role block
+			const excerpted = excerptRoleBlocks(entry.content, cfg.first, cfg.last);
+			if (excerpted !== entry.content) {
+				currentTimeline[i] = { ...entry, content: excerpted };
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			const after = currentTokens();
+			if (after < before) {
+				trace.push({
+					step: "excerptRecent",
+					beforeTokens: before,
+					afterTokens: after,
+					detail: `first ${cfg.first} + last ${cfg.last}`,
+				});
+			}
+		}
+	}
+
+	return buildResult();
+
+	function buildResult(): ShrinkResult {
+		return {
+			prompt: assemble(),
+			shrinkTrace: trace,
+			fitAchieved: fits(),
+			updatedFullTextRounds: currentFullText,
+			updatedCompressedRounds: currentCompressed,
+		};
+	}
+}
+
+/** Extracts the topic from a Layer 1 string. */
+function extractTopic(layer1: string): string {
+	const match = layer1.match(/## Topic\n\n([^\n]+)/);
+	return match?.[1] ?? "";
+}
+
+/**
+ * Excerpts role blocks (Proposer/Challenger) to first N + last M chars.
+ */
+function excerptRoleBlocks(
+	content: string,
+	first: number,
+	last: number,
+): string {
+	// Split on role headers like **Proposer:** and **Challenger:**
+	return content.replace(
+		/(\*\*(?:Proposer|Challenger):\*\*\n)([\s\S]*?)(?=\n\n\*\*(?:Proposer|Challenger):\*\*|$)/g,
+		(match, header: string, body: string) => {
+			if (body.length <= first + last + 10) return match;
+			const excerpted =
+				body.slice(0, first) + "\n[...truncated...]\n" + body.slice(-last);
+			return header + excerpted;
+		},
+	);
 }
 
 /** Renders a single round in full-text format per spec. */

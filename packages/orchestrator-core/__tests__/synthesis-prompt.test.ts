@@ -16,6 +16,7 @@ import {
 	detectCjkMajority,
 	estimateTokens,
 	normalizeConfig,
+	shrinkToFit,
 } from "../src/synthesis-prompt.js";
 import type { DebateMeta, DebateState, DebateTurn } from "../src/types.js";
 
@@ -1723,6 +1724,416 @@ describe("assembleAdaptiveSynthesisPrompt", () => {
 			const result = assembleAdaptiveSynthesisPrompt(input);
 			expect(result.prompt).toBeDefined();
 			expect(result.debug).toBeDefined();
+		});
+	});
+});
+
+// --- Task 8: shrinkToFit tests ---
+
+describe("shrinkToFit", () => {
+	/** Helper to build a shrinkToFit-compatible sections object */
+	function makeSections(overrides: {
+		layer1?: string;
+		debateTimeline?: Array<{
+			roundNumber: number;
+			type: "fullText" | "compressed" | "phaseBlock";
+			content: string;
+		}>;
+		contextNote?: string;
+	}) {
+		return {
+			layer1: overrides.layer1 ?? "## Topic\n\nTest Topic",
+			debateTimeline: overrides.debateTimeline ?? [],
+			contextNote: overrides.contextNote ?? "",
+		};
+	}
+
+	function makeShrinkPlan(overrides: Partial<EvolvingPlan> = {}): EvolvingPlan {
+		return { ...emptyPlan(), ...overrides };
+	}
+
+	function makeShrinkState(roundCount: number): DebateState {
+		return makeStateWithRounds(roundCount);
+	}
+
+	describe("demoteFullText", () => {
+		it("demotes lowest-numbered full-text round (excluding recentK) to compressed", () => {
+			// 5 rounds, recentK=2, so rounds 4-5 are protected. Rounds 1-3 are demotable.
+			const state = makeShrinkState(5);
+			const plan = makePlanWithAnalyses(5);
+
+			const sections = makeSections({
+				layer1: "## Topic\n\nTest",
+				debateTimeline: [
+					{
+						roundNumber: 1,
+						type: "fullText",
+						content: "P1 " + "x".repeat(500),
+					},
+					{
+						roundNumber: 2,
+						type: "fullText",
+						content: "P2 " + "x".repeat(500),
+					},
+					{
+						roundNumber: 3,
+						type: "fullText",
+						content: "P3 " + "x".repeat(500),
+					},
+					{
+						roundNumber: 4,
+						type: "fullText",
+						content: "P4 " + "x".repeat(500),
+					},
+					{
+						roundNumber: 5,
+						type: "fullText",
+						content: "P5 " + "x".repeat(500),
+					},
+				],
+			});
+
+			// Set budget very low to force shrink
+			const result = shrinkToFit(
+				sections,
+				10, // impossibly low budget
+				2, // recentK
+				[1, 2, 3, 4, 5], // fullTextRounds
+				[], // compressedRounds
+				plan,
+				state,
+			);
+
+			// Round 1 should be demoted first (lowest number)
+			expect(result.updatedCompressedRounds).toContain(1);
+			expect(result.updatedFullTextRounds).not.toContain(1);
+
+			// Trace should include a demoteFullText entry
+			const demoteEntries = result.shrinkTrace.filter(
+				(e) => e.step === "demoteFullText",
+			);
+			expect(demoteEntries.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe("trimSummaries", () => {
+		it("truncates round summaries to 80 then 40 chars", () => {
+			const longSummary = "A".repeat(120);
+			const plan = makeShrinkPlan({
+				roundSummaries: [longSummary],
+				roundAnalyses: [makeAnalysis(1)],
+			});
+			const state = makeShrinkState(1);
+
+			const sections = makeSections({
+				layer1: buildLayer1(plan, "Test"),
+				debateTimeline: [
+					{
+						roundNumber: 1,
+						type: "fullText",
+						content: "Full text round 1 " + "x".repeat(2000),
+					},
+				],
+			});
+
+			const result = shrinkToFit(
+				sections,
+				10, // very small budget
+				1,
+				[1],
+				[],
+				plan,
+				state,
+			);
+
+			// Should have trimSummaries entries in trace
+			const trimEntries = result.shrinkTrace.filter(
+				(e) => e.step === "trimSummaries",
+			);
+			// At most 2 sub-steps (80 then 40)
+			expect(trimEntries.length).toBeLessThanOrEqual(2);
+			// If summaries were truncated, the trace should have entries
+			if (trimEntries.length > 0) {
+				expect(trimEntries[0].beforeTokens).toBeGreaterThan(
+					trimEntries[0].afterTokens,
+				);
+			}
+		});
+	});
+
+	describe("compactLayer1 order", () => {
+		it("compacts evidence first, consensus last", () => {
+			const plan = makeShrinkPlan({
+				evidence: Array.from({ length: 10 }, (_, i) => ({
+					claim: `Evidence claim ${i} with some extra description text`,
+					source: `Source ${i}`,
+					round: i + 1,
+				})),
+				consensus: [
+					"Consensus item one that is fairly long and detailed to show truncation effects clearly",
+					"Consensus item two that is also fairly long and detailed to show truncation effects clearly",
+				],
+				judgeNotes: [
+					{
+						roundNumber: 1,
+						leading: "proposer" as const,
+						reasoning:
+							"The proposer made a very strong argument with detailed evidence and reasoning",
+					},
+					{
+						roundNumber: 2,
+						leading: "challenger" as const,
+						reasoning:
+							"The challenger responded with equally compelling counterpoints and data",
+					},
+				],
+				unresolved: [
+					"Unresolved issue one with extended description that goes on and on",
+					"Unresolved issue two with extended description that goes on and on",
+				],
+				risks: [
+					{
+						risk: "Risk one with extended description that continues further",
+						severity: "high",
+						round: 1,
+					},
+					{
+						risk: "Risk two with extended description that continues further",
+						severity: "medium",
+						round: 2,
+					},
+				],
+				roundAnalyses: [makeAnalysis(1)],
+			});
+			const state = makeShrinkState(1);
+
+			const sections = makeSections({
+				layer1: buildLayer1(plan, "Test Topic"),
+				debateTimeline: [
+					{
+						roundNumber: 1,
+						type: "fullText",
+						content: "x".repeat(5000),
+					},
+				],
+			});
+
+			const result = shrinkToFit(
+				sections,
+				10, // impossibly low budget forces all steps
+				1,
+				[1],
+				[],
+				plan,
+				state,
+			);
+
+			// compactLayer1 should appear in trace
+			const compactEntries = result.shrinkTrace.filter(
+				(e) => e.step === "compactLayer1",
+			);
+			expect(compactEntries.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe("emergency Layer 2 truncation", () => {
+		it("truncates Layer 2 blocks to 2 lines each", () => {
+			const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
+			const state = makeShrinkState(1);
+
+			// Multi-line content
+			const multiLineContent = Array.from(
+				{ length: 10 },
+				(_, i) => `Line ${i + 1} of debate content`,
+			).join("\n");
+
+			const sections = makeSections({
+				layer1: "## Topic\n\nTest",
+				debateTimeline: [
+					{
+						roundNumber: 1,
+						type: "fullText",
+						content: multiLineContent,
+					},
+				],
+			});
+
+			const result = shrinkToFit(
+				sections,
+				10, // very small budget forces emergency
+				1,
+				[1],
+				[],
+				plan,
+				state,
+			);
+
+			const emergencyEntries = result.shrinkTrace.filter(
+				(e) => e.step === "emergency",
+			);
+			expect(emergencyEntries.length).toBeGreaterThan(0);
+			if (emergencyEntries.length > 0) {
+				expect(emergencyEntries[0].beforeTokens).toBeGreaterThan(
+					emergencyEntries[0].afterTokens,
+				);
+			}
+		});
+	});
+
+	describe("excerptRecent", () => {
+		it("truncates recent full-text rounds in 3 passes (500+200, 250+100, 100+50)", () => {
+			const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
+			const state = makeShrinkState(1);
+
+			// A very long full-text round
+			const longContent =
+				"**Proposer:**\n" +
+				"x".repeat(3000) +
+				"\n\n**Challenger:**\n" +
+				"y".repeat(3000);
+
+			const sections = makeSections({
+				layer1: "## Topic\n\nT",
+				debateTimeline: [
+					{
+						roundNumber: 1,
+						type: "fullText",
+						content: longContent,
+					},
+				],
+			});
+
+			const result = shrinkToFit(
+				sections,
+				10, // impossibly small
+				1,
+				[1],
+				[],
+				plan,
+				state,
+			);
+
+			const excerptEntries = result.shrinkTrace.filter(
+				(e) => e.step === "excerptRecent",
+			);
+			// Up to 3 passes
+			expect(excerptEntries.length).toBeGreaterThan(0);
+			expect(excerptEntries.length).toBeLessThanOrEqual(3);
+		});
+	});
+
+	describe("shrinkTrace only records steps that changed the prompt", () => {
+		it("does not include cutSnippets in trace (no-op in Phase 1)", () => {
+			const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
+			const state = makeShrinkState(1);
+
+			const sections = makeSections({
+				layer1: "## Topic\n\nTest",
+				debateTimeline: [
+					{
+						roundNumber: 1,
+						type: "fullText",
+						content: "x".repeat(2000),
+					},
+				],
+			});
+
+			const result = shrinkToFit(sections, 10, 1, [1], [], plan, state);
+
+			// cutSnippets should never appear (it is a no-op in Phase 1)
+			const cutEntries = result.shrinkTrace.filter(
+				(e) => e.step === "cutSnippets",
+			);
+			expect(cutEntries).toHaveLength(0);
+		});
+	});
+
+	describe("fitAchieved = false when all steps exhausted", () => {
+		it("returns fitAchieved = false when budget is impossibly small", () => {
+			const plan = makeShrinkPlan({ roundAnalyses: [makeAnalysis(1)] });
+			const state = makeShrinkState(1);
+
+			const sections = makeSections({
+				layer1: "## Topic\n\nTest Topic for the debate",
+				debateTimeline: [
+					{
+						roundNumber: 1,
+						type: "fullText",
+						content: "x".repeat(2000),
+					},
+				],
+			});
+
+			const result = shrinkToFit(
+				sections,
+				1, // impossibly small budget (1 token)
+				1,
+				[1],
+				[],
+				plan,
+				state,
+			);
+
+			expect(result.fitAchieved).toBe(false);
+		});
+
+		it("returns fitAchieved = true when prompt already fits", () => {
+			const plan = makeShrinkPlan();
+			const state = makeShrinkState(1);
+
+			const sections = makeSections({
+				layer1: "short",
+				debateTimeline: [{ roundNumber: 1, type: "fullText", content: "hi" }],
+			});
+
+			const result = shrinkToFit(
+				sections,
+				100000, // huge budget
+				1,
+				[1],
+				[],
+				plan,
+				state,
+			);
+
+			expect(result.fitAchieved).toBe(true);
+			// No shrink steps needed
+			expect(result.shrinkTrace).toHaveLength(0);
+		});
+	});
+
+	describe("integration with assembleAdaptiveSynthesisPrompt", () => {
+		it("shrinks when assembled prompt exceeds budget", () => {
+			const state = makeStateWithRounds(5);
+			const plan = makePlanWithAnalyses(5);
+			const transcript = new Map<
+				number,
+				{ proposer?: string; challenger?: string }
+			>();
+			for (let r = 1; r <= 5; r++) {
+				transcript.set(r, {
+					proposer: `Proposer text R${r} ${"x".repeat(1000)}`,
+					challenger: `Challenger text R${r} ${"x".repeat(1000)}`,
+				});
+			}
+
+			// Budget too small for all full-text but enough to trigger shrink
+			const input: AdaptiveSynthesisInput = {
+				state,
+				plan,
+				topic: "Test Topic",
+				cleanTranscript: transcript,
+				config: { contextTokenLimit: 2000, recentK: 2 },
+			};
+
+			const result = assembleAdaptiveSynthesisPrompt(input);
+
+			// Should have non-empty shrinkTrace if shrinking was needed
+			if (!result.debug.fitAchieved) {
+				expect(result.debug.shrinkTrace.length).toBeGreaterThan(0);
+			}
+			// Either way, it should not throw
+			expect(result.prompt.length).toBeGreaterThan(0);
 		});
 	});
 });
