@@ -236,8 +236,8 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 | `/inject proposer <text>`   | Add context to proposer's next prompt            | ✅       |
 | `/inject challenger <text>` | Add context to challenger's next prompt          | ✅       |
 | `/inject both <text>`       | Add context to both agents' next prompts         | ✅       |
-| `/inject! proposer <text>`  | High-priority injection (must-address directive) | ✅       |
-| `/inject judge <text>`      | Trigger judge immediately with user instruction  | ✅       |
+| `/inject! <target> <text>`  | High-priority injection for `proposer`, `challenger`, or `both` | ✅ |
+| `/inject judge <text>`      | Queue an out-of-band judge turn after the current round with user instruction | ✅ |
 | `/interrupt [role]`         | Interrupt the active provider turn when supported | ✅       |
 | `/pause`                    | Pause the debate after the current turn          | ✅       |
 | `/resume`                   | Resume a paused live debate                      | ✅       |
@@ -246,6 +246,12 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 **Approval mode** (auto-activates on tool approval requests): `/approve`, `/deny` ✅
 
 `crossfire resume` now reuses the same live command wiring as `crossfire start`, so `/stop`, `/interrupt`, approval commands, inject commands, `/pause`, `/resume`, and `/extend` remain available while resuming an interrupted debate.
+
+Inject semantics:
+
+- proposer / challenger / both injects are one-shot guidance consumed when the next targeted prompt is built
+- if you inject the same target multiple times before its next turn, the latest inject replaces the earlier pending one
+- `/inject judge` does not interrupt the current speaker mid-turn; it queues an extra judge turn at the next post-round checkpoint
 
 ## Supported Agents
 
@@ -377,6 +383,7 @@ Layer guide:
 - `crossfire replay` is currently non-interactive and does not expose the live command parser
 - `/jump turn <turnId>` is parsed by the TUI but does not have a live handler yet
 - external history injection remains an internal adapter recovery capability; there is no user-facing `--history-file` or live import command yet
+- TODO: if external history injection becomes a product feature, prefer `start/resume --history-file <json>` over a live import command so the imported context stays event-sourced and replay-safe
 - `replay --from-round` is not reliable across resumed multi-segment runs today
 
 ## Extending Crossfire

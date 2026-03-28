@@ -236,8 +236,8 @@ Configuration:
 | `/inject proposer <text>`   | 向提议者下一轮注入上下文       | ✅       |
 | `/inject challenger <text>` | 向挑战者下一轮注入上下文       | ✅       |
 | `/inject both <text>`       | 向双方下一轮都注入上下文       | ✅       |
-| `/inject! proposer <text>`  | 高优先级注入（必须处理的指令） | ✅       |
-| `/inject judge <text>`      | 立即触发裁判并附带用户指令     | ✅       |
+| `/inject! <target> <text>`  | 面向 `proposer`、`challenger` 或 `both` 的高优先级注入 | ✅ |
+| `/inject judge <text>`      | 在当前 round 结束后追加一次带用户指令的裁判回合 | ✅ |
 | `/interrupt [role]`         | 在 provider 支持时中断当前活跃回合 | ✅    |
 | `/pause`                    | 在当前回合结束后暂停辩论       | ✅       |
 | `/resume`                   | 恢复已暂停的实时辩论           | ✅       |
@@ -246,6 +246,12 @@ Configuration:
 **审批模式**（工具审批请求时自动激活）：`/approve`、`/deny` ✅
 
 `crossfire resume` 现在复用了与 `crossfire start` 相同的实时命令接线，因此在恢复中断辩论时也可以继续使用 `/stop`、`/interrupt`、审批命令、inject 命令，以及 `/pause`、`/resume`、`/extend`。
+
+Inject 语义说明：
+
+- proposer / challenger / both 的 inject 都是 one-shot guidance，会在下一次目标 prompt 构建时被消费
+- 如果同一目标在下一次发言前连续 inject 多次，当前实现是后写覆盖前写，不会自动拼接
+- `/inject judge` 不会在当前 speaker 说到一半时硬插入，而是在下一个 round 结束后的检查点追加一次裁判回合
 
 ## 支持的智能体
 
@@ -377,6 +383,7 @@ packages/
 - `crossfire replay` 目前是非交互式的，不暴露实时辩论中的命令解析器
 - `/jump turn <turnId>` 已能被 TUI 解析，但目前还没有实时处理逻辑
 - external history injection 目前仍只是 adapter 内部恢复能力；还没有用户可用的 `--history-file` 或实时导入命令
+- TODO：如果未来把 external history injection 做成产品能力，优先考虑 `start/resume --history-file <json>`，而不是实时导入命令，这样导入上下文仍然满足 event-sourced 和 replay-safe
 - 在多段恢复后的运行中，`replay --from-round` 目前不可靠
 
 ## 扩展 Crossfire
