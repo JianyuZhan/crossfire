@@ -77,7 +77,7 @@ export function defaultSystemPrompt(
 // --- Schema template constants (module-level, NOT exported) ---
 
 const DEBATE_META_SCHEMA_FULL = `Output a \`debate_meta\` JSON block at the end of your response with these fields:
-\`\`\`
+\`\`\`debate_meta
 {
   "stance": "strongly_agree" | "agree" | "neutral" | "disagree" | "strongly_disagree",
   "confidence": 0.0-1.0,
@@ -96,7 +96,7 @@ const DEBATE_META_REMINDER =
 	"(Remember to include your debate_meta JSON block at the end of your response.)";
 
 const JUDGE_VERDICT_SCHEMA_FULL = `Output a \`judge_verdict\` JSON block with these fields:
-\`\`\`
+\`\`\`judge_verdict
 {
   "leading": "proposer" | "challenger" | "tie",
   "score": { "proposer": 0-10, "challenger": 0-10 },

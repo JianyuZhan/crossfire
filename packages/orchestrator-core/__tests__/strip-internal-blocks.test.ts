@@ -40,4 +40,27 @@ describe("stripInternalBlocks", () => {
 	it("handles empty string", () => {
 		expect(stripInternalBlocks("")).toBe("");
 	});
+
+	it("strips ```json blocks containing debate_meta signature fields", () => {
+		const input =
+			'My argument here.\n```json\n{"stance":"agree","confidence":0.8,"key_points":["point1"]}\n```';
+		expect(stripInternalBlocks(input)).toBe("My argument here.");
+	});
+
+	it("strips ```json blocks containing judge_verdict signature fields", () => {
+		const input =
+			'Assessment text.\n```json\n{"leading":"proposer","score":{"proposer":8,"challenger":5},"reasoning":"...","should_continue":true}\n```';
+		expect(stripInternalBlocks(input)).toBe("Assessment text.");
+	});
+
+	it("does NOT strip ```json blocks without meta/verdict signature fields", () => {
+		const input =
+			'Here is code:\n```json\n{"name":"test","version":"1.0"}\n```\nMore text.';
+		expect(stripInternalBlocks(input)).toBe(input);
+	});
+
+	it("strips incomplete ```json block with meta fields at end of string", () => {
+		const input = 'Content.\n```json\n{"stance":"disagree","confidence":0.6';
+		expect(stripInternalBlocks(input)).toBe("Content.");
+	});
 });
