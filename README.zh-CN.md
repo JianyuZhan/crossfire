@@ -251,7 +251,7 @@ Configuration:
 
 | 配置文件 `agent` 字段 | CLI 工具 | 传输方式                       |
 | --------------------- | -------- | ------------------------------ |
-| `claude_code`         | `claude` | 进程内 Agent SDK（异步生成器） |
+| `claude_code`         | `claude` | 进程内 Agent SDK ≥0.1.77（异步生成器 + hooks） |
 | `codex`               | `codex`  | 双向 JSON-RPC 2.0 over stdio   |
 | `gemini_cli`          | `gemini` | 每轮子进程                     |
 

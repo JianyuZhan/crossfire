@@ -5,8 +5,36 @@ interface HookContext {
 	adapterSessionId: string;
 }
 
+/**
+ * SDK HookInput — the first argument to every hook callback.
+ * We use a loose type to avoid coupling to SDK internals.
+ */
+type HookInput = Record<string, unknown>;
+
+/**
+ * SDK HookJSONOutput — return value from hook callbacks.
+ * `{ continue: true }` tells the SDK to proceed normally.
+ */
+type HookJSONOutput = { continue?: boolean; [key: string]: unknown };
+
+/**
+ * SDK HookCallback signature (claude-agent-sdk@0.1.77+):
+ *   (input: HookInput, toolUseID: string | undefined, options: { signal }) => Promise<HookJSONOutput>
+ */
+type HookCallback = (
+	input: HookInput,
+	toolUseID: string | undefined,
+	options: { signal: AbortSignal },
+) => Promise<HookJSONOutput>;
+
+/**
+ * SDK HookCallbackMatcher (claude-agent-sdk@0.1.77+):
+ *   { matcher?: string; hooks: HookCallback[]; timeout?: number }
+ */
 interface HookCallbackMatcher {
-	callback: (info: Record<string, unknown>) => void;
+	matcher?: string;
+	hooks: HookCallback[];
+	timeout?: number;
 }
 
 /**
@@ -32,73 +60,93 @@ export function buildHooks(
 		turnId: getTurnId(),
 	});
 
+	const CONTINUE: HookJSONOutput = { continue: true };
+
 	return {
 		PreToolUse: [
 			{
-				callback: (info: Record<string, unknown>) => {
-					emit({
-						...base(),
-						kind: "tool.call",
-						toolUseId: info.tool_use_id as string,
-						toolName: info.tool_name as string,
-						input: info.tool_input,
-					});
-				},
+				hooks: [
+					async (input: HookInput, toolUseID: string | undefined) => {
+						emit({
+							...base(),
+							kind: "tool.call",
+							toolUseId:
+								toolUseID ?? (input.tool_use_id as string) ?? "unknown",
+							toolName: (input.tool_name as string) ?? "unknown",
+							input: input.tool_input,
+						});
+						return CONTINUE;
+					},
+				],
 			},
 		],
 
 		PostToolUse: [
 			{
-				callback: (info: Record<string, unknown>) => {
-					emit({
-						...base(),
-						kind: "tool.result",
-						toolUseId: info.tool_use_id as string,
-						toolName: info.tool_name as string,
-						success: true,
-						output: info.tool_output,
-					});
-				},
+				hooks: [
+					async (input: HookInput, toolUseID: string | undefined) => {
+						emit({
+							...base(),
+							kind: "tool.result",
+							toolUseId:
+								toolUseID ?? (input.tool_use_id as string) ?? "unknown",
+							toolName: (input.tool_name as string) ?? "unknown",
+							success: true,
+							output: input.tool_response ?? input.tool_output,
+						});
+						return CONTINUE;
+					},
+				],
 			},
 		],
 
 		PostToolUseFailure: [
 			{
-				callback: (info: Record<string, unknown>) => {
-					emit({
-						...base(),
-						kind: "tool.result",
-						toolUseId: info.tool_use_id as string,
-						toolName: info.tool_name as string,
-						success: false,
-						error: info.error as string,
-					});
-				},
+				hooks: [
+					async (input: HookInput, toolUseID: string | undefined) => {
+						emit({
+							...base(),
+							kind: "tool.result",
+							toolUseId:
+								toolUseID ?? (input.tool_use_id as string) ?? "unknown",
+							toolName: (input.tool_name as string) ?? "unknown",
+							success: false,
+							error: input.error as string,
+						});
+						return CONTINUE;
+					},
+				],
 			},
 		],
 
 		SubagentStart: [
 			{
-				callback: (info: Record<string, unknown>) => {
-					emit({
-						...base(),
-						kind: "subagent.started",
-						subagentId: info.subagent_id as string,
-						description: info.description as string | undefined,
-					});
-				},
+				hooks: [
+					async (input: HookInput) => {
+						emit({
+							...base(),
+							kind: "subagent.started",
+							subagentId: (input.agent_id as string) ?? "unknown",
+							description: input.agent_type as string | undefined,
+						});
+						return CONTINUE;
+					},
+				],
 			},
 		],
 
 		SubagentStop: [
 			{
-				callback: (info: Record<string, unknown>) => {
-					emit({
-						...base(),
-						kind: "subagent.completed",
-						subagentId: info.subagent_id as string,
-					});
-				},
+				hooks: [
+					async (input: HookInput) => {
+						emit({
+							...base(),
+							kind: "subagent.completed",
+							subagentId: (input.agent_id as string) ?? "unknown",
+						});
+						return CONTINUE;
+					},
+				],
 			},
 		],
 	};

@@ -7,6 +7,18 @@ const CTX = {
 	adapterSessionId: "s1",
 };
 
+const DUMMY_SIGNAL = new AbortController().signal;
+
+/** Helper: invoke the first hook callback in a matcher */
+// biome-ignore lint: test helper with loose types
+async function callHook(
+	matcher: { hooks: Array<any> },
+	input: Record<string, unknown>,
+	toolUseID?: string,
+) {
+	return matcher.hooks[0](input, toolUseID, { signal: DUMMY_SIGNAL });
+}
+
 describe("buildHooks", () => {
 	it("returns object with expected hook keys", () => {
 		const emit = vi.fn();
@@ -18,7 +30,7 @@ describe("buildHooks", () => {
 		expect(hooks).toHaveProperty("SubagentStop");
 	});
 
-	it("each hook value is an array of matchers with a callback", () => {
+	it("each hook value is an array of matchers with a hooks array", () => {
 		const emit = vi.fn();
 		const hooks = buildHooks(emit, CTX, () => "t1");
 		for (const key of [
@@ -31,19 +43,24 @@ describe("buildHooks", () => {
 			const arr = hooks[key];
 			expect(Array.isArray(arr)).toBe(true);
 			expect(arr.length).toBeGreaterThan(0);
-			expect(typeof arr[0].callback).toBe("function");
+			expect(Array.isArray(arr[0].hooks)).toBe(true);
+			expect(typeof arr[0].hooks[0]).toBe("function");
 		}
 	});
 
-	it("PreToolUse callback emits tool.call event", () => {
+	it("PreToolUse hook emits tool.call event", async () => {
 		const emit = vi.fn();
 		const hooks = buildHooks(emit, CTX, () => "t1");
-		const cb = hooks.PreToolUse[0].callback;
-		cb({
-			tool_name: "bash",
-			tool_use_id: "tu1",
-			tool_input: { command: "ls" },
-		});
+		const result = await callHook(
+			hooks.PreToolUse[0],
+			{
+				tool_name: "bash",
+				tool_use_id: "tu1",
+				tool_input: { command: "ls" },
+			},
+			"tu1",
+		);
+		expect(result).toEqual({ continue: true });
 		expect(emit).toHaveBeenCalledTimes(1);
 		const event: NormalizedEvent = emit.mock.calls[0][0];
 		expect(event.kind).toBe("tool.call");
@@ -57,15 +74,18 @@ describe("buildHooks", () => {
 		}
 	});
 
-	it("PostToolUse callback emits tool.result with success=true", () => {
+	it("PostToolUse hook emits tool.result with success=true", async () => {
 		const emit = vi.fn();
 		const hooks = buildHooks(emit, CTX, () => "t1");
-		const cb = hooks.PostToolUse[0].callback;
-		cb({
-			tool_name: "bash",
-			tool_use_id: "tu1",
-			tool_output: "file.txt",
-		});
+		await callHook(
+			hooks.PostToolUse[0],
+			{
+				tool_name: "bash",
+				tool_use_id: "tu1",
+				tool_response: "file.txt",
+			},
+			"tu1",
+		);
 		expect(emit).toHaveBeenCalledTimes(1);
 		const event: NormalizedEvent = emit.mock.calls[0][0];
 		expect(event.kind).toBe("tool.result");
@@ -77,15 +97,18 @@ describe("buildHooks", () => {
 		}
 	});
 
-	it("PostToolUseFailure callback emits tool.result with success=false", () => {
+	it("PostToolUseFailure hook emits tool.result with success=false", async () => {
 		const emit = vi.fn();
 		const hooks = buildHooks(emit, CTX, () => "t1");
-		const cb = hooks.PostToolUseFailure[0].callback;
-		cb({
-			tool_name: "bash",
-			tool_use_id: "tu1",
-			error: "Permission denied",
-		});
+		await callHook(
+			hooks.PostToolUseFailure[0],
+			{
+				tool_name: "bash",
+				tool_use_id: "tu1",
+				error: "Permission denied",
+			},
+			"tu1",
+		);
 		expect(emit).toHaveBeenCalledTimes(1);
 		const event: NormalizedEvent = emit.mock.calls[0][0];
 		expect(event.kind).toBe("tool.result");
@@ -97,13 +120,12 @@ describe("buildHooks", () => {
 		}
 	});
 
-	it("SubagentStart callback emits subagent.started", () => {
+	it("SubagentStart hook emits subagent.started", async () => {
 		const emit = vi.fn();
 		const hooks = buildHooks(emit, CTX, () => "t1");
-		const cb = hooks.SubagentStart[0].callback;
-		cb({
-			subagent_id: "sa1",
-			description: "Research task",
+		await callHook(hooks.SubagentStart[0], {
+			agent_id: "sa1",
+			agent_type: "Research task",
 		});
 		expect(emit).toHaveBeenCalledTimes(1);
 		const event: NormalizedEvent = emit.mock.calls[0][0];
@@ -114,12 +136,11 @@ describe("buildHooks", () => {
 		}
 	});
 
-	it("SubagentStop callback emits subagent.completed", () => {
+	it("SubagentStop hook emits subagent.completed", async () => {
 		const emit = vi.fn();
 		const hooks = buildHooks(emit, CTX, () => "t1");
-		const cb = hooks.SubagentStop[0].callback;
-		cb({
-			subagent_id: "sa1",
+		await callHook(hooks.SubagentStop[0], {
+			agent_id: "sa1",
 		});
 		expect(emit).toHaveBeenCalledTimes(1);
 		const event: NormalizedEvent = emit.mock.calls[0][0];
@@ -129,36 +150,50 @@ describe("buildHooks", () => {
 		}
 	});
 
-	it("uses current turnId from getter", () => {
+	it("uses current turnId from getter", async () => {
 		const emit = vi.fn();
 		let turnId = "t1";
 		const hooks = buildHooks(emit, CTX, () => turnId);
 
-		hooks.PreToolUse[0].callback({
-			tool_name: "bash",
-			tool_use_id: "tu1",
-			tool_input: {},
-		});
+		await callHook(
+			hooks.PreToolUse[0],
+			{ tool_name: "bash", tool_use_id: "tu1", tool_input: {} },
+			"tu1",
+		);
 		expect(emit.mock.calls[0][0].turnId).toBe("t1");
 
 		turnId = "t2";
-		hooks.PreToolUse[0].callback({
-			tool_name: "read",
-			tool_use_id: "tu2",
-			tool_input: {},
-		});
+		await callHook(
+			hooks.PreToolUse[0],
+			{ tool_name: "read", tool_use_id: "tu2", tool_input: {} },
+			"tu2",
+		);
 		expect(emit.mock.calls[1][0].turnId).toBe("t2");
 	});
 
-	it("timestamp is populated on emitted events", () => {
+	it("timestamp is populated on emitted events", async () => {
 		const emit = vi.fn();
 		const hooks = buildHooks(emit, CTX, () => "t1");
-		hooks.PreToolUse[0].callback({
-			tool_name: "bash",
-			tool_use_id: "tu1",
-			tool_input: {},
-		});
+		await callHook(
+			hooks.PreToolUse[0],
+			{ tool_name: "bash", tool_use_id: "tu1", tool_input: {} },
+			"tu1",
+		);
 		const event: NormalizedEvent = emit.mock.calls[0][0];
 		expect(event.timestamp).toBeGreaterThan(0);
+	});
+
+	it("toolUseID from second argument takes priority", async () => {
+		const emit = vi.fn();
+		const hooks = buildHooks(emit, CTX, () => "t1");
+		await callHook(
+			hooks.PreToolUse[0],
+			{ tool_name: "bash", tool_use_id: "from-input", tool_input: {} },
+			"from-arg",
+		);
+		const event: NormalizedEvent = emit.mock.calls[0][0];
+		if (event.kind === "tool.call") {
+			expect(event.toolUseId).toBe("from-arg");
+		}
 	});
 });

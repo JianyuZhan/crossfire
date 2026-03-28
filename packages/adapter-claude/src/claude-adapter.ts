@@ -97,26 +97,13 @@ export class ClaudeAdapter implements AgentAdapter {
 		);
 
 		// Build the canUseTool callback for approval flow
-		const canUseTool = (tool: unknown): Promise<unknown> => {
-			// SDK may pass a plain string (tool name) or an object with tool details
-			const toolName =
-				typeof tool === "string"
-					? tool
-					: (() => {
-							const info = tool as Record<string, unknown>;
-							return (
-								(info.tool_name as string) ??
-								(info.name as string) ??
-								(info.toolName as string) ??
-								"unknown"
-							);
-						})();
-			const toolUseId =
-				typeof tool === "string"
-					? String(Date.now())
-					: (((tool as Record<string, unknown>).tool_use_id as string) ??
-						((tool as Record<string, unknown>).id as string) ??
-						String(Date.now()));
+		// SDK signature: (toolName: string, toolInput: Record<string, unknown>, options: { signal, suggestions, toolUseID, ... }) => Promise<PermissionResult>
+		const canUseTool = (
+			toolName: string,
+			_toolInput: Record<string, unknown>,
+			options: { toolUseID: string; [key: string]: unknown },
+		): Promise<unknown> => {
+			const toolUseId = options.toolUseID ?? String(Date.now());
 			const requestId = `ar-${input.turnId}-${toolUseId}`;
 
 			// Emit approval.request
@@ -129,7 +116,7 @@ export class ClaudeAdapter implements AgentAdapter {
 				requestId,
 				approvalType: "tool",
 				title: `Approve tool: ${toolName}`,
-				payload: typeof tool === "string" ? { tool_name: tool } : tool,
+				payload: { tool_name: toolName, tool_input: _toolInput },
 			});
 
 			// Return a promise that will be resolved when approve() is called
@@ -138,7 +125,24 @@ export class ClaudeAdapter implements AgentAdapter {
 					requestId,
 					adapterSessionId: handle.adapterSessionId,
 					turnId: input.turnId,
-					resolve,
+					resolve: (value: unknown) => {
+						// Transform to SDK PermissionResult format
+						const decision = value as {
+							decision: string;
+							updatedInput?: Record<string, unknown>;
+						};
+						if (decision.decision === "allow") {
+							resolve({
+								behavior: "allow",
+								updatedInput: decision.updatedInput ?? _toolInput,
+							});
+						} else {
+							resolve({
+								behavior: "deny",
+								message: "User denied tool use",
+							});
+						}
+					},
 				});
 			});
 		};

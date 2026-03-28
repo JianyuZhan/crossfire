@@ -156,7 +156,8 @@ interface StartSessionInput {
 - in-process SDK `query()` stream
 - session state tracked in a local query-context map
 - `providerSessionId` becomes known after the first provider init event
-- approval support comes from `canUseTool`
+- tool visibility via SDK hooks (`PreToolUse`/`PostToolUse`/`PostToolUseFailure`/`SubagentStart`/`SubagentStop`) — each matcher uses the `{ hooks: [asyncFn] }` format required by SDK ≥0.1.77
+- approval support comes from `canUseTool(toolName, input, options)` returning `PermissionResult`
 - supports interrupts and subagent events
 
 ### Codex

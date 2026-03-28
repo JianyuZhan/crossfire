@@ -251,7 +251,7 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 
 | Profile `agent` field | CLI      | Transport                              |
 | --------------------- | -------- | -------------------------------------- |
-| `claude_code`         | `claude` | In-process Agent SDK (async generator) |
+| `claude_code`         | `claude` | In-process Agent SDK ≥0.1.77 (async generator + hooks) |
 | `codex`               | `codex`  | Bidirectional JSON-RPC 2.0 over stdio  |
 | `gemini_cli`          | `gemini` | Subprocess per turn                    |
 

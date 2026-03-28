@@ -15,6 +15,10 @@ export type QueryFn = (options: {
 	prompt: string;
 	resume?: string;
 	model?: string;
-	canUseTool?: (tool: unknown) => Promise<unknown>;
+	canUseTool?: (
+		toolName: string,
+		toolInput: Record<string, unknown>,
+		options: { toolUseID: string; [key: string]: unknown },
+	) => Promise<unknown>;
 	hooks?: unknown;
 }) => QueryResult;

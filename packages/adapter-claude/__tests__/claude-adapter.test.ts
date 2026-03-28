@@ -1,8 +1,8 @@
 import type { NormalizedEvent } from "@crossfire/adapter-core";
 import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ClaudeAdapter } from "../src/claude-adapter.js";
-import type { QueryFn, SdkMessage } from "../src/claude-adapter.js";
+import type { QueryFn, SdkMessage } from "../src/types.js";
 
 // Helper: create an async generator from an array of SDK messages
 async function* messagesFrom(
@@ -651,11 +651,7 @@ describe("ClaudeAdapter", () => {
 					if (opts.canUseTool) {
 						canUseToolCalled = true;
 						// Don't await - leave it pending
-						opts.canUseTool({
-							tool_name: "bash",
-							tool_use_id: "tu1",
-							tool_input: { command: "test" },
-						});
+						opts.canUseTool("bash", { command: "test" }, { toolUseID: "tu1" });
 					}
 					// Never send result - keep turn running
 					await new Promise(() => {}); // Hang forever
@@ -758,11 +754,11 @@ describe("ClaudeAdapter", () => {
 					};
 					// Simulate the SDK calling canUseTool
 					if (opts.canUseTool) {
-						await opts.canUseTool({
-							tool_name: "bash",
-							tool_use_id: "tu1",
-							tool_input: { command: "rm -rf /" },
-						});
+						await opts.canUseTool(
+							"bash",
+							{ command: "rm -rf /" },
+							{ toolUseID: "tu1" },
+						);
 					}
 					yield {
 						type: "result",

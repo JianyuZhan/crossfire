@@ -5,11 +5,19 @@ import {
 	runContractTests,
 } from "@crossfire/adapter-core/testing";
 import { ClaudeAdapter } from "../src/claude-adapter.js";
-import type {
-	QueryFn,
-	QueryResult,
-	SdkMessage,
-} from "../src/claude-adapter.js";
+import type { QueryFn, SdkMessage } from "../src/types.js";
+
+// biome-ignore lint: loose type for test mock hooks
+type MockHooks = Record<
+	string,
+	Array<{
+		hooks: Array<
+			(input: any, toolUseID: string | undefined, opts: any) => Promise<any>
+		>;
+	}>
+>;
+
+const DUMMY_SIGNAL = new AbortController().signal;
 
 /**
  * Split fixture steps into per-turn groups.
@@ -122,36 +130,42 @@ function createMockFactory(fixture: ScenarioFixture): {
 
 				// Handle tool-call: invoke PreToolUse hook
 				if (step.kind === "tool-call") {
-					const hooks = options.hooks as Record<
-						string,
-						Array<{ callback: (info: unknown) => void }>
-					>;
-					hooks?.PreToolUse?.[0]?.callback({
-						tool_use_id: step.toolUseId,
-						tool_name: step.toolName,
-						tool_input: step.input,
-					});
+					const hooks = options.hooks as MockHooks;
+					await hooks?.PreToolUse?.[0]?.hooks?.[0](
+						{
+							tool_use_id: step.toolUseId,
+							tool_name: step.toolName,
+							tool_input: step.input,
+						},
+						step.toolUseId,
+						{ signal: DUMMY_SIGNAL },
+					);
 					continue;
 				}
 
 				// Handle tool-result: invoke PostToolUse or PostToolUseFailure hook
 				if (step.kind === "tool-result") {
-					const hooks = options.hooks as Record<
-						string,
-						Array<{ callback: (info: unknown) => void }>
-					>;
+					const hooks = options.hooks as MockHooks;
 					if (step.success) {
-						hooks?.PostToolUse?.[0]?.callback({
-							tool_use_id: step.toolUseId,
-							tool_name: step.toolName,
-							tool_output: step.output,
-						});
+						await hooks?.PostToolUse?.[0]?.hooks?.[0](
+							{
+								tool_use_id: step.toolUseId,
+								tool_name: step.toolName,
+								tool_response: step.output,
+							},
+							step.toolUseId,
+							{ signal: DUMMY_SIGNAL },
+						);
 					} else {
-						hooks?.PostToolUseFailure?.[0]?.callback({
-							tool_use_id: step.toolUseId,
-							tool_name: step.toolName,
-							error: "Tool failed",
-						});
+						await hooks?.PostToolUseFailure?.[0]?.hooks?.[0](
+							{
+								tool_use_id: step.toolUseId,
+								tool_name: step.toolName,
+								error: "Tool failed",
+							},
+							step.toolUseId,
+							{ signal: DUMMY_SIGNAL },
+						);
 					}
 					continue;
 				}
@@ -159,10 +173,11 @@ function createMockFactory(fixture: ScenarioFixture): {
 				// Handle approval-request: call canUseTool which blocks until approve() is called
 				if (step.kind === "approval-request") {
 					if (options.canUseTool) {
-						await options.canUseTool({
-							tool_use_id: step.requestId,
-							tool_name: step.title,
-						});
+						await options.canUseTool(
+							step.title,
+							{},
+							{ toolUseID: step.requestId },
+						);
 					}
 					continue;
 				}
@@ -174,25 +189,23 @@ function createMockFactory(fixture: ScenarioFixture): {
 
 				// Handle subagent-started: invoke SubagentStart hook
 				if (step.kind === "subagent-started") {
-					const hooks = options.hooks as Record<
-						string,
-						Array<{ callback: (info: unknown) => void }>
-					>;
-					hooks?.SubagentStart?.[0]?.callback({
-						subagent_id: step.subagentId,
-					});
+					const hooks = options.hooks as MockHooks;
+					await hooks?.SubagentStart?.[0]?.hooks?.[0](
+						{ agent_id: step.subagentId },
+						undefined,
+						{ signal: DUMMY_SIGNAL },
+					);
 					continue;
 				}
 
 				// Handle subagent-completed: invoke SubagentStop hook
 				if (step.kind === "subagent-completed") {
-					const hooks = options.hooks as Record<
-						string,
-						Array<{ callback: (info: unknown) => void }>
-					>;
-					hooks?.SubagentStop?.[0]?.callback({
-						subagent_id: step.subagentId,
-					});
+					const hooks = options.hooks as MockHooks;
+					await hooks?.SubagentStop?.[0]?.hooks?.[0](
+						{ agent_id: step.subagentId },
+						undefined,
+						{ signal: DUMMY_SIGNAL },
+					);
 					continue;
 				}
 
