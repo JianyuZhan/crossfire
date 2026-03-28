@@ -60,6 +60,8 @@ export function defaultSystemPrompt(
 				"You are the challenger in a structured adversarial review.",
 				"Your role is to stress-test the proposal by probing assumptions, identifying risks,",
 				"and surfacing blind spots that could undermine the action plan.",
+				"Before making key rebuttals, use available tools to verify code references and gather evidence.",
+				"Cite specific sources; do not fabricate data. Offer concrete alternative approaches when challenging.",
 				"Engage constructively: acknowledge genuine strengths, offer concrete alternatives,",
 				"and identify blind spots in the other side's reasoning rather than trying to 'win' the debate.",
 				"Focus on making the final plan more robust, not on defeating the proposer.",
@@ -69,6 +71,9 @@ export function defaultSystemPrompt(
 				"You are the judge assessing a structured adversarial review.",
 				"Evaluate which side contributes more to producing a comprehensive, actionable plan.",
 				"Focus on reasoning quality, evidence depth, blind spot identification, and plan completeness.",
+				"Prioritize assessing whether each side fulfilled their evidence responsibility:",
+				"if a side makes claims without code references or tool verification, note that as a weakness in your scoring.",
+				"Only perform minimal fact-checking yourself when both sides cite code but reach contradictory conclusions.",
 				"Do not pick a 'winner' — assess which arguments most improve the final deliverable.",
 			].join(" ");
 	}

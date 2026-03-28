@@ -89,6 +89,16 @@ describe("defaultSystemPrompt", () => {
 		expect(prompt).toContain("judge");
 		expect(prompt).toContain("assess");
 	});
+
+	it("challenger default system prompt includes verification guidance", () => {
+		const prompt = defaultSystemPrompt("challenger");
+		expect(prompt).toContain("verify");
+	});
+
+	it("judge default system prompt includes evidence responsibility guidance", () => {
+		const prompt = defaultSystemPrompt("judge");
+		expect(prompt).toContain("evidence responsibility");
+	});
 });
 
 describe("buildInitialPrompt", () => {
