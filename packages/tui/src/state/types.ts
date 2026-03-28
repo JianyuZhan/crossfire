@@ -16,9 +16,19 @@ export interface PlanStep {
 	status: string;
 }
 
+export interface SubagentEntry {
+	subagentId: string;
+	description?: string;
+	status: "running" | "completed";
+}
+
 /** Snapshot of a single agent's completed turn within a round */
 export interface AgentTurnSnapshot {
 	messageText: string;
+	thinkingText?: string;
+	thinkingType?: "raw-thinking" | "reasoning-summary";
+	latestPlan?: PlanStep[];
+	subagents?: SubagentEntry[];
 	tools: LiveToolEntry[];
 	turnDurationMs?: number;
 	turnStatus?: "completed" | "interrupted" | "failed" | "timeout";
@@ -57,9 +67,11 @@ export interface LiveAgentPanelState {
 	model?: string;
 	status: "idle" | "thinking" | "tool" | "speaking" | "done" | "error";
 	thinkingText: string;
+	thinkingType?: "raw-thinking" | "reasoning-summary";
 	currentMessageText: string;
 	tools: LiveToolEntry[];
 	latestPlan?: PlanStep[];
+	subagents?: SubagentEntry[];
 	warnings: string[];
 	error?: string;
 	turnDurationMs?: number;
@@ -187,7 +199,17 @@ export type RenderBlock =
 			status: string;
 			duration?: number;
 	  }
-	| { kind: "thinking"; text: string }
+	| {
+			kind: "thinking";
+			text: string;
+			thinkingType?: "raw-thinking" | "reasoning-summary";
+	  }
+	| { kind: "plan"; steps: PlanStep[] }
+	| {
+			kind: "subagent";
+			description: string;
+			status: "running" | "completed";
+	  }
 	| {
 			kind: "tool-call";
 			toolName: string;

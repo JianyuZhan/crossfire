@@ -63,4 +63,24 @@ describe("buildPanelLines", () => {
 			expect(line.displayWidth).toBeLessThanOrEqual(30);
 		}
 	});
+
+	it("renders plan and subagent blocks with readable text", () => {
+		const blocks = [
+			{ kind: "agent-header", role: "proposer", status: "tool" },
+			{
+				kind: "plan",
+				steps: [{ title: "Inspect files", status: "in_progress" }],
+			},
+			{
+				kind: "subagent",
+				description: "Research the failing path",
+				status: "running",
+			},
+		] as unknown as RenderBlock[];
+		const text = buildPanelLines(blocks, 40)
+			.flatMap((line) => line.segments.map((segment) => segment.text))
+			.join("");
+		expect(text).toContain("Inspect files");
+		expect(text).toContain("Research the failing path");
+	});
 });

@@ -44,7 +44,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 - **Action-plan first** — The primary output is `action-plan.html` / `action-plan.md`, not just a debate transcript
 - **Multi-provider** — Mix and match Claude (Agent SDK), Codex (JSON-RPC), and Gemini (subprocess) in any role
-- **Real-time TUI** — Split-panel terminal UI with live streaming, thinking indicators, tool-call traces, and convergence metrics
+- **Real-time TUI** — Split-panel terminal UI with live streaming, retained thinking summaries, plan/subagent traces, tool-call traces, and convergence metrics
 - **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates and replay completed ones from the same source of truth
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
@@ -61,7 +61,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 ## What You Get
 
-- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, judge feedback, and convergence tracking
+- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, retained thinking summaries, plan/subagent activity, judge feedback, and convergence tracking
 - **Action plan outputs** — Final report in Markdown and HTML for sharing, editing, or automation
 - **Full transcript** — Human-readable transcript in Markdown and HTML
 - **Replayable audit trail** — Event-sourced JSONL logs plus `index.json` metadata for replay, resume, and status inspection

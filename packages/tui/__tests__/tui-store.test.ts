@@ -12,6 +12,21 @@ function ev(kind: string, extra: Record<string, unknown> = {}): AnyEvent {
 	return { ...BASE, kind, ...extra } as AnyEvent;
 }
 
+interface SnapshotWithThinking {
+	thinkingText?: string;
+	thinkingType?: string;
+}
+
+interface PanelWithSubagents {
+	subagents?: Array<{
+		subagentId: string;
+		description?: string;
+		status: "running" | "completed";
+	}>;
+}
+
+type ProposerPanel = ReturnType<TuiStore["getState"]>["proposer"];
+
 describe("TuiStore", () => {
 	it("initializes with idle state", () => {
 		const store = new TuiStore();
@@ -272,6 +287,150 @@ describe("TuiStore", () => {
 		expect(store.getState().proposer.thinkingText.length).toBeLessThanOrEqual(
 			4096,
 		);
+	});
+
+	it("retains thinking summary across speaking and into the round snapshot", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 3,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("thinking.delta", {
+				text: "Break the problem into smaller steps.",
+				thinkingType: "reasoning-summary",
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("message.final", {
+				text: "Final answer",
+				role: "assistant",
+				turnId: "p-1",
+			}),
+		);
+		expect(store.getState().proposer.thinkingText).toContain(
+			"Break the problem",
+		);
+
+		store.handleEvent(
+			ev("turn.completed", {
+				status: "completed",
+				durationMs: 100,
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("round.completed", { roundNumber: 1, speaker: "proposer" }),
+		);
+
+		const snapshot = store.getState().rounds[0].proposer as
+			| SnapshotWithThinking
+			| undefined;
+		expect(snapshot?.thinkingText).toContain("Break the problem");
+		expect(snapshot?.thinkingType).toBe("reasoning-summary");
+	});
+
+	it("stores plan updates for the active speaker", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 3,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("plan.updated", {
+				steps: [
+					{ description: "Inspect files", status: "completed" },
+					{ description: "Patch tests", status: "in_progress" },
+				],
+				turnId: "p-1",
+			}),
+		);
+		expect(store.getState().proposer.latestPlan).toEqual([
+			{ id: "step-0", title: "Inspect files", status: "completed" },
+			{ id: "step-1", title: "Patch tests", status: "in_progress" },
+		]);
+	});
+
+	it("tracks subagent lifecycle in live state and completed snapshots", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 3,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("subagent.started", {
+				subagentId: "sa-1",
+				description: "Research supporting evidence",
+				turnId: "p-1",
+			}),
+		);
+		let proposer = store.getState().proposer as ProposerPanel &
+			PanelWithSubagents;
+		expect(proposer.subagents).toEqual([
+			{
+				subagentId: "sa-1",
+				description: "Research supporting evidence",
+				status: "running",
+			},
+		]);
+
+		store.handleEvent(
+			ev("subagent.completed", {
+				subagentId: "sa-1",
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("turn.completed", {
+				status: "completed",
+				durationMs: 100,
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("round.completed", { roundNumber: 1, speaker: "proposer" }),
+		);
+
+		proposer = store.getState().proposer as ProposerPanel & PanelWithSubagents;
+		expect(proposer.subagents?.[0]?.status).toBe("completed");
+		const snapshot = store.getState().rounds[0].proposer as
+			| (SnapshotWithThinking & PanelWithSubagents)
+			| undefined;
+		expect(snapshot?.subagents).toEqual([
+			{
+				subagentId: "sa-1",
+				description: "Research supporting evidence",
+				status: "completed",
+			},
+		]);
 	});
 
 	it("fires subscriber callbacks on events", () => {

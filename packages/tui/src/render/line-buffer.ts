@@ -231,12 +231,48 @@ export function buildPanelLines(
 				break;
 			}
 			case "thinking": {
+				const prefix =
+					block.thinkingType === "reasoning-summary"
+						? "Reasoning: "
+						: "\uD83D\uDCAD ";
 				const lines = wrapText(block.text, panelWidth, {
-					firstLinePrefix: [{ text: "\uD83D\uDCAD ", style: { dim: true } }],
-					continuationIndent: 3,
+					firstLinePrefix: [{ text: prefix, style: { dim: true } }],
+					continuationIndent: prefix.length,
 					style: { dim: true, italic: true },
 				});
 				result.push(...lines);
+				break;
+			}
+			case "plan": {
+				result.push(
+					screenLine([{ text: "Plan", style: { bold: true, dim: true } }]),
+				);
+				const STEP_PREFIXES: Record<string, string> = {
+					completed: "[x] ",
+					in_progress: "[>] ",
+					pending: "[ ] ",
+					failed: "[!] ",
+				};
+				for (const step of block.steps) {
+					const prefix = STEP_PREFIXES[step.status] ?? "[ ] ";
+					result.push(
+						...wrapText(`${prefix}${step.title}`, panelWidth, {
+							continuationIndent: prefix.length,
+							style: { dim: true },
+						}),
+					);
+				}
+				break;
+			}
+			case "subagent": {
+				const prefix =
+					block.status === "completed" ? "Subagent ✓ " : "Subagent ▶ ";
+				result.push(
+					...wrapText(`${prefix}${block.description}`, panelWidth, {
+						continuationIndent: prefix.length,
+						style: { dim: true },
+					}),
+				);
 				break;
 			}
 			case "tool-call": {

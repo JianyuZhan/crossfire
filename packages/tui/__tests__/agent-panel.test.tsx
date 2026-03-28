@@ -56,6 +56,34 @@ describe("AgentPanel — live mode", () => {
 		expect(lastFrame()).toContain("I argue that...");
 	});
 
+	it("keeps thinking summary and plan details visible while speaking", () => {
+		const { lastFrame } = render(
+			<AgentPanel
+				mode="live"
+				role="proposer"
+				state={makePanel({
+					status: "speaking",
+					thinkingText: "First inspect the failing path",
+					thinkingType: "reasoning-summary",
+					currentMessageText: "I argue that...",
+					latestPlan: [
+						{ id: "step-1", title: "Inspect files", status: "completed" },
+					],
+					subagents: [
+						{
+							subagentId: "sa-1",
+							description: "Research edge cases",
+							status: "running",
+						},
+					],
+				})}
+			/>,
+		);
+		expect(lastFrame()).toContain("Reasoning:");
+		expect(lastFrame()).toContain("Inspect files");
+		expect(lastFrame()).toContain("Research edge cases");
+	});
+
 	it("shows tool calls", () => {
 		const { lastFrame } = render(
 			<AgentPanel

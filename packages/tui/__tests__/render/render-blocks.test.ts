@@ -57,6 +57,47 @@ describe("liveStateToBlocks", () => {
 		expect(blocks.some((b) => b.kind === "thinking")).toBe(true);
 	});
 
+	it("keeps thinking visible after speaking starts", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			agentType: "codex",
+			status: "speaking",
+			thinkingText: "First reason about the repo shape",
+			currentMessageText: "Here is the answer...",
+			tools: [],
+			warnings: [],
+		};
+		const blocks = liveStateToBlocks(state);
+		expect(blocks.some((b) => b.kind === "thinking")).toBe(true);
+		expect(blocks.some((b) => b.kind === "message")).toBe(true);
+	});
+
+	it("includes plan and subagent blocks when present", () => {
+		const state = {
+			role: "challenger",
+			status: "tool",
+			thinkingText: "",
+			currentMessageText: "",
+			tools: [],
+			warnings: [],
+			latestPlan: [
+				{ id: "step-1", title: "Inspect files", status: "in_progress" },
+			],
+			subagents: [
+				{
+					subagentId: "sa-1",
+					description: "Research the test failure",
+					status: "running",
+				},
+			],
+		} as unknown as LiveAgentPanelState;
+		const blocks = liveStateToBlocks(state);
+		expect(blocks.some((b) => b.kind === "plan")).toBe(true);
+		expect(
+			blocks.some((block) => (block as { kind: string }).kind === "subagent"),
+		).toBe(true);
+	});
+
 	it("includes streaming message when speaking", () => {
 		const state: LiveAgentPanelState = {
 			role: "challenger",

@@ -38,6 +38,23 @@ export function snapshotToBlocks(
 			duration: snap.turnDurationMs,
 		},
 	];
+	if (snap.thinkingText) {
+		blocks.push({
+			kind: "thinking",
+			text: snap.thinkingText,
+			thinkingType: snap.thinkingType,
+		});
+	}
+	if (snap.latestPlan?.length) {
+		blocks.push({ kind: "plan", steps: snap.latestPlan });
+	}
+	for (const subagent of snap.subagents ?? []) {
+		blocks.push({
+			kind: "subagent",
+			description: subagent.description ?? subagent.subagentId,
+			status: subagent.status,
+		});
+	}
 	for (const t of snap.tools) blocks.push(toolToBlock(t));
 	for (const w of snap.warnings) blocks.push({ kind: "warning", text: w });
 	if (snap.error) blocks.push({ kind: "error", text: snap.error });
@@ -56,8 +73,22 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 			duration: state.turnDurationMs,
 		},
 	];
-	if (state.status === "thinking" && state.thinkingText) {
-		blocks.push({ kind: "thinking", text: state.thinkingText });
+	if (state.thinkingText) {
+		blocks.push({
+			kind: "thinking",
+			text: state.thinkingText,
+			thinkingType: state.thinkingType,
+		});
+	}
+	if (state.latestPlan?.length) {
+		blocks.push({ kind: "plan", steps: state.latestPlan });
+	}
+	for (const subagent of state.subagents ?? []) {
+		blocks.push({
+			kind: "subagent",
+			description: subagent.description ?? subagent.subagentId,
+			status: subagent.status,
+		});
 	}
 	for (const t of state.tools) blocks.push(toolToBlock(t));
 	for (const w of state.warnings) blocks.push({ kind: "warning", text: w });

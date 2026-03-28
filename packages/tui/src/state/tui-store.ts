@@ -34,8 +34,10 @@ function defaultAgentPanel(
 		role,
 		status: "idle",
 		thinkingText: "",
+		thinkingType: undefined,
 		currentMessageText: "",
 		tools: [],
+		subagents: [],
 		warnings: [],
 	};
 }
@@ -95,6 +97,10 @@ const DEFAULT_DEBATE_STATE: DebateState = {
 function captureSnapshot(panel: LiveAgentPanelState): AgentTurnSnapshot {
 	return {
 		messageText: stripInternalToolBlocks(panel.currentMessageText),
+		thinkingText: panel.thinkingText || undefined,
+		thinkingType: panel.thinkingType,
+		latestPlan: panel.latestPlan?.map((step) => ({ ...step })),
+		subagents: panel.subagents?.map((subagent) => ({ ...subagent })),
 		tools: panel.tools.map((t) => ({ ...t, expanded: false })),
 		turnDurationMs: panel.turnDurationMs,
 		turnStatus: panel.turnStatus,
@@ -558,8 +564,11 @@ export class TuiStore {
 				this.activeSpeaker = e.speaker;
 				const p = this.state[e.speaker];
 				p.thinkingText = "";
+				p.thinkingType = undefined;
 				p.currentMessageText = "";
 				p.tools = [];
+				p.latestPlan = undefined;
+				p.subagents = [];
 				p.warnings = [];
 				p.error = undefined;
 				p.status = "thinking";
@@ -594,13 +603,18 @@ export class TuiStore {
 			case "thinking.delta": {
 				const p = this.panel();
 				if (!p) break;
-				const e = event as { text: string };
+				const e = event as {
+					text: string;
+					thinkingType?: "raw-thinking" | "reasoning-summary";
+				};
 				if (p.status === "idle") {
 					p.thinkingText = "";
+					p.thinkingType = undefined;
 					p.currentMessageText = "";
 				}
 				p.status = "thinking";
 				p.thinkingText += e.text;
+				p.thinkingType = e.thinkingType ?? p.thinkingType;
 				if (p.thinkingText.length > MAX_THINKING_BYTES) {
 					p.thinkingText = p.thinkingText.slice(-MAX_THINKING_BYTES);
 				}
@@ -611,6 +625,7 @@ export class TuiStore {
 				if (p) {
 					if (p.status === "idle") {
 						p.thinkingText = "";
+						p.thinkingType = undefined;
 						p.currentMessageText = "";
 					}
 					p.status = "speaking";
@@ -631,7 +646,6 @@ export class TuiStore {
 			case "message.final": {
 				const p = this.panel();
 				if (p) {
-					p.thinkingText = "";
 					p.currentMessageText = stripInternalToolBlocks(
 						(event as { text: string }).text,
 					);
@@ -657,6 +671,7 @@ export class TuiStore {
 				if (INTERNAL_TOOLS.has(e.toolName)) break;
 				if (p.status === "idle") {
 					p.thinkingText = "";
+					p.thinkingType = undefined;
 					p.currentMessageText = "";
 				}
 				p.status = "tool";
@@ -862,6 +877,43 @@ export class TuiStore {
 						title: step.description,
 						status: step.status,
 					}));
+				}
+				break;
+			}
+			case "subagent.started": {
+				const p = this.panel();
+				if (!p) break;
+				const e = event as { subagentId: string; description?: string };
+				if (!p.subagents) p.subagents = [];
+				const existing = p.subagents.find(
+					(subagent) => subagent.subagentId === e.subagentId,
+				);
+				if (existing) {
+					existing.description = e.description ?? existing.description;
+					existing.status = "running";
+				} else {
+					p.subagents.push({
+						subagentId: e.subagentId,
+						description: e.description,
+						status: "running",
+					});
+				}
+				break;
+			}
+			case "subagent.completed": {
+				const p = this.panel();
+				if (!p?.subagents) break;
+				const e = event as { subagentId: string };
+				const existing = p.subagents.find(
+					(subagent) => subagent.subagentId === e.subagentId,
+				);
+				if (existing) {
+					existing.status = "completed";
+				} else {
+					p.subagents.push({
+						subagentId: e.subagentId,
+						status: "completed",
+					});
 				}
 				break;
 			}

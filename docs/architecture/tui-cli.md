@@ -41,6 +41,8 @@ Important implementation notes:
 - it does not re-project full debate state on every delta event
 - usage accounting is provider-aware, including normalization for providers that report cumulative usage
 - `thinkingText` is front-trimmed to about 4096 characters
+- thinking is no longer a purely transient status-only string; the latest retained thinking summary is kept visible while tools/messages stream and can be copied into completed round snapshots
+- `plan.updated` and `subagent.*` are projected into live panel state and completed snapshots rather than being dropped on the floor
 - visible assistant text is stripped of internal `debate_meta` / `judge_verdict` JSON blocks before rendering
 
 ## Render Pipeline
@@ -59,6 +61,12 @@ App
 Round/judge/summary visualization is produced indirectly through the chunk pipeline:
 
 `TuiStore` → `rebuildChunks()` → `populateChunkLines()` → `buildGlobalLineBuffer()`
+
+Current block-level rendering now includes:
+
+- retained thinking summaries, including `reasoning-summary` vs `raw-thinking` labeling
+- plan steps from `plan.updated`
+- subagent lifecycle entries from `subagent.started` / `subagent.completed`
 
 ## Command Parsing and Current Wiring
 

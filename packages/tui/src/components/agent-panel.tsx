@@ -11,6 +11,8 @@ import type {
 	AgentTurnSnapshot,
 	LiveAgentPanelState,
 	LiveToolEntry,
+	PlanStep,
+	SubagentEntry,
 } from "../state/types.js";
 
 type AgentRole = "proposer" | "challenger";
@@ -90,6 +92,49 @@ function ToolList({ tools }: { tools: LiveToolEntry[] }): React.ReactElement {
 	);
 }
 
+function PlanList({ steps }: { steps: PlanStep[] }): React.ReactElement {
+	return (
+		<>
+			<Text dimColor bold>
+				Plan
+			</Text>
+			{steps.map((step) => (
+				<Box key={step.id}>
+					<Text dimColor>
+						{step.status === "completed"
+							? "[x]"
+							: step.status === "in_progress"
+								? "[>]"
+								: step.status === "failed"
+									? "[!]"
+									: "[ ]"}{" "}
+						{step.title}
+					</Text>
+				</Box>
+			))}
+		</>
+	);
+}
+
+function SubagentList({
+	subagents,
+}: {
+	subagents: SubagentEntry[];
+}): React.ReactElement {
+	return (
+		<>
+			{subagents.map((subagent) => (
+				<Box key={subagent.subagentId}>
+					<Text dimColor>
+						{subagent.status === "completed" ? "Subagent ✓" : "Subagent ▶"}{" "}
+						{subagent.description ?? subagent.subagentId}
+					</Text>
+				</Box>
+			))}
+		</>
+	);
+}
+
 export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 	const label = roleLabel(props.role);
 	const color = ROLE_COLORS[props.role] ?? "white";
@@ -127,8 +172,27 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 						Error: {snapshot.error}
 					</Text>
 				)}
+				{snapshot.thinkingText && (
+					<Box marginTop={1}>
+						<Text dimColor italic>
+							{snapshot.thinkingType === "reasoning-summary"
+								? `Reasoning: ${snapshot.thinkingText}`
+								: snapshot.thinkingText}
+						</Text>
+					</Box>
+				)}
+				{snapshot.latestPlan && snapshot.latestPlan.length > 0 && (
+					<Box marginTop={1} flexDirection="column">
+						<PlanList steps={snapshot.latestPlan} />
+					</Box>
+				)}
+				{snapshot.subagents && snapshot.subagents.length > 0 && (
+					<Box marginTop={1} flexDirection="column">
+						<SubagentList subagents={snapshot.subagents} />
+					</Box>
+				)}
 				{snapshot.warnings.map((w, i) => (
-					<Text key={i} color="yellow">
+					<Text key={`${w}-${i}`} color="yellow">
 						⚠ {w}
 					</Text>
 				))}
@@ -165,15 +229,27 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 				</Box>
 			)}
 			{state.warnings.map((w, i) => (
-				<Text key={i} color="yellow">
+				<Text key={`${w}-${i}`} color="yellow">
 					⚠ {w}
 				</Text>
 			))}
-			{state.status === "thinking" && state.thinkingText && (
+			{state.thinkingText && (
 				<Box marginTop={1}>
 					<Text dimColor italic>
-						{state.thinkingText}
+						{state.thinkingType === "reasoning-summary"
+							? `Reasoning: ${state.thinkingText}`
+							: state.thinkingText}
 					</Text>
+				</Box>
+			)}
+			{state.latestPlan && state.latestPlan.length > 0 && (
+				<Box marginTop={1} flexDirection="column">
+					<PlanList steps={state.latestPlan} />
+				</Box>
+			)}
+			{state.subagents && state.subagents.length > 0 && (
+				<Box marginTop={1} flexDirection="column">
+					<SubagentList subagents={state.subagents} />
 				</Box>
 			)}
 			<ToolList tools={state.tools} />
