@@ -11,7 +11,7 @@ git clone https://github.com/jyzhan/crossfire.git
 cd crossfire
 pnpm install
 pnpm build            # Build all 8 packages (Turborepo)
-pnpm test             # Run unit/contract tests (~450 tests)
+pnpm test             # Run unit/contract tests (~950 tests)
 pnpm lint             # Biome check
 pnpm lint:fix         # Biome auto-fix
 ```
@@ -101,9 +101,9 @@ RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.1-codex-mini HAVE_GEMINI=1 \
 
 Crossfire currently maintains repository-level instruction surfaces for three agent environments:
 
-- `AGENTS.md` — shared cross-agent project contract
+- `AGENTS.md` — shared cross-agent project contract (Codex reads this directly)
 - `CLAUDE.md` — Claude-specific entry point that imports `AGENTS.md`
-- `.gemini/settings.json` — Gemini settings that point back to `AGENTS.md`
+- `GEMINI.md` — Gemini-specific entry point that imports `AGENTS.md`
 
 When updating these files, keep `AGENTS.md` minimal and contract-focused:
 
@@ -122,7 +122,7 @@ If behavior is specific to one environment, keep it in that environment's entry 
 | `docs/architecture/`                                | Detailed subsystem architecture references                           |
 | `AGENTS.md`                                         | Shared contract for repository-aware agent environments              |
 | `CLAUDE.md`                                         | Claude-specific instruction entry point                              |
-| `.gemini/settings.json`                             | Gemini settings that point to the shared repository contract         |
+| `GEMINI.md`                                         | Gemini-specific instruction entry point                              |
 | `packages/adapter-core/src/types.ts`                | `NormalizedEvent`, `AgentAdapter` interface                         |
 | `packages/orchestrator-core/src/types.ts`           | `DebateState`, `DebateConfig`, debate types                         |
 | `packages/orchestrator-core/src/context-builder.ts` | Incremental debate prompt construction                              |
