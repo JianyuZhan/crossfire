@@ -170,16 +170,88 @@ export function buildDraftReport(plan: EvolvingPlan): DraftReport {
 	};
 }
 
-export function draftToAuditReport(draft: DraftReport): AuditReport {
+/** Subset of DebateSummary fields used by draftToAuditReport */
+export interface FallbackSummaryInput {
+	leading?: string;
+	judgeScore?: { proposer: number; challenger: number } | null;
+	recommendedAction?: string | null;
+	consensus?: string[];
+	unresolved?: string[];
+}
+
+export function draftToAuditReport(
+	draft: DraftReport,
+	summary?: FallbackSummaryInput,
+): AuditReport {
 	const totalRounds = Math.max(
 		...draft.argumentTrajectories.map((t) => t.firstRound),
 		...draft.risks.map((r) => r.round),
 		1,
 	);
 
-	const executiveSummary = `Debate covered ${totalRounds} round(s). ${draft.consensus.length} item(s) reached consensus, ${draft.unresolved.length} remain unresolved.`;
+	// --- Merge consensus: draft items + summary items not already in draft ---
+	const draftConsensusTitles = new Set(
+		draft.consensus.map((c) => c.title.toLowerCase()),
+	);
+	const mergedConsensus = [...draft.consensus];
+	for (const sc of summary?.consensus ?? []) {
+		if (!draftConsensusTitles.has(sc.toLowerCase())) {
+			mergedConsensus.push({
+				title: sc,
+				supportingRounds: [],
+				challengesSurvived: [],
+				evidence: [],
+			});
+		}
+	}
 
-	const consensusItems = draft.consensus.map((c) => ({
+	// --- Merge unresolved: draft items + summary items not already in draft ---
+	const draftUnresolvedTitles = new Set(
+		draft.unresolved.map((u) => u.title.toLowerCase()),
+	);
+	const mergedUnresolved = [...draft.unresolved];
+	for (const su of summary?.unresolved ?? []) {
+		if (!draftUnresolvedTitles.has(su.toLowerCase())) {
+			mergedUnresolved.push({
+				title: su,
+				proposerArguments: [],
+				challengerArguments: [],
+				relatedRisks: [],
+			});
+		}
+	}
+
+	// --- Executive summary: use summary data when available, fall back to judge notes ---
+	const parts: string[] = [`Debate covered ${totalRounds} round(s).`];
+
+	if (mergedConsensus.length > 0) {
+		parts.push(`${mergedConsensus.length} item(s) reached consensus.`);
+	}
+	if (mergedUnresolved.length > 0) {
+		parts.push(`${mergedUnresolved.length} issue(s) remain unresolved.`);
+	}
+	if (summary?.leading && summary.leading !== "unknown") {
+		const scoreStr = summary.judgeScore
+			? ` (${summary.judgeScore.proposer} vs ${summary.judgeScore.challenger})`
+			: "";
+		parts.push(`Leading: ${summary.leading}${scoreStr}.`);
+	}
+	if (summary?.recommendedAction) {
+		parts.push(`Recommendation: ${summary.recommendedAction}`);
+	} else {
+		// Fall back to last judge note reasoning
+		const lastJudgeNote =
+			draft.judgeNotes.length > 0
+				? draft.judgeNotes[draft.judgeNotes.length - 1]
+				: undefined;
+		if (lastJudgeNote?.reasoning) {
+			parts.push(`Judge assessment: ${lastJudgeNote.reasoning}`);
+		}
+	}
+	const executiveSummary = parts.join(" ");
+
+	// --- Consensus items ---
+	const consensusItems = mergedConsensus.map((c) => ({
 		title: c.title,
 		detail:
 			c.challengesSurvived.length > 0
@@ -191,34 +263,63 @@ export function draftToAuditReport(draft: DraftReport): AuditReport {
 		supportingEvidence: c.evidence,
 	}));
 
-	const unresolvedIssues = draft.unresolved.map((u) => ({
-		title: u.title,
-		proposerPosition:
-			u.proposerArguments.join("; ") || "No specific position recorded.",
-		challengerPosition:
-			u.challengerArguments.join("; ") || "No specific position recorded.",
-		risk: u.relatedRisks.join("; ") || "No specific risk identified.",
-		suggestedExploration: "Further investigation recommended.",
-	}));
+	// --- Unresolved issues ---
+	const unresolvedIssues = mergedUnresolved.map((u) => {
+		const proposerPos =
+			u.proposerArguments.join("; ") || "No specific position recorded.";
+		const challengerPos =
+			u.challengerArguments.join("; ") || "No specific position recorded.";
+		const risk = u.relatedRisks.join("; ") || "No specific risk identified.";
+		const exploration =
+			proposerPos !== "No specific position recorded." &&
+			challengerPos !== "No specific position recorded."
+				? `Compare: proposer argues ${proposerPos.slice(0, 80)}; challenger argues ${challengerPos.slice(0, 80)}. Prototype both approaches to resolve.`
+				: `Review ${u.title} with additional stakeholder input.`;
+		return {
+			title: u.title,
+			proposerPosition: proposerPos,
+			challengerPosition: challengerPos,
+			risk,
+			suggestedExploration: exploration,
+		};
+	});
 
+	// --- Argument evolution ---
 	const argumentEvolution = draft.argumentTrajectories.map((t) => ({
 		argument: t.text,
 		trajectory: t.rounds.map((r) => `R${r.round}: ${r.event}`).join(" → "),
 		finalStatus: t.finalStatus,
 	}));
 
-	const riskMatrix = draft.risks.map((r) => ({
-		risk: r.risk,
-		severity: r.severity,
-		likelihood:
-			r.severity === "high" ? "high" : r.severity === "low" ? "low" : "medium",
-		mitigation: "Not discussed in debate.",
-	}));
+	// --- Risk matrix ---
+	const riskMatrix = draft.risks.map((r) => {
+		const relatedArgs = draft.argumentTrajectories.filter(
+			(t) =>
+				t.text.toLowerCase().includes(r.risk.toLowerCase().slice(0, 15)) ||
+				r.risk.toLowerCase().includes(t.text.toLowerCase().slice(0, 15)),
+		);
+		const mitigation =
+			relatedArgs.length > 0
+				? `Related debate points: ${relatedArgs.map((a) => a.text.slice(0, 60)).join("; ")}`
+				: `Raised in round ${r.round}; severity: ${r.severity}. Address during implementation planning.`;
+		return {
+			risk: r.risk,
+			severity: r.severity,
+			likelihood:
+				r.severity === "high"
+					? "high"
+					: r.severity === "low"
+						? "low"
+						: "medium",
+			mitigation,
+		};
+	});
 
+	// --- Evidence registry ---
 	const evidenceRegistry = draft.evidence.map((e) => ({
 		claim: e.claim,
 		source: e.source,
-		usedBy: "unknown",
+		usedBy: `round ${e.round}`,
 		contested: false,
 	}));
 

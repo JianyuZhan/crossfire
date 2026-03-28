@@ -676,7 +676,7 @@ export async function runDebate(
 					);
 				} else {
 					// Fallback: improved local template
-					const report = draftToAuditReport(draft);
+					const report = draftToAuditReport(draft, summary);
 					const totalItems =
 						draft.consensus.length +
 						draft.unresolved.length +

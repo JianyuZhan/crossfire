@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { DebateSummary } from "../src/director/summary-generator.js";
 import {
 	type AuditReport,
 	type DraftReport,
@@ -195,6 +196,113 @@ describe("draftToAuditReport — template quality", () => {
 		const report = draftToAuditReport(draft);
 		for (const ev of report.evidenceRegistry) {
 			expect(ev.usedBy).not.toBe("debate participant");
+		}
+	});
+});
+
+function makeRichSummary(): DebateSummary {
+	return {
+		terminationReason: "max_rounds",
+		roundsCompleted: 2,
+		leading: "challenger",
+		judgeScore: { proposer: 6, challenger: 8 },
+		recommendedAction: "Adopt modular monolith as compromise",
+		stanceTrajectory: {
+			proposer: [{ round: 1, stance: "strongly_agree", confidence: 0.9 }],
+			challenger: [{ round: 1, stance: "disagree", confidence: 0.8 }],
+		},
+		consensus: ["API-first design", "Incremental migration path"],
+		unresolved: ["Service boundary granularity", "Team readiness"],
+		totalTurns: 4,
+	};
+}
+
+describe("draftToAuditReport — with DebateSummary", () => {
+	it("uses summary.recommendedAction in executive summary", () => {
+		const plan = makePlanWith2Rounds();
+		const draft = buildDraftReport(plan);
+		const summary = makeRichSummary();
+		const report = draftToAuditReport(draft, summary);
+		expect(report.executiveSummary).toContain("Adopt modular monolith");
+	});
+
+	it("merges summary.consensus into consensus items when draft is sparse", () => {
+		let plan = makePlanWith2Rounds();
+		plan = { ...plan, consensus: [] }; // empty plan consensus
+		const draft = buildDraftReport(plan);
+		const summary = makeRichSummary();
+		const report = draftToAuditReport(draft, summary);
+		expect(report.consensusItems.length).toBeGreaterThanOrEqual(2);
+		expect(report.consensusItems.map((c) => c.title)).toContain(
+			"API-first design",
+		);
+	});
+
+	it("merges summary.unresolved into unresolved issues when draft is sparse", () => {
+		let plan = makePlanWith2Rounds();
+		plan = { ...plan, unresolved: [] }; // empty plan unresolved
+		const draft = buildDraftReport(plan);
+		const summary = makeRichSummary();
+		const report = draftToAuditReport(draft, summary);
+		expect(report.unresolvedIssues.length).toBeGreaterThanOrEqual(2);
+		expect(report.unresolvedIssues.map((u) => u.title)).toContain(
+			"Team readiness",
+		);
+	});
+
+	it("includes leading and judgeScore in executive summary", () => {
+		const plan = makePlanWith2Rounds();
+		const draft = buildDraftReport(plan);
+		const summary = makeRichSummary();
+		const report = draftToAuditReport(draft, summary);
+		expect(report.executiveSummary).toContain("challenger");
+		expect(report.executiveSummary).toMatch(/6.*8|8.*6/);
+	});
+
+	it("still works without summary (backward compat)", () => {
+		const plan = makePlanWith2Rounds();
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		expect(report.executiveSummary).toBeTruthy();
+	});
+});
+
+describe("draftToAuditReport — template quality (enriched)", () => {
+	it("uses judge reasoning in executive summary when available", () => {
+		const plan = makePlanWith2Rounds();
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		// judgeNotes has reasoning "Valid cost concerns"
+		expect(report.executiveSummary).toContain("Valid cost concerns");
+	});
+
+	it("does not use 'Not discussed in debate.' for risk mitigation", () => {
+		const plan = makePlanWith2Rounds();
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		for (const r of report.riskMatrix) {
+			expect(r.mitigation).not.toBe("Not discussed in debate.");
+		}
+	});
+
+	it("does not use 'Further investigation recommended.' for suggestedExploration", () => {
+		const plan = makePlanWith2Rounds();
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		for (const u of report.unresolvedIssues) {
+			expect(u.suggestedExploration).not.toBe(
+				"Further investigation recommended.",
+			);
+		}
+	});
+
+	it("uses round number for evidence usedBy instead of 'unknown'", () => {
+		const plan = makePlanWith2Rounds();
+		const draft = buildDraftReport(plan);
+		const report = draftToAuditReport(draft);
+		for (const ev of report.evidenceRegistry) {
+			expect(ev.usedBy).not.toBe("unknown");
+			expect(ev.usedBy).toMatch(/round \d+/);
 		}
 	});
 });
