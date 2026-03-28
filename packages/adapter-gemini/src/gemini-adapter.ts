@@ -154,6 +154,7 @@ export class GeminiAdapter implements AgentAdapter {
 			turnId: input.turnId,
 			sessionStarted: session.sessionStarted,
 			messageBuffer: "",
+			toolNamesById: {},
 		};
 
 		// Determine if this is a resume attempt (A path)

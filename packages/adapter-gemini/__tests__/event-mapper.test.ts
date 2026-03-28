@@ -8,6 +8,7 @@ function makeCtx(overrides: Partial<GeminiMapContext> = {}): GeminiMapContext {
 		turnId: "t1",
 		sessionStarted: false,
 		messageBuffer: "",
+		toolNamesById: {},
 		...overrides,
 	};
 }
@@ -46,6 +47,35 @@ describe("mapGeminiEvent", () => {
 			expect(events[0].text).toBe("Hello");
 			expect(events[0].role).toBe("assistant");
 		}
+	});
+
+	it("maps current CLI assistant content to message.delta", () => {
+		const ctx = makeCtx();
+		const events = mapGeminiEvent(
+			{
+				type: "message",
+				role: "assistant",
+				content: "Hello from content",
+				delta: true,
+			},
+			ctx,
+		);
+		expect(events).toHaveLength(1);
+		expect(events[0].kind).toBe("message.delta");
+		if (events[0].kind === "message.delta") {
+			expect(events[0].text).toBe("Hello from content");
+		}
+		expect(ctx.messageBuffer).toBe("Hello from content");
+	});
+
+	it("ignores non-assistant message events", () => {
+		const ctx = makeCtx();
+		const events = mapGeminiEvent(
+			{ type: "message", role: "user", content: "User prompt" },
+			ctx,
+		);
+		expect(events).toHaveLength(0);
+		expect(ctx.messageBuffer).toBe("");
 	});
 
 	it("message with role field uses provided role", () => {
@@ -107,6 +137,26 @@ describe("mapGeminiEvent", () => {
 		}
 	});
 
+	it("maps current CLI tool_use shape to tool.call", () => {
+		const ctx = makeCtx();
+		const events = mapGeminiEvent(
+			{
+				type: "tool_use",
+				tool_id: "tu2",
+				tool_name: "list_directory",
+				parameters: { dir_path: "." },
+			},
+			ctx,
+		);
+		expect(events).toHaveLength(1);
+		expect(events[0].kind).toBe("tool.call");
+		if (events[0].kind === "tool.call") {
+			expect(events[0].toolUseId).toBe("tu2");
+			expect(events[0].toolName).toBe("list_directory");
+			expect(events[0].input).toEqual({ dir_path: "." });
+		}
+	});
+
 	it("maps tool_result to tool.result", () => {
 		const ctx = makeCtx();
 		const events = mapGeminiEvent(
@@ -123,6 +173,57 @@ describe("mapGeminiEvent", () => {
 		expect(events[0].kind).toBe("tool.result");
 		if (events[0].kind === "tool.result") {
 			expect(events[0].toolUseId).toBe("tu1");
+			expect(events[0].success).toBe(true);
+		}
+	});
+
+	it("maps current CLI tool_result shape to tool.result", () => {
+		const ctx = makeCtx();
+		const events = mapGeminiEvent(
+			{
+				type: "tool_result",
+				tool_id: "tu2",
+				tool_name: "list_directory",
+				status: "success",
+				output: "Listed 28 item(s).",
+			},
+			ctx,
+		);
+		expect(events).toHaveLength(1);
+		expect(events[0].kind).toBe("tool.result");
+		if (events[0].kind === "tool.result") {
+			expect(events[0].toolUseId).toBe("tu2");
+			expect(events[0].toolName).toBe("list_directory");
+			expect(events[0].success).toBe(true);
+			expect(events[0].output).toBe("Listed 28 item(s).");
+		}
+	});
+
+	it("maps current CLI tool_result without tool_name using cached tool name", () => {
+		const ctx = makeCtx();
+		mapGeminiEvent(
+			{
+				type: "tool_use",
+				tool_id: "tu3",
+				tool_name: "list_directory",
+				parameters: { dir_path: "." },
+			},
+			ctx,
+		);
+		const events = mapGeminiEvent(
+			{
+				type: "tool_result",
+				tool_id: "tu3",
+				status: "success",
+				output: "Listed 28 item(s).",
+			},
+			ctx,
+		);
+		expect(events).toHaveLength(1);
+		expect(events[0].kind).toBe("tool.result");
+		if (events[0].kind === "tool.result") {
+			expect(events[0].toolUseId).toBe("tu3");
+			expect(events[0].toolName).toBe("list_directory");
 			expect(events[0].success).toBe(true);
 		}
 	});
@@ -193,6 +294,37 @@ describe("mapGeminiEvent", () => {
 		expect(events.filter((e) => e.kind === "message.final")).toHaveLength(0);
 		expect(events.filter((e) => e.kind === "usage.updated")).toHaveLength(1);
 		expect(events.filter((e) => e.kind === "turn.completed")).toHaveLength(1);
+	});
+
+	it("maps current CLI result stats to usage.updated and turn.completed usage", () => {
+		const ctx = makeCtx({ messageBuffer: "Hi" });
+		const events = mapGeminiEvent(
+			{
+				type: "result",
+				status: "success",
+				stats: {
+					input_tokens: 13170,
+					output_tokens: 56,
+					duration_ms: 4952,
+				},
+			},
+			ctx,
+		);
+		expect(events).toHaveLength(3);
+		expect(events[0].kind).toBe("message.final");
+		expect(events[1].kind).toBe("usage.updated");
+		if (events[1].kind === "usage.updated") {
+			expect(events[1].inputTokens).toBe(13170);
+			expect(events[1].outputTokens).toBe(56);
+		}
+		expect(events[2].kind).toBe("turn.completed");
+		if (events[2].kind === "turn.completed") {
+			expect(events[2].durationMs).toBe(4952);
+			expect(events[2].usage).toEqual({
+				inputTokens: 13170,
+				outputTokens: 56,
+			});
+		}
 	});
 
 	it("returns empty for unknown event types", () => {

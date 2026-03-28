@@ -7,6 +7,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { GeminiAdapter } from "../src/gemini-adapter.js";
 
 const RUN_INTEGRATION = process.env.RUN_INTEGRATION === "1";
+const INTEGRATION_TIMEOUT_MS = 90000;
+const TEST_MODEL = process.env.GEMINI_MODEL;
 
 describe.skipIf(!RUN_INTEGRATION)("Gemini integration", () => {
 	let geminiAvailable = false;
@@ -25,102 +27,110 @@ describe.skipIf(!RUN_INTEGRATION)("Gemini integration", () => {
 		}
 	});
 
-	it("smoke: single turn -> message.final -> turn.completed -> close", async () => {
-		if (!geminiAvailable) {
-			console.warn("Skipping: gemini CLI not found in PATH");
-			return;
-		}
+	it(
+		"smoke: single turn -> message.final -> turn.completed -> close",
+		async () => {
+			if (!geminiAvailable) {
+				console.warn("Skipping: gemini CLI not found in PATH");
+				return;
+			}
 
-		// Use default ProcessManager (spawns real gemini CLI)
-		const adapter = new GeminiAdapter();
-		const { events, unsubscribe } = collectEvents(adapter);
+			// Use default ProcessManager (spawns real gemini CLI)
+			const adapter = new GeminiAdapter();
+			const { events, unsubscribe } = collectEvents(adapter);
 
-		try {
-			// Start session
-			const handle = await adapter.startSession({
-				profile: "test",
-				workingDirectory: process.cwd(),
-				model: "gemini-flash", // Cheapest model
-			});
+			try {
+				// Start session
+				const handle = await adapter.startSession({
+					profile: "test",
+					workingDirectory: process.cwd(),
+					model: TEST_MODEL,
+				});
 
-			// Send a simple turn
-			await adapter.sendTurn(handle, {
-				turnId: "turn-1",
-				prompt: "What is 2+2? Answer briefly.",
-			});
+				// Send a simple turn
+				await adapter.sendTurn(handle, {
+					turnId: "turn-1",
+					prompt: "What is 2+2? Answer briefly.",
+				});
 
-			// Wait for turn completion with generous timeout
-			await waitForTurnCompleted(events, "turn-1", 60000);
+				// Wait for turn completion with generous timeout
+				await waitForTurnCompleted(events, "turn-1", 60000);
 
-			// Assert: session.started was emitted
-			const sessionStarted = events.find((e) => e.kind === "session.started");
-			expect(sessionStarted).toBeDefined();
+				// Assert: session.started was emitted
+				const sessionStarted = events.find((e) => e.kind === "session.started");
+				expect(sessionStarted).toBeDefined();
 
-			// Assert: at least one message.delta
-			const messageDeltas = events.filter((e) => e.kind === "message.delta");
-			expect(messageDeltas.length).toBeGreaterThan(0);
+				// Assert: at least one message.delta
+				const messageDeltas = events.filter((e) => e.kind === "message.delta");
+				expect(messageDeltas.length).toBeGreaterThan(0);
 
-			// Assert: message.final
-			const messageFinal = events.find((e) => e.kind === "message.final");
-			expect(messageFinal).toBeDefined();
+				// Assert: message.final
+				const messageFinal = events.find((e) => e.kind === "message.final");
+				expect(messageFinal).toBeDefined();
 
-			// Assert: turn.completed
-			const turnCompleted = events.find(
-				(e) => e.kind === "turn.completed" && e.turnId === "turn-1",
-			);
-			expect(turnCompleted).toBeDefined();
-			expect(turnCompleted?.status).toBe("completed");
+				// Assert: turn.completed
+				const turnCompleted = events.find(
+					(e) => e.kind === "turn.completed" && e.turnId === "turn-1",
+				);
+				expect(turnCompleted).toBeDefined();
+				expect(turnCompleted?.status).toBe("completed");
 
-			// Close the session
-			await adapter.close(handle);
-		} finally {
-			unsubscribe();
-		}
-	}, 60000);
+				// Close the session
+				await adapter.close(handle);
+			} finally {
+				unsubscribe();
+			}
+		},
+		INTEGRATION_TIMEOUT_MS,
+	);
 
-	it("resume: second turn reuses session", async () => {
-		if (!geminiAvailable) {
-			console.warn("Skipping: gemini CLI not found in PATH");
-			return;
-		}
+	it(
+		"resume: second turn reuses session",
+		async () => {
+			if (!geminiAvailable) {
+				console.warn("Skipping: gemini CLI not found in PATH");
+				return;
+			}
 
-		// Use default ProcessManager (spawns real gemini CLI)
-		const adapter = new GeminiAdapter();
-		const { events, unsubscribe } = collectEvents(adapter);
+			// Use default ProcessManager (spawns real gemini CLI)
+			const adapter = new GeminiAdapter();
+			const { events, unsubscribe } = collectEvents(adapter);
 
-		try {
-			// Start session
-			const handle = await adapter.startSession({
-				profile: "test",
-				workingDirectory: process.cwd(),
-				model: "gemini-flash",
-			});
+			try {
+				// Start session
+				const handle = await adapter.startSession({
+					profile: "test",
+					workingDirectory: process.cwd(),
+					model: TEST_MODEL,
+				});
 
-			// First turn
-			await adapter.sendTurn(handle, {
-				turnId: "turn-1",
-				prompt: "Say 'hello'",
-			});
-			await waitForTurnCompleted(events, "turn-1", 60000);
+				// First turn
+				await adapter.sendTurn(handle, {
+					turnId: "turn-1",
+					prompt: "Say 'hello'",
+				});
+				await waitForTurnCompleted(events, "turn-1", 60000);
 
-			// Capture providerSessionId after first turn
-			const firstProviderSessionId = handle.providerSessionId;
-			expect(firstProviderSessionId).toBeDefined();
+				// Capture providerSessionId after first turn
+				const firstProviderSessionId = handle.providerSessionId;
+				expect(firstProviderSessionId).toBeDefined();
 
-			// Second turn
-			await adapter.sendTurn(handle, {
-				turnId: "turn-2",
-				prompt: "Say 'goodbye'",
-			});
-			await waitForTurnCompleted(events, "turn-2", 60000);
+				// Second turn
+				await adapter.sendTurn(handle, {
+					turnId: "turn-2",
+					prompt: "Say 'goodbye'",
+				});
+				await waitForTurnCompleted(events, "turn-2", 60000);
 
-			// Assert: providerSessionId is consistent
-			expect(handle.providerSessionId).toBe(firstProviderSessionId);
+				// Assert: providerSessionId is consistent
+				expect(handle.providerSessionId).toBe(firstProviderSessionId);
 
-			// Close the session
-			await adapter.close(handle);
-		} finally {
-			unsubscribe();
-		}
-	}, 120000);
+				// Close the session
+				await adapter.close(handle);
+			} finally {
+				unsubscribe();
+			}
+		},
+		INTEGRATION_TIMEOUT_MS * 2,
+	);
 });

@@ -9,11 +9,34 @@ export interface GeminiMapContext {
 	turnId: string;
 	sessionStarted: boolean;
 	messageBuffer: string;
+	toolNamesById: Record<string, string>;
 }
 
 interface GeminiEvent {
 	type: string;
 	[key: string]: unknown;
+}
+
+function readMessageText(event: GeminiEvent): string {
+	return String(event.content ?? event.text ?? "");
+}
+
+function readToolUseId(event: GeminiEvent): string {
+	return String(event.tool_id ?? event.tool_use_id ?? "");
+}
+
+function readToolName(event: GeminiEvent, ctx: GeminiMapContext): string {
+	const toolUseId = readToolUseId(event);
+	return String(
+		event.tool_name ??
+			event.name ??
+			(toolUseId ? ctx.toolNamesById[toolUseId] : undefined) ??
+			"unknown",
+	);
+}
+
+function readToolInput(event: GeminiEvent): unknown {
+	return event.parameters ?? event.input;
 }
 
 export function mapGeminiEvent(
@@ -45,7 +68,8 @@ export function mapGeminiEvent(
 		}
 
 		case "message": {
-			const text = event.text as string;
+			if (event.role && event.role !== "assistant") return [];
+			const text = readMessageText(event);
 			if (!text) return [];
 			ctx.messageBuffer += text;
 			return [
@@ -70,25 +94,33 @@ export function mapGeminiEvent(
 		}
 
 		case "tool_use": {
+			const toolUseId = readToolUseId(event);
+			const toolName = readToolName(event, ctx);
+			if (toolUseId && toolName !== "unknown") {
+				ctx.toolNamesById[toolUseId] = toolName;
+			}
 			return [
 				{
 					...base,
 					kind: "tool.call",
-					toolUseId: event.tool_use_id as string,
-					toolName: event.name as string,
-					input: event.input,
+					toolUseId,
+					toolName,
+					input: readToolInput(event),
 				},
 			];
 		}
 
 		case "tool_result": {
+			const toolUseId = readToolUseId(event);
 			return [
 				{
 					...base,
 					kind: "tool.result",
-					toolUseId: event.tool_use_id as string,
-					toolName: (event.name as string) ?? "unknown",
-					success: (event.success as boolean) ?? true,
+					toolUseId,
+					toolName: readToolName(event, ctx),
+					success:
+						(event.success as boolean | undefined) ??
+						event.status === "success",
 					output: event.output,
 				},
 			];
@@ -125,9 +157,13 @@ export function mapGeminiEvent(
 				});
 				ctx.messageBuffer = "";
 			}
-			const rawUsage = event.usage as
-				| { input_tokens: number; output_tokens: number }
-				| undefined;
+			const rawUsage =
+				(event.usage as
+					| { input_tokens: number; output_tokens: number }
+					| undefined) ??
+				(event.stats as
+					| { input_tokens: number; output_tokens: number }
+					| undefined);
 			const normalizedUsage = rawUsage
 				? {
 						inputTokens: rawUsage.input_tokens,
@@ -145,7 +181,10 @@ export function mapGeminiEvent(
 				...base,
 				kind: "turn.completed",
 				status: "completed",
-				durationMs: (event.duration_ms as number) ?? 0,
+				durationMs:
+					(event.duration_ms as number | undefined) ??
+					(event.stats as { duration_ms?: number } | undefined)?.duration_ms ??
+					0,
 				usage: normalizedUsage,
 			});
 			return events;

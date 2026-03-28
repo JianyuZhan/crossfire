@@ -7,6 +7,18 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { CodexAdapter } from "../src/codex-adapter.js";
 
 const RUN_INTEGRATION = process.env.RUN_INTEGRATION === "1";
+const INTEGRATION_TIMEOUT_MS = 90000;
+const TEST_MODEL = process.env.CODEX_MODEL || "gpt-5.1-codex-mini";
+
+function spawnFn() {
+	const proc = spawn("codex", ["app-server"], {
+		stdio: ["pipe", "pipe", "inherit"],
+	});
+	return {
+		stdin: proc.stdin,
+		stdout: proc.stdout,
+	};
+}
 
 describe.skipIf(!RUN_INTEGRATION)("Codex integration", () => {
 	let codexAvailable = false;
@@ -25,122 +37,108 @@ describe.skipIf(!RUN_INTEGRATION)("Codex integration", () => {
 		}
 	});
 
-	it("smoke: single turn -> message.final -> turn.completed -> close", async () => {
-		if (!codexAvailable) {
-			console.warn("Skipping: codex CLI not found in PATH");
-			return;
-		}
+	it(
+		"smoke: single turn -> message.final -> turn.completed -> close",
+		async () => {
+			if (!codexAvailable) {
+				console.warn("Skipping: codex CLI not found in PATH");
+				return;
+			}
 
-		// Spawn real codex process
-		const spawnFn = () => {
-			const proc = spawn("codex", ["--listen", "stdio://"], {
-				stdio: ["pipe", "pipe", "pipe"],
-			});
-			return {
-				stdin: proc.stdin,
-				stdout: proc.stdout,
-			};
-		};
+			const adapter = new CodexAdapter({ spawnFn });
+			const { events, unsubscribe } = collectEvents(adapter);
 
-		const adapter = new CodexAdapter({ spawnFn });
-		const { events, unsubscribe } = collectEvents(adapter);
+			try {
+				// Start session
+				const handle = await adapter.startSession({
+					profile: "test",
+					workingDirectory: process.cwd(),
+					model: TEST_MODEL,
+				});
 
-		try {
-			// Start session
-			const handle = await adapter.startSession({
-				profile: "test",
-				workingDirectory: process.cwd(),
-				model: "o4-mini", // Cheapest model
-			});
+				// Send a simple turn
+				await adapter.sendTurn(handle, {
+					turnId: "turn-1",
+					prompt: "What is 2+2? Answer briefly.",
+				});
 
-			// Send a simple turn
-			await adapter.sendTurn(handle, {
-				turnId: "turn-1",
-				prompt: "What is 2+2? Answer briefly.",
-			});
+				// Wait for turn completion with generous timeout
+				await waitForTurnCompleted(events, "turn-1", 60000);
 
-			// Wait for turn completion with generous timeout
-			await waitForTurnCompleted(events, "turn-1", 60000);
+				// Assert: session.started was emitted
+				const sessionStarted = events.find((e) => e.kind === "session.started");
+				expect(sessionStarted).toBeDefined();
 
-			// Assert: session.started was emitted
-			const sessionStarted = events.find((e) => e.kind === "session.started");
-			expect(sessionStarted).toBeDefined();
+				// Assert: at least one message.delta
+				const messageDeltas = events.filter((e) => e.kind === "message.delta");
+				expect(messageDeltas.length).toBeGreaterThan(0);
 
-			// Assert: at least one message.delta
-			const messageDeltas = events.filter((e) => e.kind === "message.delta");
-			expect(messageDeltas.length).toBeGreaterThan(0);
+				// Assert: message.final
+				const messageFinal = events.find((e) => e.kind === "message.final");
+				expect(messageFinal).toBeDefined();
 
-			// Assert: message.final
-			const messageFinal = events.find((e) => e.kind === "message.final");
-			expect(messageFinal).toBeDefined();
+				// Assert: turn.completed
+				const turnCompleted = events.find(
+					(e) => e.kind === "turn.completed" && e.turnId === "turn-1",
+				);
+				expect(turnCompleted).toBeDefined();
+				expect(turnCompleted?.status).toBe("completed");
 
-			// Assert: turn.completed
-			const turnCompleted = events.find(
-				(e) => e.kind === "turn.completed" && e.turnId === "turn-1",
-			);
-			expect(turnCompleted).toBeDefined();
-			expect(turnCompleted?.status).toBe("completed");
+				// Close the session
+				await adapter.close(handle);
+			} finally {
+				unsubscribe();
+			}
+		},
+		INTEGRATION_TIMEOUT_MS,
+	);
 
-			// Close the session
-			await adapter.close(handle);
-		} finally {
-			unsubscribe();
-		}
-	}, 60000);
+	it(
+		"resume: second turn reuses session",
+		async () => {
+			if (!codexAvailable) {
+				console.warn("Skipping: codex CLI not found in PATH");
+				return;
+			}
 
-	it("resume: second turn reuses session", async () => {
-		if (!codexAvailable) {
-			console.warn("Skipping: codex CLI not found in PATH");
-			return;
-		}
+			const adapter = new CodexAdapter({ spawnFn });
+			const { events, unsubscribe } = collectEvents(adapter);
 
-		// Spawn real codex process
-		const spawnFn = () => {
-			const proc = spawn("codex", ["--listen", "stdio://"], {
-				stdio: ["pipe", "pipe", "pipe"],
-			});
-			return {
-				stdin: proc.stdin,
-				stdout: proc.stdout,
-			};
-		};
+			try {
+				// Start session
+				const handle = await adapter.startSession({
+					profile: "test",
+					workingDirectory: process.cwd(),
+					model: TEST_MODEL,
+				});
 
-		const adapter = new CodexAdapter({ spawnFn });
-		const { events, unsubscribe } = collectEvents(adapter);
+				// First turn
+				await adapter.sendTurn(handle, {
+					turnId: "turn-1",
+					prompt: "Say 'hello'",
+				});
+				await waitForTurnCompleted(events, "turn-1", 60000);
 
-		try {
-			// Start session
-			const handle = await adapter.startSession({
-				profile: "test",
-				workingDirectory: process.cwd(),
-				model: "o4-mini",
-			});
+				// Capture providerSessionId after first turn
+				const firstProviderSessionId = handle.providerSessionId;
+				expect(firstProviderSessionId).toBeDefined();
 
-			// First turn
-			await adapter.sendTurn(handle, {
-				turnId: "turn-1",
-				prompt: "Say 'hello'",
-			});
-			await waitForTurnCompleted(events, "turn-1", 60000);
+				// Second turn
+				await adapter.sendTurn(handle, {
+					turnId: "turn-2",
+					prompt: "Say 'goodbye'",
+				});
+				await waitForTurnCompleted(events, "turn-2", 60000);
 
-			// Capture providerSessionId after first turn
-			const firstProviderSessionId = handle.providerSessionId;
-			expect(firstProviderSessionId).toBeDefined();
+				// Assert: providerSessionId is consistent
+				expect(handle.providerSessionId).toBe(firstProviderSessionId);
 
-			// Second turn
-			await adapter.sendTurn(handle, {
-				turnId: "turn-2",
-				prompt: "Say 'goodbye'",
-			});
-			await waitForTurnCompleted(events, "turn-2", 60000);
-
-			// Assert: providerSessionId is consistent
-			expect(handle.providerSessionId).toBe(firstProviderSessionId);
-
-			// Close the session
-			await adapter.close(handle);
-		} finally {
-			unsubscribe();
-		}
-	}, 120000);
+				// Close the session
+				await adapter.close(handle);
+			} finally {
+				unsubscribe();
+			}
+		},
+		INTEGRATION_TIMEOUT_MS * 2,
+	);
 });
