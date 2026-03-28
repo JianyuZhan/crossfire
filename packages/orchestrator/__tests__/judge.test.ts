@@ -87,7 +87,7 @@ describe("runJudgeTurn", () => {
 		// Wire adapter into bus
 		const unsub = adapter.onEvent((e) => bus.push(e));
 
-		const verdict = await runJudgeTurn(adapter, handle, bus, {
+		const result = await runJudgeTurn(adapter, handle, bus, {
 			turnId: "j-1",
 			prompt: "Judge this debate",
 			roundNumber: 1,
@@ -95,9 +95,10 @@ describe("runJudgeTurn", () => {
 
 		unsub();
 
-		expect(verdict).toBeDefined();
-		expect(verdict?.leading).toBe("proposer");
-		expect(verdict?.shouldContinue).toBe(true);
+		expect(result.status).toBe("completed");
+		expect(result.verdict).toBeDefined();
+		expect(result.verdict?.leading).toBe("proposer");
+		expect(result.verdict?.shouldContinue).toBe(true);
 	});
 
 	it("extracts verdict from fenced code block in message.final", async () => {
@@ -138,7 +139,7 @@ describe("runJudgeTurn", () => {
 		const bus = new DebateEventBus();
 		const unsub = adapter.onEvent((e) => bus.push(e));
 
-		const verdict = await runJudgeTurn(adapter, handle, bus, {
+		const result = await runJudgeTurn(adapter, handle, bus, {
 			turnId: "j-1",
 			prompt: "Judge this debate",
 			roundNumber: 1,
@@ -146,14 +147,15 @@ describe("runJudgeTurn", () => {
 
 		unsub();
 
-		expect(verdict).toBeDefined();
-		expect(verdict?.leading).toBe("challenger");
-		expect(verdict?.score).toEqual({ proposer: 4, challenger: 8 });
-		expect(verdict?.shouldContinue).toBe(false);
-		expect(verdict?.reasoning).toBe("Stronger rebuttal");
+		expect(result.status).toBe("completed");
+		expect(result.verdict).toBeDefined();
+		expect(result.verdict?.leading).toBe("challenger");
+		expect(result.verdict?.score).toEqual({ proposer: 4, challenger: 8 });
+		expect(result.verdict?.shouldContinue).toBe(false);
+		expect(result.verdict?.reasoning).toBe("Stronger rebuttal");
 	});
 
-	it("returns undefined when judge produces no verdict", async () => {
+	it("returns undefined verdict when judge produces no verdict", async () => {
 		const events: NormalizedEvent[] = [
 			{
 				kind: "message.final",
@@ -185,13 +187,14 @@ describe("runJudgeTurn", () => {
 		const bus = new DebateEventBus();
 		const unsub = adapter.onEvent((e) => bus.push(e));
 
-		const verdict = await runJudgeTurn(adapter, handle, bus, {
+		const result = await runJudgeTurn(adapter, handle, bus, {
 			turnId: "j-1",
 			prompt: "Judge this debate",
 			roundNumber: 1,
 		});
 
 		unsub();
-		expect(verdict).toBeUndefined();
+		expect(result.status).toBe("completed");
+		expect(result.verdict).toBeUndefined();
 	});
 });
