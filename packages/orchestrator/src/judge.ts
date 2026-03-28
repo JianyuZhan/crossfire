@@ -4,10 +4,11 @@ import type {
 	SessionHandle,
 } from "@crossfire/adapter-core";
 import {
+	type AnyEvent,
+	type JudgeVerdict,
 	JudgeVerdictSchema,
 	extractFencedJson,
 } from "@crossfire/orchestrator-core";
-import type { AnyEvent, JudgeVerdict } from "@crossfire/orchestrator-core";
 import type { DebateEventBus } from "./event-bus.js";
 
 export interface JudgeTurnInput {

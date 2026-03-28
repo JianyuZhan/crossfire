@@ -45,24 +45,19 @@ export class EventStore {
 		const line = `${JSON.stringify(event)}\n`;
 
 		if (event.kind === "round.started" && "roundNumber" in event) {
-			const rn = (event as { roundNumber: number }).roundNumber;
-			this.roundOffsets[String(rn)] = {
+			const e = event as { roundNumber: number; speaker?: string };
+			const offset = {
 				byteOffset: this.byteOffset + this.bufferByteLength(),
 				eventIndex: this.totalEvents,
 			};
-		}
-
-		if (
-			event.kind === "round.started" &&
-			"speaker" in event &&
-			"roundNumber" in event
-		) {
-			const e = event as { speaker: string; roundNumber: number };
-			const key = `${e.speaker === "proposer" ? "p" : "c"}-${e.roundNumber}`;
-			this.turnOffsets[key] = {
-				byteOffset: this.byteOffset + this.bufferByteLength(),
-				eventIndex: this.totalEvents,
-			};
+			this.roundOffsets[String(e.roundNumber)] = offset;
+			if (e.speaker) {
+				const key = `${e.speaker === "proposer" ? "p" : "c"}-${e.roundNumber}`;
+				this.turnOffsets[key] = offset;
+			}
+			if (e.roundNumber > this.totalRounds) {
+				this.totalRounds = e.roundNumber;
+			}
 		}
 
 		if (event.kind === "debate.started" && "config" in event) {
@@ -70,11 +65,6 @@ export class EventStore {
 			this.topic = e.config.topic;
 			this.startedAt = event.timestamp;
 			this.debateId = `d-${new Date(event.timestamp).toISOString().replace(/[:.]/g, "").slice(0, 15)}`;
-		}
-
-		if (event.kind === "round.started" && "roundNumber" in event) {
-			const rn = (event as { roundNumber: number }).roundNumber;
-			if (rn > this.totalRounds) this.totalRounds = rn;
 		}
 
 		if (event.kind === "debate.completed" && "reason" in event) {
@@ -111,11 +101,10 @@ export class EventStore {
 	}
 
 	private bufferByteLength(): number {
-		let len = 0;
-		for (const line of this.buffer) {
-			len += Buffer.byteLength(line, "utf-8");
-		}
-		return len;
+		return this.buffer.reduce(
+			(len, line) => len + Buffer.byteLength(line, "utf-8"),
+			0,
+		);
 	}
 
 	private writeIndex(): void {
@@ -206,9 +195,6 @@ export class EventStore {
 	}
 
 	static async *stream(eventsPath: string): AsyncIterable<AnyEvent> {
-		const events = EventStore.load(eventsPath);
-		for (const event of events) {
-			yield event;
-		}
+		yield* EventStore.load(eventsPath);
 	}
 }

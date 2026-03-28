@@ -26,12 +26,14 @@ export function renderActionPlanHtml(
 	report: AuditReport,
 	meta: ReportMeta,
 ): string {
-	const qualityBadge =
-		meta.generationQuality === "full"
-			? '<span class="badge badge-green">Enhanced synthesis</span>'
-			: meta.generationQuality === "draft-filled"
-				? '<span class="badge badge-yellow">Fallback synthesis</span>'
-				: '<span class="badge badge-red">Minimal fallback</span>';
+	let qualityBadge: string;
+	if (meta.generationQuality === "full") {
+		qualityBadge = '<span class="badge badge-green">Enhanced synthesis</span>';
+	} else if (meta.generationQuality === "draft-filled") {
+		qualityBadge = '<span class="badge badge-yellow">Fallback synthesis</span>';
+	} else {
+		qualityBadge = '<span class="badge badge-red">Minimal fallback</span>';
+	}
 
 	return `<!DOCTYPE html>
 <html lang="en">

@@ -7,11 +7,11 @@ import {
 	waitForEvent,
 	waitForTurnCompleted,
 } from "./helpers.js";
-import type { ScenarioFixture } from "./scenarios.js";
 import {
 	APPROVAL_LIFECYCLE,
 	HAPPY_PATH,
 	MULTI_TURN,
+	type ScenarioFixture,
 	TOOL_FAILURE,
 	TOOL_LIFECYCLE,
 	TRANSPORT_ERROR,

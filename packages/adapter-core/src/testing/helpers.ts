@@ -3,10 +3,7 @@ import type { NormalizedEvent } from "../types.js";
 
 export function collectEvents(adapter: {
 	onEvent: (cb: (e: NormalizedEvent) => void) => () => void;
-}): {
-	events: NormalizedEvent[];
-	unsubscribe: () => void;
-} {
+}): { events: NormalizedEvent[]; unsubscribe: () => void } {
 	const events: NormalizedEvent[] = [];
 	const unsubscribe = adapter.onEvent((e) => events.push(e));
 	return { events, unsubscribe };
@@ -40,7 +37,7 @@ export function waitForTurnCompleted(
 	events: NormalizedEvent[],
 	turnId: string,
 	timeoutMs = 5000,
-) {
+): Promise<NormalizedEvent> {
 	return waitForEvent(
 		events,
 		(e) => e.kind === "turn.completed" && e.turnId === turnId,
@@ -51,63 +48,64 @@ export function waitForTurnCompleted(
 export function assertCapabilitiesConsistent(
 	events: NormalizedEvent[],
 	capabilities: AdapterCapabilities,
-) {
-	if (!capabilities.supportsPlan) {
-		const planEvents = events.filter((e) => e.kind === "plan.updated");
-		if (planEvents.length > 0)
-			throw new Error("Received plan.updated but supportsPlan=false");
+): void {
+	if (
+		!capabilities.supportsPlan &&
+		events.some((e) => e.kind === "plan.updated")
+	) {
+		throw new Error("Received plan.updated but supportsPlan=false");
 	}
-	if (!capabilities.supportsApproval) {
-		const approvalEvents = events.filter((e) => e.kind.startsWith("approval."));
-		if (approvalEvents.length > 0)
-			throw new Error("Received approval.* but supportsApproval=false");
+	if (
+		!capabilities.supportsApproval &&
+		events.some((e) => e.kind.startsWith("approval."))
+	) {
+		throw new Error("Received approval.* but supportsApproval=false");
 	}
-	if (!capabilities.supportsSubagents) {
-		const subagentEvents = events.filter((e) => e.kind.startsWith("subagent."));
-		if (subagentEvents.length > 0)
-			throw new Error("Received subagent.* but supportsSubagents=false");
+	if (
+		!capabilities.supportsSubagents &&
+		events.some((e) => e.kind.startsWith("subagent."))
+	) {
+		throw new Error("Received subagent.* but supportsSubagents=false");
 	}
 }
 
-export function assertEventOrder(events: NormalizedEvent[]) {
-	// tool.call precedes tool.result with matching toolUseId
-	const toolCalls = events.filter((e) => e.kind === "tool.call");
-	for (const call of toolCalls) {
+export function assertEventOrder(events: NormalizedEvent[]): void {
+	// tool.call must precede tool.result with matching toolUseId
+	for (let i = 0; i < events.length; i++) {
+		const call = events[i];
 		if (call.kind !== "tool.call") continue;
-		const callIdx = events.indexOf(call);
 		const resultIdx = events.findIndex(
 			(e) => e.kind === "tool.result" && e.toolUseId === call.toolUseId,
 		);
-		if (resultIdx !== -1 && callIdx >= resultIdx) {
+		if (resultIdx !== -1 && i >= resultIdx) {
 			throw new Error(
 				`tool.call for ${call.toolUseId} must precede tool.result`,
 			);
 		}
 	}
 
-	// approval.request precedes approval.resolved with matching requestId
-	const approvalReqs = events.filter((e) => e.kind === "approval.request");
-	for (const req of approvalReqs) {
+	// approval.request must precede approval.resolved with matching requestId
+	for (let i = 0; i < events.length; i++) {
+		const req = events[i];
 		if (req.kind !== "approval.request") continue;
-		const reqIdx = events.indexOf(req);
 		const resolvedIdx = events.findIndex(
 			(e) => e.kind === "approval.resolved" && e.requestId === req.requestId,
 		);
-		if (resolvedIdx !== -1 && reqIdx >= resolvedIdx) {
+		if (resolvedIdx !== -1 && i >= resolvedIdx) {
 			throw new Error(
 				`approval.request for ${req.requestId} must precede approval.resolved`,
 			);
 		}
 	}
 
-	// turn.completed is last terminal event for its turnId
-	const turnCompleteds = events.filter((e) => e.kind === "turn.completed");
-	for (const tc of turnCompleteds) {
-		const tcIdx = events.indexOf(tc);
-		const laterSameTurn = events
-			.slice(tcIdx + 1)
-			.filter((e) => e.turnId === tc.turnId);
-		if (laterSameTurn.length > 0) {
+	// turn.completed must be last event for its turnId
+	for (let i = 0; i < events.length; i++) {
+		const tc = events[i];
+		if (tc.kind !== "turn.completed") continue;
+		const hasLaterSameTurn = events
+			.slice(i + 1)
+			.some((e) => e.turnId === tc.turnId);
+		if (hasLaterSameTurn) {
 			throw new Error(
 				`turn.completed for ${tc.turnId} must be last event for that turn`,
 			);
@@ -115,12 +113,13 @@ export function assertEventOrder(events: NormalizedEvent[]) {
 	}
 
 	// session.started must appear at most once
-	const sessionStartedEvents = events.filter(
-		(e) => e.kind === "session.started",
-	);
-	if (sessionStartedEvents.length > 1) {
+	let sessionStartedCount = 0;
+	for (const e of events) {
+		if (e.kind === "session.started") sessionStartedCount++;
+	}
+	if (sessionStartedCount > 1) {
 		throw new Error(
-			`session.started must appear at most once, found ${sessionStartedEvents.length}`,
+			`session.started must appear at most once, found ${sessionStartedCount}`,
 		);
 	}
 }

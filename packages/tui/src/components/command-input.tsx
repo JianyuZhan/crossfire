@@ -120,25 +120,24 @@ export function CommandInput({
 	onCommand,
 }: CommandInputProps): React.ReactElement {
 	const [input, setInput] = useState("");
-	useInput((_input, key) => {
+	useInput((ch, key) => {
 		if (key.return && input.trim().length > 0) {
 			onCommand(parseCommand(input, state.mode));
 			setInput("");
 		} else if (key.backspace || key.delete) {
 			setInput((prev) => prev.slice(0, -1));
-		} else if (_input === "c" && key.ctrl) {
-			// Ctrl-C: emit stop command
+		} else if (ch === "c" && key.ctrl) {
 			onCommand({ type: "stop" });
-		} else if (_input && !key.ctrl && !key.meta) {
-			setInput((prev) => prev + _input);
+		} else if (ch && !key.ctrl && !key.meta) {
+			setInput((prev) => prev + ch);
 		}
 	});
-	const prompt =
-		state.mode === "approval"
-			? "approval> "
-			: state.mode === "replay"
-				? "replay> "
-				: "> ";
+
+	const PROMPTS: Record<string, string> = {
+		approval: "approval> ",
+		replay: "replay> ",
+	};
+	const prompt = PROMPTS[state.mode] ?? "> ";
 	return (
 		<Box>
 			<Text>

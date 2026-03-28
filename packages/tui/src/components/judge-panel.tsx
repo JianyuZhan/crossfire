@@ -7,8 +7,34 @@ interface JudgePanelProps {
 	result: JudgeRoundResult;
 }
 
+function VerdictSection({
+	verdict,
+}: { verdict: JudgeRoundResult["verdict"] }): React.ReactElement | null {
+	if (!verdict) {
+		return <Text dimColor>Judge did not return a structured verdict</Text>;
+	}
+
+	const continuationColor = verdict.shouldContinue ? "green" : "red";
+	const continuationText = verdict.shouldContinue
+		? "\u2192 Continuing to next round"
+		: "\u2192 Judge decided to end debate";
+
+	return (
+		<>
+			<Text>
+				Verdict: {verdict.leading} leads {verdict.score.proposer}:
+				{verdict.score.challenger}
+				{" | "}Continue: {verdict.shouldContinue ? "Yes" : "No"}
+			</Text>
+			{verdict.reasoning && <Text dimColor>{verdict.reasoning}</Text>}
+			<Text color={continuationColor} bold>
+				{continuationText}
+			</Text>
+		</>
+	);
+}
+
 export function JudgePanel({ result }: JudgePanelProps): React.ReactElement {
-	const v = result.verdict;
 	return (
 		<Box
 			flexDirection="column"
@@ -25,28 +51,7 @@ export function JudgePanel({ result }: JudgePanelProps): React.ReactElement {
 			{result.messageText && (
 				<Text>{stripInternalToolBlocks(result.messageText)}</Text>
 			)}
-			{result.status === "done" && v && (
-				<Text>
-					Verdict: {v.leading} leads {v.score.proposer}:{v.score.challenger}
-					{" | "}Continue: {v.shouldContinue ? "Yes" : "No"}
-				</Text>
-			)}
-			{result.status === "done" && v?.reasoning && (
-				<Text dimColor>{v.reasoning}</Text>
-			)}
-			{result.status === "done" && v && v.shouldContinue && (
-				<Text color="green" bold>
-					→ Continuing to next round
-				</Text>
-			)}
-			{result.status === "done" && v && !v.shouldContinue && (
-				<Text color="red" bold>
-					→ Judge decided to end debate
-				</Text>
-			)}
-			{result.status === "done" && !v && (
-				<Text dimColor>Judge did not return a structured verdict</Text>
-			)}
+			{result.status === "done" && <VerdictSection verdict={result.verdict} />}
 		</Box>
 	);
 }

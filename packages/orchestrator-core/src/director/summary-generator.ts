@@ -24,16 +24,8 @@ export function generateSummary(
 	const proposerTrajectory = buildTrajectory(state.turns, "proposer");
 	const challengerTrajectory = buildTrajectory(state.turns, "challenger");
 
-	const proposerConcessions = new Set(
-		state.turns
-			.filter((t) => t.role === "proposer" && t.meta?.concessions)
-			.flatMap((t) => t.meta?.concessions ?? []),
-	);
-	const challengerConcessions = new Set(
-		state.turns
-			.filter((t) => t.role === "challenger" && t.meta?.concessions)
-			.flatMap((t) => t.meta?.concessions ?? []),
-	);
+	const proposerConcessions = collectConcessions(state.turns, "proposer");
+	const challengerConcessions = collectConcessions(state.turns, "challenger");
 
 	const latestRound = state.currentRound;
 	const latestProposerPoints = state.turns
@@ -136,34 +128,34 @@ export function formatFinalOutcome(
 	return lines.join("\n");
 }
 
-/** Items both sides conceded — approximate match by substring overlap */
+/** Collects all concession strings for a given role. */
+function collectConcessions(
+	turns: DebateTurn[],
+	role: "proposer" | "challenger",
+): Set<string> {
+	return new Set(
+		turns
+			.filter((t) => t.role === role && t.meta?.concessions)
+			.flatMap((t) => t.meta?.concessions ?? []),
+	);
+}
+
+/** Items both sides conceded — union of all concession strings. */
 function computeConsensus(
-	proposerConcessions: Set<string | undefined>,
-	challengerConcessions: Set<string | undefined>,
+	proposerConcessions: Set<string>,
+	challengerConcessions: Set<string>,
 ): string[] {
-	const all = new Set<string>();
-	for (const pc of proposerConcessions) {
-		if (!pc) continue;
-		all.add(pc);
-	}
-	for (const cc of challengerConcessions) {
-		if (!cc) continue;
-		all.add(cc);
-	}
-	return [...all];
+	return [...new Set([...proposerConcessions, ...challengerConcessions])];
 }
 
 /** Key points NOT acknowledged by the other side's concessions */
 function computeUnresolved(
 	proposerPoints: string[],
 	challengerPoints: string[],
-	proposerConcessions: Set<string | undefined>,
-	challengerConcessions: Set<string | undefined>,
+	proposerConcessions: Set<string>,
+	challengerConcessions: Set<string>,
 ): string[] {
-	const allConcessions = [
-		...[...proposerConcessions].filter(Boolean),
-		...[...challengerConcessions].filter(Boolean),
-	] as string[];
+	const allConcessions = [...proposerConcessions, ...challengerConcessions];
 
 	return filterUnresolved(
 		[...proposerPoints, ...challengerPoints],

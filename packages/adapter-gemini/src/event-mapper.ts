@@ -1,5 +1,7 @@
-import type { NormalizedEvent } from "@crossfire/adapter-core";
-import { GEMINI_CAPABILITIES } from "@crossfire/adapter-core";
+import {
+	GEMINI_CAPABILITIES,
+	type NormalizedEvent,
+} from "@crossfire/adapter-core";
 
 export interface GeminiMapContext {
 	adapterId: "gemini";
@@ -18,12 +20,13 @@ export function mapGeminiEvent(
 	event: GeminiEvent,
 	ctx: GeminiMapContext,
 ): NormalizedEvent[] {
-	const base = {
-		timestamp: Date.now(),
+	const now = Date.now();
+	const sessionBase = {
+		timestamp: now,
 		adapterId: ctx.adapterId,
 		adapterSessionId: ctx.adapterSessionId,
-		turnId: ctx.turnId,
 	};
+	const base = { ...sessionBase, turnId: ctx.turnId };
 
 	switch (event.type) {
 		case "init": {
@@ -31,9 +34,7 @@ export function mapGeminiEvent(
 			ctx.sessionStarted = true;
 			return [
 				{
-					timestamp: base.timestamp,
-					adapterId: ctx.adapterId,
-					adapterSessionId: ctx.adapterSessionId,
+					...sessionBase,
 					kind: "session.started",
 					model: (event.model as string) ?? "unknown",
 					tools: (event.tools as string[]) ?? [],
@@ -94,8 +95,7 @@ export function mapGeminiEvent(
 		}
 
 		case "error": {
-			const fatal = event.fatal as boolean;
-			if (fatal) {
+			if (event.fatal) {
 				return [
 					{
 						...base,
@@ -116,7 +116,6 @@ export function mapGeminiEvent(
 
 		case "result": {
 			const events: NormalizedEvent[] = [];
-			// Flush message buffer as message.final
 			if (ctx.messageBuffer) {
 				events.push({
 					...base,
@@ -126,30 +125,28 @@ export function mapGeminiEvent(
 				});
 				ctx.messageBuffer = "";
 			}
-			// Usage
-			const usage = event.usage as
+			const rawUsage = event.usage as
 				| { input_tokens: number; output_tokens: number }
 				| undefined;
-			if (usage) {
+			const normalizedUsage = rawUsage
+				? {
+						inputTokens: rawUsage.input_tokens,
+						outputTokens: rawUsage.output_tokens,
+					}
+				: undefined;
+			if (normalizedUsage) {
 				events.push({
 					...base,
 					kind: "usage.updated",
-					inputTokens: usage.input_tokens,
-					outputTokens: usage.output_tokens,
+					...normalizedUsage,
 				});
 			}
-			// Turn completed
 			events.push({
 				...base,
 				kind: "turn.completed",
 				status: "completed",
 				durationMs: (event.duration_ms as number) ?? 0,
-				usage: usage
-					? {
-							inputTokens: usage.input_tokens,
-							outputTokens: usage.output_tokens,
-						}
-					: undefined,
+				usage: normalizedUsage,
 			});
 			return events;
 		}

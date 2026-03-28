@@ -6,7 +6,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "CMD=$(jq -r '.tool_input.command'); if ! echo \"$CMD\" | grep -q 'git commit'; then exit 0; fi; STAGED=$(git diff --cached --name-only 2>/dev/null || echo ''); HAS_CODE=$(echo \"$STAGED\" | grep -c '^packages/' || true); HAS_ARCH=$(echo \"$STAGED\" | grep -c '^docs/architecture.md' || true); HAS_README=$(echo \"$STAGED\" | grep -c '^README.md' || true); HAS_README_ZH=$(echo \"$STAGED\" | grep -c '^README.zh-CN.md' || true); HAS_DOCS=$((HAS_ARCH + HAS_README + HAS_README_ZH)); if [ \"$HAS_CODE\" -gt 0 ] && [ \"$HAS_DOCS\" -eq 0 ]; then echo '{\"decision\":\"block\",\"reason\":\"⚠️ Code changes under packages/ detected but no documentation staged. Check if docs/architecture.md, README.md, or README.zh-CN.md need updates per CLAUDE.md rules.\"}'; else exit 0; fi",
+						"command": "CMD=$(jq -r '.tool_input.command'); if ! echo \"$CMD\" | grep -q 'git commit'; then exit 0; fi; STAGED=$(git diff --cached --name-only 2>/dev/null || echo ''); HAS_CODE=$(echo \"$STAGED\" | grep -c '^packages/' || true); HAS_ARCH=$(echo \"$STAGED\" | grep -c '^docs/architecture/' || true); HAS_README=$(echo \"$STAGED\" | grep -c '^README.md' || true); HAS_README_ZH=$(echo \"$STAGED\" | grep -c '^README.zh-CN.md' || true); HAS_DOCS=$((HAS_ARCH + HAS_README + HAS_README_ZH)); if [ \"$HAS_CODE\" -gt 0 ] && [ \"$HAS_DOCS\" -eq 0 ]; then echo '{\"decision\":\"block\",\"reason\":\"⚠️ Code changes under packages/ detected but no documentation staged. Check if docs/architecture/, README.md, or README.zh-CN.md need updates per CLAUDE.md rules.\"}'; else exit 0; fi",
 						"timeout": 10,
 						"statusMessage": "Checking doc coverage..."
 					}

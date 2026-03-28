@@ -8,17 +8,17 @@ import type {
 
 type AgentRole = "proposer" | "challenger";
 
+const TOOL_STATUS_MAP: Record<string, "running" | "success" | "error"> = {
+	running: "running",
+	done: "success",
+	error: "error",
+};
+
 function toolToBlock(t: LiveToolEntry): RenderBlock {
-	const status: "running" | "success" | "error" =
-		t.status === "running"
-			? "running"
-			: t.status === "done"
-				? "success"
-				: "error";
 	return {
 		kind: "tool-call",
 		toolName: t.toolName,
-		status,
+		status: TOOL_STATUS_MAP[t.status] ?? "error",
 		summary: t.inputSummary,
 		elapsedMs: t.elapsedMs,
 	};

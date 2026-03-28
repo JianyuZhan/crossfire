@@ -13,6 +13,30 @@ import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
 
+function requirePositiveInt(value: string, label: string): number {
+	const n = Number.parseInt(value, 10);
+	if (!Number.isFinite(n) || n < 1) {
+		console.error(`Error: ${label} must be a positive integer`);
+		process.exit(1);
+	}
+	return n;
+}
+
+function generateDebateId(): string {
+	const now = new Date();
+	const date = [
+		now.getFullYear(),
+		String(now.getMonth() + 1).padStart(2, "0"),
+		String(now.getDate()).padStart(2, "0"),
+	].join("");
+	const time = [
+		String(now.getHours()).padStart(2, "0"),
+		String(now.getMinutes()).padStart(2, "0"),
+		String(now.getSeconds()).padStart(2, "0"),
+	].join("");
+	return `d-${date}-${time}`;
+}
+
 export const startCommand = new Command("start")
 	.description("Start a new debate")
 	.requiredOption("--proposer <profile>", "Proposer agent profile")
@@ -66,11 +90,7 @@ export const startCommand = new Command("start")
 			}
 
 			// Validate numeric options
-			const maxRounds = Number.parseInt(options.maxRounds, 10);
-			if (!Number.isFinite(maxRounds) || maxRounds < 1) {
-				console.error("Error: --max-rounds must be a positive integer");
-				process.exit(1);
-			}
+			const maxRounds = requirePositiveInt(options.maxRounds, "--max-rounds");
 			const convergenceThreshold = Number.parseFloat(
 				options.convergenceThreshold,
 			);
@@ -94,13 +114,10 @@ export const startCommand = new Command("start")
 			const challengerProfile = loadProfile(options.challenger);
 
 			// Validate judge-every-n-rounds
-			const judgeEveryNRounds = Number.parseInt(options.judgeEveryNRounds, 10);
-			if (!Number.isFinite(judgeEveryNRounds) || judgeEveryNRounds < 1) {
-				console.error(
-					"Error: --judge-every-n-rounds must be a positive integer",
-				);
-				process.exit(1);
-			}
+			const judgeEveryNRounds = requirePositiveInt(
+				options.judgeEveryNRounds,
+				"--judge-every-n-rounds",
+			);
 			if (judgeEveryNRounds >= maxRounds) {
 				console.error(
 					`Error: --judge-every-n-rounds (${judgeEveryNRounds}) must be less than --max-rounds (${maxRounds})`,
@@ -109,20 +126,12 @@ export const startCommand = new Command("start")
 			}
 
 			// Resolve judge profile: infer from proposer adapter type if not specified
-			let judgeProfile: ReturnType<typeof loadProfile>;
-			if (options.judge) {
-				judgeProfile = loadProfile(options.judge);
-			} else {
-				// Infer from proposer's adapter type
-				const adapterType = resolveAdapterType(proposerProfile.agent);
-				const inferredJudge = `${adapterType}/judge`;
-				judgeProfile = loadProfile(inferredJudge);
-				if (options.verbose) {
-					console.log(
-						`  Judge profile inferred from proposer: ${inferredJudge}`,
-					);
-				}
+			const judgeName =
+				options.judge ?? `${resolveAdapterType(proposerProfile.agent)}/judge`;
+			if (!options.judge && options.verbose) {
+				console.log(`  Judge profile inferred from proposer: ${judgeName}`);
 			}
+			const judgeProfile = loadProfile(judgeName);
 
 			// Resolve roles
 			const roles = resolveRoles({
@@ -155,8 +164,7 @@ export const startCommand = new Command("start")
 			};
 
 			// Generate debate ID and output directory
-			const now = new Date();
-			const debateId = `d-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+			const debateId = generateDebateId();
 			const outputDir = options.output ?? `run_output/${debateId}`;
 			mkdirSync(outputDir, { recursive: true });
 
@@ -212,19 +220,13 @@ export const startCommand = new Command("start")
 				console.log(`  Output: ${outputDir}`);
 			}
 
-			// Create adapters
 			const adapterBundle = await createAdapters(
 				roles,
 				createDefaultFactories(),
 			);
-
-			// Create bus
 			const busBundle = createBus({ outputDir });
-
-			// Create TUI
 			const tuiBundle = createTui(busBundle.bus, options.headless);
 
-			// Render TUI if not headless
 			let inkInstance: { clear: () => void; unmount: () => void } | undefined;
 			let userQuitResolve: (() => void) | undefined;
 			if (tuiBundle) {
@@ -262,39 +264,34 @@ export const startCommand = new Command("start")
 										a.adapter.approve?.({ requestId, decision });
 									}
 								}
-							} else if (cmd.type === "inject") {
-								const targets: Array<"proposer" | "challenger"> =
-									cmd.target === "both"
-										? ["proposer", "challenger"]
-										: [cmd.target as "proposer" | "challenger"];
-								for (const t of targets) {
+							} else if (cmd.type === "inject" || cmd.type === "inject-judge") {
+								const targets =
+									cmd.type === "inject-judge"
+										? ["judge" as const]
+										: cmd.target === "both"
+											? (["proposer", "challenger"] as const)
+											: [cmd.target as "proposer" | "challenger"];
+								const priority =
+									cmd.type === "inject-judge"
+										? "high"
+										: ((cmd.priority ?? "normal") as "normal" | "high");
+								for (const target of targets) {
 									busBundle.bus.push({
 										kind: "user.inject",
-										target: t,
+										target,
 										text: cmd.text ?? "",
-										priority: (cmd.priority ?? "normal") as "normal" | "high",
+										priority,
 										timestamp: Date.now(),
 									});
 								}
-							} else if (cmd.type === "inject-judge") {
-								busBundle.bus.push({
-									kind: "user.inject",
-									target: "judge",
-									text: cmd.text ?? "",
-									priority: "high",
-									timestamp: Date.now(),
-								});
 							}
 						},
 					}),
 				);
 			}
 
-			// Abort controller for graceful shutdown
 			const abortController = new AbortController();
-
 			const triggerShutdown = () => {
-				// If debate already completed, treat as quit
 				if (userQuitResolve) {
 					userQuitResolve();
 					return;
@@ -312,8 +309,6 @@ export const startCommand = new Command("start")
 			};
 
 			process.on("SIGINT", triggerShutdown);
-
-			// Run debate
 			try {
 				const finalState = await runDebate(config, adapterBundle.adapters, {
 					bus: busBundle.bus,
@@ -335,13 +330,10 @@ export const startCommand = new Command("start")
 					console.log(`Output saved to: ${outputDir}`);
 				}
 			} finally {
-				// Cleanup
 				process.off("SIGINT", triggerShutdown);
 				tuiBundle?.store.dispose();
-				if (inkInstance) {
-					inkInstance.unmount();
-				}
-				// Write transcript + index BEFORE closing adapters (which may hang)
+				inkInstance?.unmount();
+				// Close persistence before adapters (adapters may hang on close)
 				await busBundle.close();
 				await adapterBundle.closeAll();
 			}

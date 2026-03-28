@@ -17,10 +17,6 @@ import { type ProcessHandle, ProcessManager } from "./process-manager.js";
 import { type HistoryEntry, buildStatelessPrompt } from "./prompt-builder.js";
 import { ResumeManager } from "./resume-manager.js";
 
-// ---------------------------------------------------------------------------
-// Options & internal types
-// ---------------------------------------------------------------------------
-
 export interface GeminiAdapterOptions {
 	processManager?: ProcessManager;
 	resumeManager?: ResumeManager;
@@ -48,10 +44,6 @@ interface GeminiSessionContext {
 
 let sessionCounter = 0;
 
-// ---------------------------------------------------------------------------
-// GeminiAdapter
-// ---------------------------------------------------------------------------
-
 /**
  * Adapter for the Gemini CLI. Spawns a subprocess per turn, reads JSONL from
  * stdout, and maps events through the event-mapper.
@@ -66,8 +58,6 @@ export class GeminiAdapter implements AgentAdapter {
 	readonly id = "gemini";
 	readonly capabilities: AdapterCapabilities = GEMINI_CAPABILITIES;
 
-	// No approve or interrupt methods — capabilities say false.
-
 	private readonly processManager: ProcessManager;
 	private readonly resumeManager: ResumeManager;
 	private readonly sessions: Map<string, GeminiSessionContext> = new Map();
@@ -77,8 +67,6 @@ export class GeminiAdapter implements AgentAdapter {
 		this.processManager = options.processManager ?? new ProcessManager();
 		this.resumeManager = options.resumeManager ?? new ResumeManager();
 	}
-
-	// -- AgentAdapter interface -----------------------------------------------
 
 	async startSession(input: StartSessionInput): Promise<SessionHandle> {
 		sessionCounter++;
@@ -150,8 +138,6 @@ export class GeminiAdapter implements AgentAdapter {
 		this.sessions.delete(handle.adapterSessionId);
 	}
 
-	// -- Internal: turn execution with A->B fallback --------------------------
-
 	private async attemptTurn(
 		session: GeminiSessionContext,
 		handle: SessionHandle,
@@ -212,22 +198,19 @@ export class GeminiAdapter implements AgentAdapter {
 			mapCtx.messageBuffer = "";
 
 			// Build fallback prompt: prefer transcript recovery if recoveryContext is available
-			let fallbackPrompt: string;
-			if (handle.recoveryContext && handle.transcript.length > 0) {
-				fallbackPrompt = buildTranscriptRecoveryPrompt({
-					systemPrompt: handle.recoveryContext.systemPrompt,
-					topic: handle.recoveryContext.topic,
-					transcript: handle.transcript,
-					schemaType: handle.recoveryContext.schemaType,
-				});
-			} else {
-				fallbackPrompt = buildStatelessPrompt(input.prompt, session.history);
-			}
-			const statelessPrompt = fallbackPrompt;
+			const fallbackPrompt =
+				handle.recoveryContext && handle.transcript.length > 0
+					? buildTranscriptRecoveryPrompt({
+							systemPrompt: handle.recoveryContext.systemPrompt,
+							topic: handle.recoveryContext.topic,
+							transcript: handle.transcript,
+							schemaType: handle.recoveryContext.schemaType,
+						})
+					: buildStatelessPrompt(input.prompt, session.history);
 
 			// Build args with forceStateless
 			const fallbackArgs = this.resumeManager.buildArgs({
-				prompt: statelessPrompt,
+				prompt: fallbackPrompt,
 				sessionId: session.providerSessionId,
 				model: session.model,
 				forceStateless: true,
@@ -323,7 +306,7 @@ export class GeminiAdapter implements AgentAdapter {
 						if (turnState.completed) continue; // Skip duplicate
 						turnState.completed = true;
 						// Override durationMs with actual wall-clock time
-						(ne as any).durationMs = Date.now() - turnStart;
+						ne.durationMs = Date.now() - turnStart;
 					}
 
 					// Track sessionStarted on the session context
@@ -389,18 +372,16 @@ export class GeminiAdapter implements AgentAdapter {
 							recoverable: false,
 						});
 
-						if (!turnState.completed) {
-							turnState.completed = true;
-							this.emit({
-								timestamp: Date.now(),
-								adapterId: "gemini",
-								adapterSessionId: handle.adapterSessionId,
-								turnId: input.turnId,
-								kind: "turn.completed",
-								status: "failed",
-								durationMs: Date.now() - turnStart,
-							});
-						}
+						turnState.completed = true;
+						this.emit({
+							timestamp: Date.now(),
+							adapterId: "gemini",
+							adapterSessionId: handle.adapterSessionId,
+							turnId: input.turnId,
+							kind: "turn.completed",
+							status: "failed",
+							durationMs: Date.now() - turnStart,
+						});
 
 						resolve("done");
 						return;
@@ -412,8 +393,6 @@ export class GeminiAdapter implements AgentAdapter {
 			});
 		});
 	}
-
-	// -- Helpers --------------------------------------------------------------
 
 	private emit(event: NormalizedEvent): void {
 		for (const listener of this.listeners) {

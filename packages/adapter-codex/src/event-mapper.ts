@@ -9,6 +9,20 @@ export interface MapContext {
 /** Known meta-tool names that map to structured tool calls */
 const META_TOOLS = new Set(["debate_meta", "judge_verdict"]);
 
+/** Extract the item object and its id from Codex notification params */
+function extractItem(params: Record<string, unknown>): {
+	item: Record<string, unknown>;
+	id: string;
+	type: unknown;
+} {
+	const item = (params.item ?? params) as Record<string, unknown>;
+	return {
+		item,
+		id: String(item.id ?? params.id ?? ""),
+		type: item.type,
+	};
+}
+
 function detectMetaTool(command: string): string | null {
 	for (const tool of META_TOOLS) {
 		if (command.includes(tool)) return tool;
@@ -16,10 +30,8 @@ function detectMetaTool(command: string): string | null {
 	return null;
 }
 
-/**
- * Try to parse JSON from a string, returning undefined on failure.
- */
-function tryParseJson(text: string): unknown | undefined {
+/** Try to parse JSON from a string, returning undefined on failure. */
+function tryParseJson(text: string): unknown {
 	const trimmed = text.trim();
 	if (!trimmed) return undefined;
 	try {
@@ -78,9 +90,7 @@ export function mapCodexNotification(
 		}
 
 		case "item/started": {
-			const item = (params.item ?? params) as Record<string, unknown>;
-			const type = item.type;
-			const id = String(item.id ?? params.id ?? "");
+			const { item, id, type } = extractItem(params);
 
 			if (type === "commandExecution") {
 				const command = String(item.command ?? "");
@@ -124,9 +134,7 @@ export function mapCodexNotification(
 		}
 
 		case "item/completed": {
-			const item = (params.item ?? params) as Record<string, unknown>;
-			const type = item.type;
-			const id = String(item.id ?? params.id ?? "");
+			const { item, id, type } = extractItem(params);
 
 			if (type === "agentMessage") {
 				// Extract text from content array or flat text field

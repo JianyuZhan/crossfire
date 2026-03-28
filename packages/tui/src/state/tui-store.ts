@@ -108,6 +108,11 @@ export class TuiStore {
 	private readonly allEvents: AnyEvent[] = [];
 	private activeSpeaker: "proposer" | "challenger" | undefined;
 	private activeJudgeTurnId: string | undefined;
+	/** Cumulative token tracking for Codex adapters (keyed by role) */
+	private cumulativeTokens = new Map<
+		string,
+		{ input: number; output: number }
+	>();
 	private viewport: ViewportState = {
 		scrollOffset: 0,
 		autoFollow: true,
@@ -440,6 +445,47 @@ export class TuiStore {
 		}
 	}
 
+	/**
+	 * Compute token deltas from a usage event.
+	 * Codex reports cumulative totals; this method converts them to per-event deltas.
+	 */
+	private computeTokenDeltas(e: {
+		inputTokens: number;
+		outputTokens: number;
+		semantics?: string;
+	}): { inputDelta: number; outputDelta: number } {
+		if (e.semantics !== "cumulative_thread_total" || !this.activeSpeaker) {
+			return { inputDelta: e.inputTokens, outputDelta: e.outputTokens };
+		}
+
+		const usage =
+			this.activeSpeaker === "proposer"
+				? this.state.metrics.proposerUsage
+				: this.state.metrics.challengerUsage;
+		const prev = this.cumulativeTokens.get(this.activeSpeaker);
+
+		let inputDelta: number;
+		let outputDelta: number;
+
+		if (prev) {
+			inputDelta = e.inputTokens - prev.input;
+			outputDelta = e.outputTokens - prev.output;
+			usage.lastDeltaInput = inputDelta;
+			usage.previousCumulativeInput = prev.input;
+		} else {
+			inputDelta = e.inputTokens;
+			outputDelta = e.outputTokens;
+			usage.lastDeltaInput = e.inputTokens;
+		}
+
+		this.cumulativeTokens.set(this.activeSpeaker, {
+			input: e.inputTokens,
+			output: e.outputTokens,
+		});
+
+		return { inputDelta, outputDelta };
+	}
+
 	private panel(): LiveAgentPanelState | undefined {
 		if (!this.activeSpeaker) return undefined;
 		return this.state[this.activeSpeaker];
@@ -692,43 +738,7 @@ export class TuiStore {
 					localMetrics?: { totalChars: number; totalUtf8Bytes: number };
 				};
 
-				// Determine token delta based on semantics
-				let inputDelta = e.inputTokens;
-				let outputDelta = e.outputTokens;
-				if (e.semantics === "cumulative_thread_total" && this.activeSpeaker) {
-					// Codex cumulative tracking: both input and output are cumulative
-					const usage =
-						this.activeSpeaker === "proposer"
-							? this.state.metrics.proposerUsage
-							: this.state.metrics.challengerUsage;
-
-					// Internal tracking fields for next calculation (not exposed in interface)
-					const lastCumulativeInput = (
-						usage as { _lastCumulativeInput?: number }
-					)._lastCumulativeInput;
-					const lastCumulativeOutput = (
-						usage as { _lastCumulativeOutput?: number }
-					)._lastCumulativeOutput;
-
-					if (lastCumulativeInput !== undefined) {
-						// Compute delta from last cumulative values
-						inputDelta = e.inputTokens - lastCumulativeInput;
-						outputDelta = e.outputTokens - (lastCumulativeOutput ?? 0);
-						usage.lastDeltaInput = inputDelta;
-						usage.previousCumulativeInput = lastCumulativeInput;
-					} else {
-						// First event: use full values as delta (no previous baseline)
-						inputDelta = e.inputTokens;
-						outputDelta = e.outputTokens;
-						usage.lastDeltaInput = e.inputTokens;
-						// Don't set previousCumulativeInput for first event
-					}
-					// Store current cumulative for next delta calculation
-					(usage as { _lastCumulativeInput?: number })._lastCumulativeInput =
-						e.inputTokens;
-					(usage as { _lastCumulativeOutput?: number })._lastCumulativeOutput =
-						e.outputTokens;
-				}
+				const { inputDelta, outputDelta } = this.computeTokenDeltas(e);
 
 				const tokens = inputDelta + outputDelta;
 				const cost = e.totalCostUsd ?? 0;
@@ -738,7 +748,6 @@ export class TuiStore {
 						(this.state.metrics.totalCostUsd ?? 0) + e.totalCostUsd;
 				}
 
-				// Per-agent attribution
 				if (this.activeSpeaker) {
 					const usage =
 						this.activeSpeaker === "proposer"
@@ -747,7 +756,6 @@ export class TuiStore {
 					usage.tokens += tokens;
 					usage.costUsd += cost;
 
-					// Accumulate local metrics
 					if (e.localMetrics) {
 						usage.localTotalChars =
 							(usage.localTotalChars ?? 0) + e.localMetrics.totalChars;
@@ -755,7 +763,6 @@ export class TuiStore {
 							(usage.localTotalUtf8Bytes ?? 0) + e.localMetrics.totalUtf8Bytes;
 					}
 
-					// Track Claude cache reads
 					if (
 						e.semantics === "session_delta_or_cached" &&
 						e.cacheReadTokens !== undefined

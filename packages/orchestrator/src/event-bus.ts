@@ -1,10 +1,8 @@
-import type { NormalizedEvent } from "@crossfire/adapter-core";
 import {
 	type AnyEvent,
-	type OrchestratorEvent,
+	type DebateState,
 	projectState,
 } from "@crossfire/orchestrator-core";
-import type { DebateState } from "@crossfire/orchestrator-core";
 
 export class DebateEventBus {
 	private readonly allEvents: AnyEvent[] = [];

@@ -13,6 +13,12 @@ function formatCost(usd: number | undefined): string {
 	return `$${usd.toFixed(2)}`;
 }
 
+function convergenceColor(percent: number): string {
+	if (percent >= 80) return "green";
+	if (percent >= 50) return "yellow";
+	return "white";
+}
+
 function convergenceBar(percent: number): string {
 	const filled = Math.round(percent / 10);
 	return `[${"=".repeat(filled)}${"-".repeat(10 - filled)}]`;
@@ -28,6 +34,58 @@ interface MetricsBarProps {
  */
 export function metricsBarHeight(): number {
 	return 3;
+}
+
+function ScrollStatus({
+	viewport,
+}: { viewport?: ViewportState }): React.ReactElement {
+	if (!viewport) {
+		return <Text dimColor>Ready</Text>;
+	}
+
+	if (viewport.autoFollow) {
+		return (
+			<>
+				<Text backgroundColor="green" color="black" bold>
+					{" \u25CF LIVE "}
+				</Text>
+				<Text> </Text>
+				<Text backgroundColor="magenta" color="white" bold>
+					{" \u2191\u2193 Arrow "}
+				</Text>
+				<Text color="magenta"> to scroll</Text>
+			</>
+		);
+	}
+
+	const currentLine = Math.max(
+		1,
+		viewport.contentHeight -
+			viewport.scrollOffset -
+			viewport.viewportHeight +
+			1,
+	);
+
+	return (
+		<>
+			<Text backgroundColor="yellow" color="black" bold>
+				{" \u25CB SCROLLED "}
+			</Text>
+			<Text> </Text>
+			<Text dimColor>
+				L{currentLine}/{viewport.contentHeight}
+			</Text>
+			<Text> </Text>
+			<Text backgroundColor="magenta" color="white" bold>
+				{" Ctrl+D "}
+			</Text>
+			<Text color="magenta"> or </Text>
+			<Text backgroundColor="magenta" color="white" bold>
+				{" /bottom "}
+			</Text>
+			<Text color="magenta"> {"\u2192"} resume LIVE</Text>
+		</>
+	);
 }
 
 export function MetricsBar({
@@ -72,16 +130,7 @@ export function MetricsBar({
 			{/* Row 2: Convergence + Judge */}
 			<Box>
 				<Text dimColor>Convergence: </Text>
-				<Text
-					color={
-						state.convergencePercent >= 80
-							? "green"
-							: state.convergencePercent >= 50
-								? "yellow"
-								: "white"
-					}
-					bold
-				>
+				<Text color={convergenceColor(state.convergencePercent)} bold>
 					{convergenceBar(state.convergencePercent)} {state.convergencePercent}%
 				</Text>
 				{state.judgeVerdict && (
@@ -100,51 +149,9 @@ export function MetricsBar({
 					</>
 				)}
 			</Box>
-			{/* Row 3: Scroll status — highlighted prompts */}
+			{/* Row 3: Scroll status */}
 			<Box>
-				{viewport ? (
-					viewport.autoFollow ? (
-						<>
-							<Text backgroundColor="green" color="black" bold>
-								{" \u25CF LIVE "}
-							</Text>
-							<Text> </Text>
-							<Text backgroundColor="magenta" color="white" bold>
-								{" \u2191\u2193 Arrow "}
-							</Text>
-							<Text color="magenta"> to scroll</Text>
-						</>
-					) : (
-						<>
-							<Text backgroundColor="yellow" color="black" bold>
-								{" \u25CB SCROLLED "}
-							</Text>
-							<Text> </Text>
-							<Text dimColor>
-								L
-								{Math.max(
-									1,
-									viewport.contentHeight -
-										viewport.scrollOffset -
-										viewport.viewportHeight +
-										1,
-								)}
-								/{viewport.contentHeight}
-							</Text>
-							<Text> </Text>
-							<Text backgroundColor="magenta" color="white" bold>
-								{" Ctrl+D "}
-							</Text>
-							<Text color="magenta"> or </Text>
-							<Text backgroundColor="magenta" color="white" bold>
-								{" /bottom "}
-							</Text>
-							<Text color="magenta"> {"\u2192"} resume LIVE</Text>
-						</>
-					)
-				) : (
-					<Text dimColor>Ready</Text>
-				)}
+				<ScrollStatus viewport={viewport} />
 			</Box>
 		</Box>
 	);

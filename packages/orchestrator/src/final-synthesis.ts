@@ -36,7 +36,7 @@ export async function runFinalSynthesis(
 	let session: SessionHandle | undefined;
 	let eventUnsub: (() => void) | undefined;
 
-	// Hoisted so catch block can access intermediate data
+	// Hoisted so catch/finally blocks can access intermediate data
 	let longestFinal: string | undefined;
 	let deltaBuffer = "";
 	const diagnostics: SynthesisDiagnostics = {
@@ -46,6 +46,17 @@ export async function runFinalSynthesis(
 		eventKindCounts: {},
 		capturedFinalPreview: undefined,
 	};
+
+	function buildResult(error?: string): SynthesisRunResult {
+		return {
+			markdown:
+				longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined),
+			durationMs: Date.now() - startTime,
+			rawDeltaLength: deltaBuffer.length,
+			...(error ? { error } : {}),
+			diagnostics,
+		};
+	}
 
 	try {
 		session = await adapter.startSession({
@@ -113,24 +124,11 @@ export async function runFinalSynthesis(
 
 		diagnostics.capturedFinalPreview = longestFinal?.slice(0, 200);
 
-		return {
-			markdown:
-				longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined),
-			durationMs: Date.now() - startTime,
-			rawDeltaLength: deltaBuffer.length,
-			diagnostics,
-		};
+		return buildResult();
 	} catch (err) {
 		diagnostics.capturedFinalPreview = longestFinal?.slice(0, 200);
 
-		return {
-			markdown:
-				longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined),
-			durationMs: Date.now() - startTime,
-			rawDeltaLength: deltaBuffer.length,
-			error: err instanceof Error ? err.message : String(err),
-			diagnostics,
-		};
+		return buildResult(err instanceof Error ? err.message : String(err));
 	} finally {
 		if (eventUnsub) eventUnsub();
 		if (session) {

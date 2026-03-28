@@ -46,8 +46,9 @@ export function HeaderBar({
 	proposerInfo,
 	challengerInfo,
 }: HeaderBarProps): React.ReactElement {
-	const modeLabel =
-		mode === "replay" ? " [REPLAY]" : mode === "approval" ? " [APPROVAL]" : "";
+	let modeLabel = "";
+	if (mode === "replay") modeLabel = " [REPLAY]";
+	else if (mode === "approval") modeLabel = " [APPROVAL]";
 	const topicDisplay =
 		topic.length > MAX_TOPIC_CHARS
 			? `${topic.slice(0, MAX_TOPIC_CHARS - 1)}\u2026`

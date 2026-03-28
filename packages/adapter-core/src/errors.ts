@@ -1,5 +1,3 @@
-// packages/adapter-core/src/errors.ts
-
 export class AdapterError extends Error {
 	constructor(
 		message: string,

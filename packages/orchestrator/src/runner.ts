@@ -6,34 +6,32 @@ import type {
 	SessionHandle,
 } from "@crossfire/adapter-core";
 import {
+	type AnyEvent,
 	DEFAULT_DIRECTOR_CONFIG,
 	type DebateConfig,
 	DebateDirector,
 	type DebateState,
 	type DirectorAction,
 	type JudgeVerdict,
+	type MarkdownReportMeta,
 	type ReportMeta,
+	type SynthesisAuditSummary,
+	type SynthesisDebugMetadata,
 	type TerminationReason,
+	assembleAdaptiveSynthesisPrompt,
 	buildDraftReport,
 	buildIncrementalPrompt,
 	buildInitialPrompt,
+	buildInstructions,
 	buildJudgeIncrementalPrompt,
 	buildJudgeInitialPrompt,
+	computeReferenceScores,
 	draftToAuditReport,
 	generateSummary,
 	renderActionPlanHtml,
 	renderActionPlanMarkdown,
-} from "@crossfire/orchestrator-core";
-import {
-	type MarkdownReportMeta,
-	type SynthesisAuditSummary,
-	type SynthesisDebugMetadata,
-	assembleAdaptiveSynthesisPrompt,
-	buildInstructions,
-	computeReferenceScores,
 	renderMarkdownToHtml,
 } from "@crossfire/orchestrator-core";
-import type { AnyEvent } from "@crossfire/orchestrator-core";
 import { DebateEventBus } from "./event-bus.js";
 import {
 	type SynthesisRunResult,
@@ -84,29 +82,7 @@ export async function runDebate(
 	const startRound = resumeState ? resumeState.currentRound + 1 : 1;
 
 	// Populate recovery context on each session so adapters can rebuild from transcript
-	adapters.proposer.session.recoveryContext = {
-		systemPrompt: config.proposerSystemPrompt ?? "",
-		topic: config.topic,
-		role: "proposer",
-		maxRounds: config.maxRounds,
-		schemaType: "debate_meta",
-	};
-	adapters.challenger.session.recoveryContext = {
-		systemPrompt: config.challengerSystemPrompt ?? "",
-		topic: config.topic,
-		role: "challenger",
-		maxRounds: config.maxRounds,
-		schemaType: "debate_meta",
-	};
-	if (adapters.judge) {
-		adapters.judge.session.recoveryContext = {
-			systemPrompt: config.judgeSystemPrompt ?? "",
-			topic: config.topic,
-			role: "judge",
-			maxRounds: config.maxRounds,
-			schemaType: "judge_verdict",
-		};
-	}
+	populateRecoveryContext(adapters, config);
 
 	const unsubs = [
 		adapters.proposer.adapter.onEvent((e) => bus.push(e)),
@@ -116,7 +92,6 @@ export async function runDebate(
 		unsubs.push(adapters.judge.adapter.onEvent((e) => bus.push(e)));
 	}
 
-	// PlanAccumulator — accumulates evolving plan from debate events (local-only)
 	const synthesisEnabled = process.env.CROSSFIRE_SYNTHESIZER !== "0";
 	const accumulator = new PlanAccumulator();
 	const accUnsub = accumulator.subscribe(bus);
@@ -179,6 +154,110 @@ export async function runDebate(
 	});
 	unsubs.push(judgeInjectUnsub);
 
+	/**
+	 * Build judge prompt based on turn count, using initial or incremental builder.
+	 * Appends optional suffix (e.g. user instruction).
+	 */
+	function buildJudgePrompt(
+		roundNumber: number,
+		proposerText: string,
+		challengerText: string,
+		schemaRefreshOverride?: "full" | "reminder",
+		suffix?: string,
+	): string {
+		let prompt: string;
+		if (judgeTurnCount === 1) {
+			prompt = buildJudgeInitialPrompt({
+				topic: config.topic,
+				maxRounds: config.maxRounds,
+				roundNumber,
+				proposerText,
+				challengerText,
+				systemPrompt: config.judgeSystemPrompt,
+			});
+		} else {
+			prompt = buildJudgeIncrementalPrompt({
+				roundNumber,
+				maxRounds: config.maxRounds,
+				proposerText,
+				challengerText,
+				schemaRefreshMode:
+					schemaRefreshOverride ??
+					getSchemaRefreshMode(
+						judgeTurnCount,
+						config.judgeEveryNRounds,
+						0, // Judge failures not tracked separately
+					),
+			});
+		}
+		if (suffix) {
+			prompt = `${prompt}\n\n${suffix}`;
+		}
+		return prompt;
+	}
+
+	/**
+	 * Execute a full judge invocation: emit started, build prompt, run turn,
+	 * emit completed, and return the verdict.
+	 */
+	async function invokeJudge(
+		turnId: string,
+		roundNumber: number,
+		schemaRefreshOverride?: "full" | "reminder",
+		promptSuffix?: string,
+	): Promise<JudgeVerdict | undefined> {
+		if (!adapters.judge) return undefined;
+		director.recordJudgeIntervention();
+		bus.push({
+			kind: "judge.started",
+			roundNumber,
+			timestamp: Date.now(),
+		});
+		judgeTurnCount++;
+		const state = bus.snapshot();
+		const proposerText = getLatestTurnContent(state, "proposer");
+		const challengerText = getLatestTurnContent(state, "challenger");
+		const prompt = buildJudgePrompt(
+			roundNumber,
+			proposerText,
+			challengerText,
+			schemaRefreshOverride,
+			promptSuffix,
+		);
+		const verdict = await runJudgeTurn(
+			adapters.judge.adapter,
+			adapters.judge.session,
+			bus,
+			{ turnId, prompt, roundNumber },
+		);
+		bus.push({
+			kind: "judge.completed",
+			roundNumber,
+			verdict,
+			timestamp: Date.now(),
+		});
+		return verdict;
+	}
+
+	/**
+	 * Process verdict result: update tracking state and determine if debate should end.
+	 * Returns true if the judge decided to end the debate.
+	 */
+	function handleJudgeVerdict(verdict: JudgeVerdict | undefined): boolean {
+		if (verdict) {
+			lastJudgeVerdict = verdict;
+			lastJudgeText = verdict.reasoning;
+		}
+		if (verdict && !verdict.shouldContinue) {
+			action = { type: "end-debate", reason: "judge-decision" };
+			return true;
+		}
+		if (verdict?.shouldContinue) {
+			director.resetStagnation();
+		}
+		return false;
+	}
+
 	try {
 		for (let round = startRound; round <= config.maxRounds; round++) {
 			// Proposer turn
@@ -200,9 +279,7 @@ export async function runDebate(
 					schemaType: "debate_meta",
 				});
 			} else {
-				const opponentText =
-					proposerState.turns.filter((t) => t.role === "challenger").at(-1)
-						?.content ?? "";
+				const opponentText = getLatestTurnContent(proposerState, "challenger");
 				proposerPrompt = buildIncrementalPrompt({
 					roundNumber: round,
 					maxRounds: config.maxRounds,
@@ -216,7 +293,6 @@ export async function runDebate(
 					),
 				});
 			}
-			// Clear judge text after proposer consumes it
 			lastJudgeText = undefined;
 			const proposerTurnId = `p-${round}`;
 			await adapters.proposer.adapter.sendTurn(adapters.proposer.session, {
@@ -226,7 +302,7 @@ export async function runDebate(
 			const proposerResult = await waitForTurnCompleted(bus, proposerTurnId);
 			if (proposerResult === "interrupted") return bus.snapshot();
 
-			// Check if proposer produced debate_meta (for schema refresh tracking)
+			// Track schema refresh failures
 			const stateAfterProposer = bus.snapshot();
 			const lastProposerTurn = stateAfterProposer.turns
 				.filter((t) => t.role === "proposer")
@@ -255,10 +331,7 @@ export async function runDebate(
 			const challengerState = bus.snapshot();
 			let challengerPrompt: string;
 			if (challengerTurnCount === 1) {
-				// Challenger Turn 1: include proposer's text as context in initial prompt
-				const proposerText =
-					challengerState.turns.filter((t) => t.role === "proposer").at(-1)
-						?.content ?? "";
+				const proposerText = getLatestTurnContent(challengerState, "proposer");
 				challengerPrompt = buildInitialPrompt({
 					role: "challenger",
 					topic: config.topic,
@@ -268,9 +341,7 @@ export async function runDebate(
 					operationalPreamble: `Proposer's opening response:\n\n${proposerText}`,
 				});
 			} else {
-				const opponentText =
-					challengerState.turns.filter((t) => t.role === "proposer").at(-1)
-						?.content ?? "";
+				const opponentText = getLatestTurnContent(challengerState, "proposer");
 				challengerPrompt = buildIncrementalPrompt({
 					roundNumber: round,
 					maxRounds: config.maxRounds,
@@ -284,7 +355,6 @@ export async function runDebate(
 					),
 				});
 			}
-			// Clear judge text after challenger consumes it
 			lastJudgeText = undefined;
 			const challengerTurnId = `c-${round}`;
 			await adapters.challenger.adapter.sendTurn(adapters.challenger.session, {
@@ -297,7 +367,7 @@ export async function runDebate(
 			);
 			if (challengerResult === "interrupted") return bus.snapshot();
 
-			// Check if challenger produced debate_meta (for schema refresh tracking)
+			// Track schema refresh failures
 			const stateAfterChallenger = bus.snapshot();
 			const lastChallengerTurn = stateAfterChallenger.turns
 				.filter((t) => t.role === "challenger")
@@ -338,75 +408,11 @@ export async function runDebate(
 				if (action.reason === "stagnation" || action.reason === "degradation") {
 					director.recordJudgeIntervention();
 				}
-				// All other reasons (scheduled, agent-request): skip and continue
 			}
 
 			if (action.type === "trigger-judge" && adapters.judge) {
-				director.recordJudgeIntervention();
-				bus.push({
-					kind: "judge.started",
-					roundNumber: round,
-					timestamp: Date.now(),
-				});
-				judgeTurnCount++;
-				const judgeState = bus.snapshot();
-				const proposerText =
-					judgeState.turns.filter((t) => t.role === "proposer").at(-1)
-						?.content ?? "";
-				const challengerText =
-					judgeState.turns.filter((t) => t.role === "challenger").at(-1)
-						?.content ?? "";
-				let judgePrompt: string;
-				if (judgeTurnCount === 1) {
-					judgePrompt = buildJudgeInitialPrompt({
-						topic: config.topic,
-						maxRounds: config.maxRounds,
-						roundNumber: round,
-						proposerText,
-						challengerText,
-						systemPrompt: config.judgeSystemPrompt,
-					});
-				} else {
-					judgePrompt = buildJudgeIncrementalPrompt({
-						roundNumber: round,
-						maxRounds: config.maxRounds,
-						proposerText,
-						challengerText,
-						schemaRefreshMode: getSchemaRefreshMode(
-							judgeTurnCount,
-							config.judgeEveryNRounds,
-							0, // Judge failures not tracked separately
-						),
-					});
-				}
-				const verdict = await runJudgeTurn(
-					adapters.judge.adapter,
-					adapters.judge.session,
-					bus,
-					{
-						turnId: `j-${round}`,
-						prompt: judgePrompt,
-						roundNumber: round,
-					},
-				);
-				bus.push({
-					kind: "judge.completed",
-					roundNumber: round,
-					verdict,
-					timestamp: Date.now(),
-				});
-				if (verdict) {
-					lastJudgeVerdict = verdict;
-					lastJudgeText = verdict.reasoning;
-				}
-				if (verdict && !verdict.shouldContinue) {
-					action = { type: "end-debate", reason: "judge-decision" };
-					break;
-				}
-				// Judge overrides stagnation — reset counter so debate can continue
-				if (verdict?.shouldContinue) {
-					director.resetStagnation();
-				}
+				const verdict = await invokeJudge(`j-${round}`, round);
+				if (handleJudgeVerdict(verdict)) break;
 			}
 
 			if (action.type === "inject-guidance") {
@@ -422,66 +428,13 @@ export async function runDebate(
 			if (pendingUserJudge !== undefined && adapters.judge) {
 				const userInstruction = pendingUserJudge;
 				pendingUserJudge = undefined;
-				director.recordJudgeIntervention();
-				bus.push({
-					kind: "judge.started",
-					roundNumber: round,
-					timestamp: Date.now(),
-				});
-				judgeTurnCount++;
-				const judgeState = bus.snapshot();
-				const proposerText =
-					judgeState.turns.filter((t) => t.role === "proposer").at(-1)
-						?.content ?? "";
-				const challengerText =
-					judgeState.turns.filter((t) => t.role === "challenger").at(-1)
-						?.content ?? "";
-				let judgePrompt: string;
-				if (judgeTurnCount === 1) {
-					judgePrompt = `${buildJudgeInitialPrompt({
-						topic: config.topic,
-						maxRounds: config.maxRounds,
-						roundNumber: round,
-						proposerText,
-						challengerText,
-						systemPrompt: config.judgeSystemPrompt,
-					})}\n\n## User Instruction\n${userInstruction}`;
-				} else {
-					judgePrompt = `${buildJudgeIncrementalPrompt({
-						roundNumber: round,
-						maxRounds: config.maxRounds,
-						proposerText,
-						challengerText,
-						schemaRefreshMode: "full",
-					})}\n\n## User Instruction\n${userInstruction}`;
-				}
-				const verdict = await runJudgeTurn(
-					adapters.judge.adapter,
-					adapters.judge.session,
-					bus,
-					{
-						turnId: `j-user-${round}`,
-						prompt: judgePrompt,
-						roundNumber: round,
-					},
+				const verdict = await invokeJudge(
+					`j-user-${round}`,
+					round,
+					"full",
+					`## User Instruction\n${userInstruction}`,
 				);
-				bus.push({
-					kind: "judge.completed",
-					roundNumber: round,
-					verdict,
-					timestamp: Date.now(),
-				});
-				if (verdict) {
-					lastJudgeVerdict = verdict;
-					lastJudgeText = verdict.reasoning;
-				}
-				if (verdict && !verdict.shouldContinue) {
-					action = { type: "end-debate", reason: "judge-decision" };
-					break;
-				}
-				if (verdict?.shouldContinue) {
-					director.resetStagnation();
-				}
+				if (handleJudgeVerdict(verdict)) break;
 			}
 		}
 
@@ -496,53 +449,12 @@ export async function runDebate(
 		if (adapters.judge && !alreadyJudged) {
 			try {
 				const finalState = bus.snapshot();
-				bus.push({
-					kind: "judge.started",
-					roundNumber: finalState.currentRound,
-					timestamp: Date.now(),
-				});
-				judgeTurnCount++;
-				const proposerText =
-					finalState.turns.filter((t) => t.role === "proposer").at(-1)
-						?.content ?? "";
-				const challengerText =
-					finalState.turns.filter((t) => t.role === "challenger").at(-1)
-						?.content ?? "";
-				let judgePrompt: string;
-				if (judgeTurnCount === 1) {
-					judgePrompt = buildJudgeInitialPrompt({
-						topic: config.topic,
-						maxRounds: config.maxRounds,
-						roundNumber: finalState.currentRound,
-						proposerText,
-						challengerText,
-						systemPrompt: config.judgeSystemPrompt,
-					});
-				} else {
-					judgePrompt = buildJudgeIncrementalPrompt({
-						roundNumber: finalState.currentRound,
-						maxRounds: config.maxRounds,
-						proposerText,
-						challengerText,
-						schemaRefreshMode: "full",
-					});
-				}
 				finalVerdict = await Promise.race([
-					runJudgeTurn(adapters.judge.adapter, adapters.judge.session, bus, {
-						turnId: "j-final",
-						prompt: judgePrompt,
-						roundNumber: finalState.currentRound,
-					}),
+					invokeJudge("j-final", finalState.currentRound, "full"),
 					new Promise<undefined>((resolve) =>
 						setTimeout(() => resolve(undefined), 30_000),
 					),
 				]);
-				bus.push({
-					kind: "judge.completed",
-					roundNumber: finalState.currentRound,
-					verdict: finalVerdict,
-					timestamp: Date.now(),
-				});
 			} catch (err) {
 				bus.push({
 					kind: "synthesis.error",
@@ -767,6 +679,50 @@ export async function runDebate(
 	} finally {
 		accUnsub();
 		for (const unsub of unsubs) unsub();
+	}
+}
+
+function getLatestTurnContent(state: DebateState, role: string): string {
+	return state.turns.filter((t) => t.role === role).at(-1)?.content ?? "";
+}
+
+function populateRecoveryContext(
+	adapters: AdapterMap,
+	config: DebateConfig,
+): void {
+	const roles = [
+		{
+			entry: adapters.proposer,
+			role: "proposer",
+			systemPrompt: config.proposerSystemPrompt,
+			schemaType: "debate_meta",
+		},
+		{
+			entry: adapters.challenger,
+			role: "challenger",
+			systemPrompt: config.challengerSystemPrompt,
+			schemaType: "debate_meta",
+		},
+	] as const;
+
+	for (const { entry, role, systemPrompt, schemaType } of roles) {
+		entry.session.recoveryContext = {
+			systemPrompt: systemPrompt ?? "",
+			topic: config.topic,
+			role,
+			maxRounds: config.maxRounds,
+			schemaType,
+		};
+	}
+
+	if (adapters.judge) {
+		adapters.judge.session.recoveryContext = {
+			systemPrompt: config.judgeSystemPrompt ?? "",
+			topic: config.topic,
+			role: "judge",
+			maxRounds: config.maxRounds,
+			schemaType: "judge_verdict",
+		};
 	}
 }
 

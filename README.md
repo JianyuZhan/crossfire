@@ -367,10 +367,10 @@ packages/
 
 Layer guide:
 
-- **Adapters** normalize provider protocols into shared events with explicit capability surfaces
+- **Adapters** normalize provider protocols into shared events with explicit capability surfaces. Shared type aliases (`AdapterId`, `DebateRole`, `UsageSnapshot`) reduce duplication across the event model.
 - **Orchestrator core** makes replay-safe decisions from projected state
-- **Orchestrator** runs debates, persists events, writes transcripts, and triggers final synthesis
-- **TUI** renders the same event stream used by live execution and replay
+- **Orchestrator** runs debates, persists events, writes transcripts, and triggers final synthesis. Key helpers (`getLatestTurnContent`, `invokeJudge`, `applyRoundToPlan`) keep the runner and plan accumulator focused and testable.
+- **TUI** renders the same event stream used by live execution and replay. Data-driven lookup maps replace nested ternaries for status icons, prefixes, and color selection.
 
 ## Current Limitations
 

@@ -42,11 +42,14 @@ export function resolveRoles(input: {
 	challenger: RoleInput;
 	judge: RoleInput | "none";
 }): ResolvedRoles {
-	const resolve = (role: RoleInput): ResolvedRole => ({
-		profile: role.profile,
-		model: resolveModel(role.cliModel, role.profile),
-		adapterType: resolveAdapterType(role.profile.agent),
-	});
+	function resolve(role: RoleInput): ResolvedRole {
+		return {
+			profile: role.profile,
+			model: resolveModel(role.cliModel, role.profile),
+			adapterType: resolveAdapterType(role.profile.agent),
+		};
+	}
+
 	return {
 		proposer: resolve(input.proposer),
 		challenger: resolve(input.challenger),

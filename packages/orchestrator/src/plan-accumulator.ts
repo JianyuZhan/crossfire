@@ -1,7 +1,10 @@
 import {
 	type AnyEvent,
+	type DebateState,
+	type DebateTurn,
 	type EvolvingPlan,
 	type JudgeVerdict,
+	type RoundAnalysis,
 	type RoundSignals,
 	buildFallbackRoundAnalysis,
 	emptyPlan,
@@ -49,39 +52,9 @@ export class PlanAccumulator {
 		if (event.kind === "judge.completed") {
 			const e = event as { roundNumber: number; verdict?: JudgeVerdict };
 			if (e.verdict) {
-				this.plan = updatePlanWithJudge(this.plan, e.verdict, e.roundNumber);
-
-				// Update judgeImpact for this round's RoundSignals
-				const signals = [...(this.plan.roundSignals ?? [])];
-				const idx = signals.findIndex((s) => s.roundNumber === e.roundNumber);
-				if (idx >= 0) {
-					const prevJudge = this.plan.judgeNotes.at(-2);
-					const spread = e.verdict.score
-						? Math.abs(e.verdict.score.proposer - e.verdict.score.challenger)
-						: 0;
-					signals[idx] = {
-						...signals[idx],
-						judgeImpact: {
-							hasVerdict: true,
-							weighted: spread >= 0.3,
-							directionChange: prevJudge
-								? prevJudge.leading !== e.verdict.leading
-								: false,
-						},
-					};
-					this.plan = { ...this.plan, roundSignals: signals };
-				}
+				this.plan = applyJudgeVerdict(this.plan, e.verdict, e.roundNumber);
 			}
 		}
-	}
-
-	private shallowSetEqual(a: string[], b: string[]): boolean {
-		if (a.length !== b.length) return false;
-		const setA = new Set(a);
-		for (const item of b) {
-			if (!setA.has(item)) return false;
-		}
-		return true;
 	}
 
 	private processRound(roundNumber: number): void {
@@ -93,108 +66,29 @@ export class PlanAccumulator {
 		this.processedRounds.add(roundNumber);
 
 		const state = projectState(this.events);
-		// Use reverse search to find the latest turn for this round (handles reprocess)
-		const reversed = [...state.turns].reverse();
-		const proposerTurn = reversed.find(
-			(t) => t.roundNumber === roundNumber && t.role === "proposer",
-		);
-		const challengerTurn = reversed.find(
-			(t) => t.roundNumber === roundNumber && t.role === "challenger",
-		);
-
-		const fallback = buildFallbackRoundAnalysis(
+		const { proposerTurn, challengerTurn } = findLatestTurns(
+			state,
 			roundNumber,
-			proposerTurn?.meta,
-			challengerTurn?.meta,
 		);
 
-		// Snapshot plan BEFORE update to compute deltas
 		const planBefore = this.plan;
-		this.plan = updatePlan(this.plan, fallback);
-
-		// Upsert roundAnalyses by roundNumber, keeping ascending order
-		const existing = this.plan.roundAnalyses ?? [];
-		const filtered = existing.filter((a) => a.roundNumber !== roundNumber);
-		const updated = [...filtered, fallback].sort(
-			(a, b) => a.roundNumber - b.roundNumber,
-		);
-		this.plan = { ...this.plan, roundAnalyses: updated };
-
-		// Determine degraded status: degraded if neither side provided meta
-		const isDegraded = !proposerTurn?.meta && !challengerTurn?.meta;
-		const currentDegraded = this.plan.degradedRounds.filter(
-			(r) => r !== roundNumber,
-		);
-		this.plan = {
-			...this.plan,
-			degradedRounds: isDegraded
-				? [...currentDegraded, roundNumber].sort((a, b) => a - b)
-				: currentDegraded,
-		};
-
-		// --- RoundSignals computation ---
-
-		// Historical dedup for newClaimCount
-		const currentClaims = [
-			...new Set(
-				fallback.newArguments.map((a) => a.argument.trim().toLowerCase()),
-			),
-		];
-		const newClaimCount = currentClaims.filter(
-			(c) => !this.seenKeyPoints.has(c),
-		).length;
-		for (const c of currentClaims) this.seenKeyPoints.add(c);
-
-		// Concession is strictly from meta.concessions, NOT consensus
-		const hasConcession =
-			(proposerTurn?.meta?.concessions?.length ?? 0) > 0 ||
-			(challengerTurn?.meta?.concessions?.length ?? 0) > 0;
-
-		// Shallow set diff for consensus and risks
-		const consensusDelta = !this.shallowSetEqual(
-			planBefore.consensus,
-			this.plan.consensus,
-		);
-		const riskDelta = !this.shallowSetEqual(
-			planBefore.risks.map((r) => `${r.risk}|${r.severity}|${r.round}`),
-			this.plan.risks.map((r) => `${r.risk}|${r.severity}|${r.round}`),
-		);
-
-		const signals: RoundSignals = {
+		this.plan = this.applyRoundToPlan(
+			this.plan,
 			roundNumber,
-			newClaimCount,
-			hasConcession,
-			consensusDelta,
-			riskDelta,
-			judgeImpact: {
-				hasVerdict: false,
-				weighted: false,
-				directionChange: false,
-			},
-		};
-
-		// Upsert roundSignals (unique by roundNumber)
-		const existingRS = (this.plan.roundSignals ?? []).filter(
-			(s) => s.roundNumber !== roundNumber,
+			proposerTurn,
+			challengerTurn,
+			planBefore,
 		);
-		this.plan = {
-			...this.plan,
-			roundSignals: [...existingRS, signals].sort(
-				(a, b) => a.roundNumber - b.roundNumber,
-			),
-		};
 	}
 
 	private rebuildRoundDerivedState(): void {
-		// Reset all order-sensitive state
 		this.seenKeyPoints = new Set<string>();
 		this.processedRounds = new Set<number>();
 
-		// Start from a clean plan preserving only the global state from updatePlan()
 		let rebuiltPlan = emptyPlan();
 		const state = projectState(this.events);
 
-		// Collect all unique round numbers from events that have been completed
+		// Collect completed rounds from events
 		const completedRounds = new Set<number>();
 		for (const event of this.events) {
 			if (event.kind === "round.completed") {
@@ -206,106 +100,23 @@ export class PlanAccumulator {
 		}
 
 		// Process in ascending order
-		const sortedRounds = [...completedRounds].sort((a, b) => a - b);
-
-		for (const roundNumber of sortedRounds) {
-			// Find turns for this round (use reverse for latest)
-			const reversed = [...state.turns].reverse();
-			const proposerTurn = reversed.find(
-				(t) => t.roundNumber === roundNumber && t.role === "proposer",
-			);
-			const challengerTurn = reversed.find(
-				(t) => t.roundNumber === roundNumber && t.role === "challenger",
-			);
-
-			const fallback = buildFallbackRoundAnalysis(
+		for (const roundNumber of [...completedRounds].sort((a, b) => a - b)) {
+			const { proposerTurn, challengerTurn } = findLatestTurns(
+				state,
 				roundNumber,
-				proposerTurn?.meta,
-				challengerTurn?.meta,
 			);
-
-			// Snapshot before update
 			const planBefore = rebuiltPlan;
-			rebuiltPlan = updatePlan(rebuiltPlan, fallback);
-
-			// Upsert roundAnalyses
-			const existingRA = (rebuiltPlan.roundAnalyses ?? []).filter(
-				(a) => a.roundNumber !== roundNumber,
-			);
-			rebuiltPlan = {
-				...rebuiltPlan,
-				roundAnalyses: [...existingRA, fallback].sort(
-					(a, b) => a.roundNumber - b.roundNumber,
-				),
-			};
-
-			// Degraded status
-			const isDegraded = !proposerTurn?.meta && !challengerTurn?.meta;
-			const currentDegraded = rebuiltPlan.degradedRounds.filter(
-				(r) => r !== roundNumber,
-			);
-			rebuiltPlan = {
-				...rebuiltPlan,
-				degradedRounds: isDegraded
-					? [...currentDegraded, roundNumber].sort((a, b) => a - b)
-					: currentDegraded,
-			};
-
-			// RoundSignals computation (same as processRound)
-			const currentClaims = [
-				...new Set(
-					fallback.newArguments.map((a) => a.argument.trim().toLowerCase()),
-				),
-			];
-			const newClaimCount = currentClaims.filter(
-				(c) => !this.seenKeyPoints.has(c),
-			).length;
-			for (const c of currentClaims) this.seenKeyPoints.add(c);
-
-			const hasConcession =
-				(proposerTurn?.meta?.concessions?.length ?? 0) > 0 ||
-				(challengerTurn?.meta?.concessions?.length ?? 0) > 0;
-
-			const consensusDelta = !this.shallowSetEqual(
-				planBefore.consensus,
-				rebuiltPlan.consensus,
-			);
-			const riskDelta = !this.shallowSetEqual(
-				planBefore.risks.map((r) => `${r.risk}|${r.severity}|${r.round}`),
-				rebuiltPlan.risks.map((r) => `${r.risk}|${r.severity}|${r.round}`),
-			);
-
-			const signals: RoundSignals = {
+			rebuiltPlan = this.applyRoundToPlan(
+				rebuiltPlan,
 				roundNumber,
-				newClaimCount,
-				hasConcession,
-				consensusDelta,
-				riskDelta,
-				judgeImpact: {
-					hasVerdict: false,
-					weighted: false,
-					directionChange: false,
-				},
-			};
-
-			const existingRS = (rebuiltPlan.roundSignals ?? []).filter(
-				(s) => s.roundNumber !== roundNumber,
+				proposerTurn,
+				challengerTurn,
+				planBefore,
 			);
-			rebuiltPlan = {
-				...rebuiltPlan,
-				roundSignals: [...existingRS, signals].sort(
-					(a, b) => a.roundNumber - b.roundNumber,
-				),
-			};
-
 			this.processedRounds.add(roundNumber);
 		}
 
 		// Re-apply judge verdicts in order
-		const judgeEvents: Array<{
-			roundNumber: number;
-			verdict: JudgeVerdict;
-		}> = [];
 		for (const event of this.events) {
 			if (event.kind === "judge.completed") {
 				const e = event as {
@@ -313,42 +124,210 @@ export class PlanAccumulator {
 					verdict?: JudgeVerdict;
 				};
 				if (e.verdict) {
-					judgeEvents.push({
-						roundNumber: e.roundNumber,
-						verdict: e.verdict,
-					});
+					rebuiltPlan = applyJudgeVerdict(
+						rebuiltPlan,
+						e.verdict,
+						e.roundNumber,
+					);
 				}
-			}
-		}
-		for (const je of judgeEvents) {
-			rebuiltPlan = updatePlanWithJudge(
-				rebuiltPlan,
-				je.verdict,
-				je.roundNumber,
-			);
-
-			// Patch judgeImpact
-			const signals = [...(rebuiltPlan.roundSignals ?? [])];
-			const idx = signals.findIndex((s) => s.roundNumber === je.roundNumber);
-			if (idx >= 0) {
-				const prevJudge = rebuiltPlan.judgeNotes.at(-2);
-				const spread = je.verdict.score
-					? Math.abs(je.verdict.score.proposer - je.verdict.score.challenger)
-					: 0;
-				signals[idx] = {
-					...signals[idx],
-					judgeImpact: {
-						hasVerdict: true,
-						weighted: spread >= 0.3,
-						directionChange: prevJudge
-							? prevJudge.leading !== je.verdict.leading
-							: false,
-					},
-				};
-				rebuiltPlan = { ...rebuiltPlan, roundSignals: signals };
 			}
 		}
 
 		this.plan = rebuiltPlan;
 	}
+
+	/**
+	 * Apply a single round's analysis, degraded status, and signals to a plan.
+	 * Shared between processRound (incremental) and rebuildRoundDerivedState (full rebuild).
+	 */
+	private applyRoundToPlan(
+		plan: EvolvingPlan,
+		roundNumber: number,
+		proposerTurn: DebateTurn | undefined,
+		challengerTurn: DebateTurn | undefined,
+		planBefore: EvolvingPlan,
+	): EvolvingPlan {
+		const analysis = buildFallbackRoundAnalysis(
+			roundNumber,
+			proposerTurn?.meta,
+			challengerTurn?.meta,
+		);
+
+		let updated = updatePlan(plan, analysis);
+		updated = upsertRoundAnalysis(updated, roundNumber, analysis);
+		updated = updateDegradedRounds(
+			updated,
+			roundNumber,
+			!proposerTurn?.meta && !challengerTurn?.meta,
+		);
+		const signals = this.computeRoundSignals(
+			roundNumber,
+			analysis,
+			proposerTurn,
+			challengerTurn,
+			planBefore,
+			updated,
+		);
+		return upsertByRoundNumber(updated, "roundSignals", signals);
+	}
+
+	/**
+	 * Compute RoundSignals for a round, tracking new claims across the
+	 * lifetime of the accumulator via seenKeyPoints.
+	 */
+	private computeRoundSignals(
+		roundNumber: number,
+		analysis: RoundAnalysis,
+		proposerTurn: DebateTurn | undefined,
+		challengerTurn: DebateTurn | undefined,
+		planBefore: EvolvingPlan,
+		planAfter: EvolvingPlan,
+	): RoundSignals {
+		const currentClaims = [
+			...new Set(
+				analysis.newArguments.map((a) => a.argument.trim().toLowerCase()),
+			),
+		];
+		const newClaimCount = currentClaims.filter(
+			(c) => !this.seenKeyPoints.has(c),
+		).length;
+		for (const c of currentClaims) this.seenKeyPoints.add(c);
+
+		const hasConcession =
+			(proposerTurn?.meta?.concessions?.length ?? 0) > 0 ||
+			(challengerTurn?.meta?.concessions?.length ?? 0) > 0;
+
+		const consensusDelta = !shallowSetEqual(
+			planBefore.consensus,
+			planAfter.consensus,
+		);
+		const riskDelta = !shallowSetEqual(
+			planBefore.risks.map(riskKey),
+			planAfter.risks.map(riskKey),
+		);
+
+		return {
+			roundNumber,
+			newClaimCount,
+			hasConcession,
+			consensusDelta,
+			riskDelta,
+			judgeImpact: {
+				hasVerdict: false,
+				weighted: false,
+				directionChange: false,
+			},
+		};
+	}
+}
+
+// --- Pure helper functions ---
+
+function findLatestTurns(
+	state: DebateState,
+	roundNumber: number,
+): {
+	proposerTurn: DebateTurn | undefined;
+	challengerTurn: DebateTurn | undefined;
+} {
+	const reversed = [...state.turns].reverse();
+	return {
+		proposerTurn: reversed.find(
+			(t) => t.roundNumber === roundNumber && t.role === "proposer",
+		),
+		challengerTurn: reversed.find(
+			(t) => t.roundNumber === roundNumber && t.role === "challenger",
+		),
+	};
+}
+
+function riskKey(r: { risk: string; severity: string; round: number }): string {
+	return `${r.risk}|${r.severity}|${r.round}`;
+}
+
+function shallowSetEqual(a: string[], b: string[]): boolean {
+	if (a.length !== b.length) return false;
+	const setA = new Set(a);
+	for (const item of b) {
+		if (!setA.has(item)) return false;
+	}
+	return true;
+}
+
+/** Upsert roundAnalyses by roundNumber, keeping ascending order */
+function upsertRoundAnalysis(
+	plan: EvolvingPlan,
+	roundNumber: number,
+	analysis: RoundAnalysis,
+): EvolvingPlan {
+	const existing = (plan.roundAnalyses ?? []).filter(
+		(a) => a.roundNumber !== roundNumber,
+	);
+	return {
+		...plan,
+		roundAnalyses: [...existing, analysis].sort(
+			(a, b) => a.roundNumber - b.roundNumber,
+		),
+	};
+}
+
+/** Update degradedRounds list based on whether a round is degraded */
+function updateDegradedRounds(
+	plan: EvolvingPlan,
+	roundNumber: number,
+	isDegraded: boolean,
+): EvolvingPlan {
+	const filtered = plan.degradedRounds.filter((r) => r !== roundNumber);
+	return {
+		...plan,
+		degradedRounds: isDegraded
+			? [...filtered, roundNumber].sort((a, b) => a - b)
+			: filtered,
+	};
+}
+
+/** Upsert an item into a plan array field keyed by roundNumber */
+function upsertByRoundNumber(
+	plan: EvolvingPlan,
+	field: "roundSignals",
+	item: RoundSignals,
+): EvolvingPlan {
+	const existing = (plan[field] ?? []).filter(
+		(s) => s.roundNumber !== item.roundNumber,
+	);
+	return {
+		...plan,
+		[field]: [...existing, item].sort((a, b) => a.roundNumber - b.roundNumber),
+	};
+}
+
+/** Apply a judge verdict to the plan and patch the corresponding RoundSignals */
+function applyJudgeVerdict(
+	plan: EvolvingPlan,
+	verdict: JudgeVerdict,
+	roundNumber: number,
+): EvolvingPlan {
+	let updated = updatePlanWithJudge(plan, verdict, roundNumber);
+
+	const signals = [...(updated.roundSignals ?? [])];
+	const idx = signals.findIndex((s) => s.roundNumber === roundNumber);
+	if (idx >= 0) {
+		const prevJudge = updated.judgeNotes.at(-2);
+		const spread = verdict.score
+			? Math.abs(verdict.score.proposer - verdict.score.challenger)
+			: 0;
+		signals[idx] = {
+			...signals[idx],
+			judgeImpact: {
+				hasVerdict: true,
+				weighted: spread >= 0.3,
+				directionChange: prevJudge
+					? prevJudge.leading !== verdict.leading
+					: false,
+			},
+		};
+		updated = { ...updated, roundSignals: signals };
+	}
+
+	return updated;
 }

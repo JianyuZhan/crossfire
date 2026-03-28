@@ -1,5 +1,3 @@
-// packages/adapter-core/src/event-schema.ts
-
 import { z } from "zod";
 
 // Base schemas
@@ -133,12 +131,38 @@ const SubagentCompletedSchema = z.object({
 });
 
 // Usage
-const UsageUpdatedSchema = z.object({
-	...BaseEventFields,
-	kind: z.literal("usage.updated"),
+const ProviderUsageSemanticsSchema = z.enum([
+	"per_turn",
+	"cumulative_thread_total",
+	"session_delta_or_cached",
+	"unknown",
+]);
+
+const LocalTurnMetricsSchema = z.object({
+	semanticChars: z.number(),
+	semanticUtf8Bytes: z.number(),
+	adapterOverheadChars: z.number(),
+	adapterOverheadUtf8Bytes: z.number(),
+	totalChars: z.number(),
+	totalUtf8Bytes: z.number(),
+	totalTokensEstimate: z.number().optional(),
+	tokenEstimateMethod: z.string().optional(),
+});
+
+const UsageFields = {
 	inputTokens: z.number(),
 	outputTokens: z.number(),
 	totalCostUsd: z.number().optional(),
+	cacheReadTokens: z.number().optional(),
+	cacheWriteTokens: z.number().optional(),
+	semantics: ProviderUsageSemanticsSchema.optional(),
+	localMetrics: LocalTurnMetricsSchema.optional(),
+};
+
+const UsageUpdatedSchema = z.object({
+	...BaseEventFields,
+	kind: z.literal("usage.updated"),
+	...UsageFields,
 });
 
 // Turn completion
@@ -147,13 +171,7 @@ const TurnCompletedSchema = z.object({
 	kind: z.literal("turn.completed"),
 	status: z.enum(["completed", "interrupted", "failed", "timeout"]),
 	durationMs: z.number(),
-	usage: z
-		.object({
-			inputTokens: z.number(),
-			outputTokens: z.number(),
-			totalCostUsd: z.number().optional(),
-		})
-		.optional(),
+	usage: z.object(UsageFields).optional(),
 });
 
 // Errors

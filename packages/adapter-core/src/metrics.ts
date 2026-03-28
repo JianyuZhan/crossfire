@@ -1,5 +1,3 @@
-// packages/adapter-core/src/metrics.ts
-
 import type { LocalTurnMetrics } from "./types.js";
 
 /**

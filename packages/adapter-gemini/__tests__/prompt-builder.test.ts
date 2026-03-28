@@ -7,18 +7,18 @@ describe("buildStatelessPrompt", () => {
 		expect(result.endsWith("What next?")).toBe(true);
 	});
 
-	it("summary mode: includes turn summaries", () => {
+	it("includes turn summaries from history", () => {
 		const history = [
 			{ role: "user", summary: "Asked about X" },
 			{ role: "assistant", summary: "Explained X in detail" },
 		];
-		const result = buildStatelessPrompt("Follow up", history, "summary");
+		const result = buildStatelessPrompt("Follow up", history);
 		expect(result).toContain("Asked about X");
 		expect(result).toContain("Explained X in detail");
 		expect(result).toContain("Follow up");
 	});
 
-	it("does not include finalText in summary mode", () => {
+	it("uses summary field, ignoring finalText", () => {
 		const history = [
 			{
 				role: "assistant",
@@ -26,7 +26,7 @@ describe("buildStatelessPrompt", () => {
 				finalText: "Very long full response...",
 			},
 		];
-		const result = buildStatelessPrompt("Next", history, "summary");
+		const result = buildStatelessPrompt("Next", history);
 		expect(result).toContain("Short summary");
 		expect(result).not.toContain("Very long full response");
 	});

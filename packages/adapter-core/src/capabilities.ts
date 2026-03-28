@@ -1,5 +1,3 @@
-// packages/adapter-core/src/capabilities.ts
-
 export interface AdapterCapabilities {
 	supportsResume: boolean;
 	resumeMode: "protocol-native" | "native-cli" | "stateless";

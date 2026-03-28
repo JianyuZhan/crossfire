@@ -60,19 +60,28 @@ export function buildHooks(
 		turnId: getTurnId(),
 	});
 
+	/** Resolve tool identity from the explicit toolUseID param or fall back to input fields. */
+	function resolveToolIds(
+		input: HookInput,
+		toolUseID: string | undefined,
+	): { toolUseId: string; toolName: string } {
+		return {
+			toolUseId: toolUseID ?? (input.tool_use_id as string) ?? "unknown",
+			toolName: (input.tool_name as string) ?? "unknown",
+		};
+	}
+
 	const CONTINUE: HookJSONOutput = { continue: true };
 
 	return {
 		PreToolUse: [
 			{
 				hooks: [
-					async (input: HookInput, toolUseID: string | undefined) => {
+					async (input, toolUseID) => {
 						emit({
 							...base(),
 							kind: "tool.call",
-							toolUseId:
-								toolUseID ?? (input.tool_use_id as string) ?? "unknown",
-							toolName: (input.tool_name as string) ?? "unknown",
+							...resolveToolIds(input, toolUseID),
 							input: input.tool_input,
 						});
 						return CONTINUE;
@@ -84,13 +93,11 @@ export function buildHooks(
 		PostToolUse: [
 			{
 				hooks: [
-					async (input: HookInput, toolUseID: string | undefined) => {
+					async (input, toolUseID) => {
 						emit({
 							...base(),
 							kind: "tool.result",
-							toolUseId:
-								toolUseID ?? (input.tool_use_id as string) ?? "unknown",
-							toolName: (input.tool_name as string) ?? "unknown",
+							...resolveToolIds(input, toolUseID),
 							success: true,
 							output: input.tool_response ?? input.tool_output,
 						});
@@ -103,13 +110,11 @@ export function buildHooks(
 		PostToolUseFailure: [
 			{
 				hooks: [
-					async (input: HookInput, toolUseID: string | undefined) => {
+					async (input, toolUseID) => {
 						emit({
 							...base(),
 							kind: "tool.result",
-							toolUseId:
-								toolUseID ?? (input.tool_use_id as string) ?? "unknown",
-							toolName: (input.tool_name as string) ?? "unknown",
+							...resolveToolIds(input, toolUseID),
 							success: false,
 							error: input.error as string,
 						});
@@ -122,7 +127,7 @@ export function buildHooks(
 		SubagentStart: [
 			{
 				hooks: [
-					async (input: HookInput) => {
+					async (input) => {
 						emit({
 							...base(),
 							kind: "subagent.started",
@@ -138,7 +143,7 @@ export function buildHooks(
 		SubagentStop: [
 			{
 				hooks: [
-					async (input: HookInput) => {
+					async (input) => {
 						emit({
 							...base(),
 							kind: "subagent.completed",

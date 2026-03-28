@@ -240,12 +240,12 @@ export function buildPanelLines(
 				break;
 			}
 			case "tool-call": {
-				const prefix =
-					block.status === "running"
-						? ">>"
-						: block.status === "success"
-							? "<<"
-							: "!!";
+				const TOOL_PREFIXES: Record<string, string> = {
+					running: ">>",
+					success: "<<",
+					error: "!!",
+				};
+				const prefix = TOOL_PREFIXES[block.status] ?? "!!";
 				const summary = block.summary ? ` (${block.summary})` : "";
 				const elapsed =
 					block.status === "running" && block.elapsedMs
@@ -438,12 +438,12 @@ export function buildGlobalLineBuffer(
 				}
 				// Decision line
 				if (chunk.status === "done") {
-					const decisionText =
-						chunk.shouldContinue === false
-							? "\u2717 Judge decided to end debate"
-							: chunk.shouldContinue === true
-								? "\u2713 Continuing to next round"
-								: "";
+					let decisionText = "";
+					if (chunk.shouldContinue === false) {
+						decisionText = "\u2717 Judge decided to end debate";
+					} else if (chunk.shouldContinue === true) {
+						decisionText = "\u2713 Continuing to next round";
+					}
 					if (decisionText) {
 						const decisionColor = chunk.shouldContinue ? "green" : "red";
 						const decisionInner = Math.max(0, contentWidth - 4);

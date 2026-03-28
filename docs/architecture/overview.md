@@ -129,3 +129,14 @@ crossfire/
 | Integration | real providers + orchestrator | env-gated provider matrix |
 
 Current integration coverage is env-expanded: `RUN_INTEGRATION=1` enables the base suite, while `HAVE_CODEX` and `HAVE_GEMINI` expand provider combinations.
+
+## Internal Code Quality
+
+Key internal helpers and abstractions extracted across packages to reduce duplication:
+
+- **adapter-core**: `AdapterId`, `DebateRole`, and `UsageSnapshot` shared type aliases reduce repetition across event and interface definitions.
+- **adapter-claude**: `consumeStream()` unifies the event processing loop for normal and recovery paths.
+- **adapter-codex**: `handleResponse/handleServerRequest/handleNotification` decompose the monolithic JSON-RPC message handler.
+- **orchestrator**: `getLatestTurnContent()`, `invokeJudge()`, and `applyRoundToPlan()` reduce the runner and plan accumulator to focused, testable units.
+- **orchestrator-core**: `wireMetaToDomain()` centralizes the snake_case-to-camelCase meta conversion. Lookup tables replace nested ternaries in renderers.
+- **tui**: `TOOL_STATUS_ICONS`, `TOOL_PREFIXES`, and `ScrollStatus` component replace deeply nested ternaries with data-driven rendering.

@@ -1,5 +1,4 @@
-import { spawn as defaultSpawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn as defaultSpawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 export interface ProcessHandle {
@@ -23,7 +22,10 @@ export class ProcessManager {
 		const proc = this.spawnFn("gemini", args, {
 			stdio: ["pipe", "pipe", "pipe"],
 		});
-		const rl = createInterface({ input: proc.stdout! });
+		if (!proc.stdout) {
+			throw new Error("Failed to create stdout pipe for gemini process");
+		}
+		const rl = createInterface({ input: proc.stdout });
 
 		const lineCallbacks: ((line: string) => void)[] = [];
 		const exitCallbacks: ((code: number | null) => void)[] = [];

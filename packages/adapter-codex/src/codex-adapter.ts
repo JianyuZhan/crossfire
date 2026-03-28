@@ -13,8 +13,7 @@ import {
 	parseTurnId,
 } from "@crossfire/adapter-core";
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
-import { mapCodexNotification } from "./event-mapper.js";
-import type { MapContext } from "./event-mapper.js";
+import { type MapContext, mapCodexNotification } from "./event-mapper.js";
 import { JsonRpcClient } from "./jsonrpc-client.js";
 
 /** Approval method types sent by the Codex server */
@@ -180,14 +179,12 @@ export class CodexAdapter implements AgentAdapter {
 			session.currentTurnRoundNumber = input.roundNumber ?? parsed.roundNumber;
 		}
 
-		// Append meta-tool instructions only on first turn so Codex knows how to call them
-		// Subsequent turns use incremental prompts that don't need the instructions repeated
+		// Append meta-tool instructions only on first turn
 		const isFirstTurn = session?.turnCount === 0;
 		const prompt = isFirstTurn
 			? input.prompt + META_TOOL_INSTRUCTIONS
 			: input.prompt;
 
-		// Measure local metrics: first turn has overhead, subsequent turns don't
 		const overheadText = isFirstTurn ? META_TOOL_INSTRUCTIONS : "";
 		const localMetrics = measureLocalMetrics(input.prompt, overheadText);
 		if (session) {
@@ -195,77 +192,89 @@ export class CodexAdapter implements AgentAdapter {
 		}
 
 		try {
-			// Send `turn/start` request — JSON-RPC errors reject the promise
-			const result = (await this.client.request("turn/start", {
-				threadId: handle.providerSessionId,
-				input: [{ type: "text", text: prompt }],
-			})) as { turn: { id: string; status: string } };
-
-			// Save native turn ID for interrupt and increment turn count
-			if (session) {
-				session.currentNativeTurnId = result.turn.id;
-				session.turnCount++;
-			}
-
-			return {
-				turnId: input.turnId,
-				status: "running",
-			};
+			await this.startTurnOnThread(
+				handle.providerSessionId,
+				prompt,
+				session,
+				input.turnId,
+			);
+			return { turnId: input.turnId, status: "running" };
 		} catch (err) {
-			// Attempt recovery if recoveryContext is available
-			if (handle.recoveryContext) {
-				const message = err instanceof Error ? err.message : String(err);
-				this.emit({
-					timestamp: Date.now(),
-					adapterId: "codex",
-					adapterSessionId: handle.adapterSessionId,
-					turnId: input.turnId,
-					kind: "run.warning",
-					message: `turn/start failed (${message}), attempting transcript recovery`,
-				});
-
-				// Create a new thread
-				const threadResult = (await this.client.request("thread/start", {
-					model: session?.model ?? "gpt-5.1-codex-mini",
-					cwd: "/tmp",
-					approvalPolicy: "on-failure",
-				})) as { thread: { id: string } };
-
-				const newThreadId = threadResult.thread.id;
-				handle.providerSessionId = newThreadId;
-				if (session) {
-					session.handle.providerSessionId = newThreadId;
-				}
-
-				// Build recovery prompt from transcript
-				const recoveryPrompt =
-					buildTranscriptRecoveryPrompt({
-						systemPrompt: handle.recoveryContext.systemPrompt,
-						topic: handle.recoveryContext.topic,
-						transcript: handle.transcript,
-						schemaType: handle.recoveryContext.schemaType,
-					}) + META_TOOL_INSTRUCTIONS;
-
-				// Retry turn/start on new thread with recovery prompt
-				const retryResult = (await this.client.request("turn/start", {
-					threadId: newThreadId,
-					input: [{ type: "text", text: recoveryPrompt }],
-				})) as { turn: { id: string; status: string } };
-
-				if (session) {
-					session.currentNativeTurnId = retryResult.turn.id;
-					session.turnCount++;
-				}
-
-				return {
-					turnId: input.turnId,
-					status: "running",
-				};
-			}
-
-			// No recovery context — re-throw
-			throw err;
+			if (!handle.recoveryContext) throw err;
+			return this.recoverTurn(handle, session, input, err);
 		}
+	}
+
+	/**
+	 * Send turn/start on a given thread, updating session state on success.
+	 */
+	private async startTurnOnThread(
+		threadId: string | undefined,
+		prompt: string,
+		session: SessionState | undefined,
+		turnId: string,
+	): Promise<void> {
+		const result = (await this.client.request("turn/start", {
+			threadId,
+			input: [{ type: "text", text: prompt }],
+		})) as { turn: { id: string; status: string } };
+
+		if (session) {
+			session.currentNativeTurnId = result.turn.id;
+			session.turnCount++;
+		}
+	}
+
+	/**
+	 * Recover from a failed turn/start by creating a new thread
+	 * and replaying transcript context.
+	 */
+	private async recoverTurn(
+		handle: SessionHandle,
+		session: SessionState | undefined,
+		input: TurnInput,
+		err: unknown,
+	): Promise<TurnHandle> {
+		const recovery = handle.recoveryContext!;
+		const message = err instanceof Error ? err.message : String(err);
+
+		this.emit({
+			timestamp: Date.now(),
+			adapterId: "codex",
+			adapterSessionId: handle.adapterSessionId,
+			turnId: input.turnId,
+			kind: "run.warning",
+			message: `turn/start failed (${message}), attempting transcript recovery`,
+		});
+
+		// Create a new thread
+		const threadResult = (await this.client.request("thread/start", {
+			model: session?.model ?? "gpt-5.1-codex-mini",
+			cwd: "/tmp",
+			approvalPolicy: "on-failure",
+		})) as { thread: { id: string } };
+
+		const newThreadId = threadResult.thread.id;
+		handle.providerSessionId = newThreadId;
+		if (session) {
+			session.handle.providerSessionId = newThreadId;
+		}
+
+		const recoveryPrompt =
+			buildTranscriptRecoveryPrompt({
+				systemPrompt: recovery.systemPrompt,
+				topic: recovery.topic,
+				transcript: handle.transcript,
+				schemaType: recovery.schemaType,
+			}) + META_TOOL_INSTRUCTIONS;
+
+		await this.startTurnOnThread(
+			newThreadId,
+			recoveryPrompt,
+			session,
+			input.turnId,
+		);
+		return { turnId: input.turnId, status: "running" };
 	}
 
 	onEvent(cb: (e: NormalizedEvent) => void): () => void {
@@ -277,37 +286,33 @@ export class CodexAdapter implements AgentAdapter {
 
 	async approve(req: ApprovalDecision): Promise<void> {
 		const pending = this.pendingApprovals.get(req.requestId);
-		if (pending) {
-			this.pendingApprovals.delete(req.requestId);
+		if (!pending) return;
 
-			// Emit approval.resolved
-			this.emit({
-				timestamp: Date.now(),
-				adapterId: "codex",
-				adapterSessionId: pending.adapterSessionId,
-				turnId: pending.turnId,
-				kind: "approval.resolved",
-				requestId: req.requestId,
-				decision: req.decision,
-			});
+		this.pendingApprovals.delete(req.requestId);
 
-			// Resolve the server's blocked JSON-RPC request
-			pending.resolveServerRequest({
-				approved: req.decision === "allow" || req.decision === "allow-always",
-			});
-		}
+		this.emit({
+			timestamp: Date.now(),
+			adapterId: "codex",
+			adapterSessionId: pending.adapterSessionId,
+			turnId: pending.turnId,
+			kind: "approval.resolved",
+			requestId: req.requestId,
+			decision: req.decision,
+		});
+
+		pending.resolveServerRequest({
+			approved: req.decision === "allow" || req.decision === "allow-always",
+		});
 	}
 
 	async interrupt(turnId: string): Promise<void> {
-		for (const [, session] of this.sessions) {
-			if (session.currentTurnId === turnId) {
-				await this.client.request("turn/interrupt", {
-					threadId: session.handle.providerSessionId,
-					turnId: session.currentNativeTurnId,
-				});
-				return;
-			}
-		}
+		const session = this.findSessionByTurnId(turnId);
+		if (!session) return;
+
+		await this.client.request("turn/interrupt", {
+			threadId: session.handle.providerSessionId,
+			turnId: session.currentNativeTurnId,
+		});
 	}
 
 	async close(handle: SessionHandle): Promise<void> {
@@ -327,15 +332,22 @@ export class CodexAdapter implements AgentAdapter {
 		}
 	}
 
+	/** Find a session that has the given active turn ID */
+	private findSessionByTurnId(turnId: string): SessionState | undefined {
+		for (const session of this.sessions.values()) {
+			if (session.currentTurnId === turnId) return session;
+		}
+		return undefined;
+	}
+
 	/**
 	 * Find the current session context for emitting events.
-	 * Uses the session that has an active turn, or the first session.
+	 * Returns the first session with an active turn.
 	 */
 	private getCurrentContext():
 		| (MapContext & { turnStartTime?: number })
 		| undefined {
-		// Find session with active turn
-		for (const [, session] of this.sessions) {
+		for (const session of this.sessions.values()) {
 			if (session.currentTurnId) {
 				return {
 					adapterId: "codex",
@@ -372,38 +384,32 @@ export class CodexAdapter implements AgentAdapter {
 
 		// Handle all notifications via wildcard
 		this.client.onNotification("*", (method: unknown, params: unknown) => {
-			const methodStr = method as string;
-			const paramsObj = (params ?? {}) as Record<string, unknown>;
 			const ctx = this.getCurrentContext();
 			if (!ctx) return;
 
-			// For turn.completed, attach durationMs from our tracking
+			const methodStr = method as string;
+			const paramsObj = (params ?? {}) as Record<string, unknown>;
+			const session = this.sessions.get(ctx.adapterSessionId);
 			const events = mapCodexNotification(methodStr, paramsObj, ctx);
+
 			for (const event of events) {
 				if (event.kind === "turn.completed" && ctx.turnStartTime) {
 					(event as { durationMs: number }).durationMs =
 						Date.now() - ctx.turnStartTime;
 				}
-				// Attach local metrics to usage.updated events
-				if (event.kind === "usage.updated") {
-					const session = this.sessions.get(ctx.adapterSessionId);
-					if (session?.pendingLocalMetrics) {
-						event.localMetrics = session.pendingLocalMetrics;
-					}
+				if (event.kind === "usage.updated" && session?.pendingLocalMetrics) {
+					event.localMetrics = session.pendingLocalMetrics;
 				}
-				// Append to transcript when a turn's final message arrives
-				if (event.kind === "message.final") {
-					const session = this.sessions.get(ctx.adapterSessionId);
-					if (
-						session?.currentTurnRole &&
-						session.currentTurnRoundNumber !== undefined
-					) {
-						session.handle.transcript.push({
-							roundNumber: session.currentTurnRoundNumber,
-							role: session.currentTurnRole,
-							content: event.text,
-						});
-					}
+				if (
+					event.kind === "message.final" &&
+					session?.currentTurnRole &&
+					session.currentTurnRoundNumber !== undefined
+				) {
+					session.handle.transcript.push({
+						roundNumber: session.currentTurnRoundNumber,
+						role: session.currentTurnRole,
+						content: event.text,
+					});
 				}
 				this.emit(event);
 			}

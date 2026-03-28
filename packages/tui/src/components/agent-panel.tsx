@@ -65,18 +65,19 @@ function statusText(state: LiveAgentPanelState): string {
 	}
 }
 
+const TOOL_STATUS_ICONS: Record<string, string> = {
+	running: "▶",
+	done: "✓",
+	error: "✗",
+};
+
 function ToolList({ tools }: { tools: LiveToolEntry[] }): React.ReactElement {
 	return (
 		<>
 			{tools.map((tool) => (
 				<Box key={tool.toolUseId}>
 					<Text dimColor>
-						{tool.status === "running"
-							? "▶"
-							: tool.status === "done"
-								? "✓"
-								: "✗"}{" "}
-						{tool.toolName}
+						{TOOL_STATUS_ICONS[tool.status] ?? "✗"} {tool.toolName}
 						{tool.expanded ? ` (${tool.inputSummary})` : ""}
 						{tool.elapsedMs !== undefined ? ` ${tool.elapsedMs}ms` : ""}
 						{tool.status === "error" && tool.resultSummary

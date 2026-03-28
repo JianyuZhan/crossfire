@@ -48,25 +48,10 @@ export const statusCommand = new Command("status")
 				// Profiles
 				if (index.profiles) {
 					console.log("Profiles:");
-					console.log(
-						`  Proposer: ${index.profiles.proposer.name} (${index.profiles.proposer.agent})`,
-					);
-					if (index.profiles.proposer.model) {
-						console.log(`    Model: ${index.profiles.proposer.model}`);
-					}
-					console.log(
-						`  Challenger: ${index.profiles.challenger.name} (${index.profiles.challenger.agent})`,
-					);
-					if (index.profiles.challenger.model) {
-						console.log(`    Model: ${index.profiles.challenger.model}`);
-					}
+					printProfileRole("Proposer", index.profiles.proposer);
+					printProfileRole("Challenger", index.profiles.challenger);
 					if (index.profiles.judge) {
-						console.log(
-							`  Judge: ${index.profiles.judge.name} (${index.profiles.judge.agent})`,
-						);
-						if (index.profiles.judge.model) {
-							console.log(`    Model: ${index.profiles.judge.model}`);
-						}
+						printProfileRole("Judge", index.profiles.judge);
 					}
 					console.log();
 				}
@@ -91,6 +76,16 @@ export const statusCommand = new Command("status")
 			process.exit(1);
 		}
 	});
+
+function printProfileRole(
+	label: string,
+	profile: { name: string; agent: string; model?: string },
+): void {
+	console.log(`  ${label}: ${profile.name} (${profile.agent})`);
+	if (profile.model) {
+		console.log(`    Model: ${profile.model}`);
+	}
+}
 
 function formatDuration(ms: number): string {
 	const seconds = Math.floor(ms / 1000);

@@ -1,13 +1,12 @@
 import type { NormalizedEvent } from "@crossfire/adapter-core";
 import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
+import type { SdkMessage } from "./types.js";
 
 interface MapContext {
 	adapterId: "claude";
 	adapterSessionId: string;
 	turnId: string;
 }
-
-import type { SdkMessage } from "./types.js";
 
 /**
  * Extract text content from an assistant message.
@@ -17,7 +16,6 @@ import type { SdkMessage } from "./types.js";
  * simplified format `{ type: 'assistant', content: string }` used in tests.
  */
 function extractAssistantText(msg: SdkMessage): string {
-	// Real SDK format: msg.message is an APIAssistantMessage
 	const apiMsg = msg.message as { content?: unknown } | undefined;
 	if (apiMsg?.content) {
 		if (typeof apiMsg.content === "string") return apiMsg.content;
@@ -30,18 +28,76 @@ function extractAssistantText(msg: SdkMessage): string {
 				.join("");
 		}
 	}
-	// Test/simplified format: content is a top-level string
 	if (typeof msg.content === "string") return msg.content;
 	return "";
 }
 
-/**
- * Extract stop reason from an assistant message.
- */
 function extractStopReason(msg: SdkMessage): string | undefined {
 	const apiMsg = msg.message as { stop_reason?: string } | undefined;
 	if (apiMsg?.stop_reason) return apiMsg.stop_reason;
 	return msg.stopReason as string | undefined;
+}
+
+/**
+ * Map a content block delta to NormalizedEvents.
+ * Shared by both the `stream_event` wrapper and raw `content_block_delta` paths.
+ */
+function mapDelta(
+	delta: { type: string; text?: string; thinking?: string },
+	base: {
+		timestamp: number;
+		adapterId: "claude";
+		adapterSessionId: string;
+		turnId: string;
+	},
+): NormalizedEvent[] {
+	if (delta.type === "text_delta") {
+		return [
+			{
+				...base,
+				kind: "message.delta",
+				text: delta.text ?? "",
+				role: "assistant" as const,
+			},
+		];
+	}
+
+	if (delta.type === "thinking_delta") {
+		return [
+			{
+				...base,
+				kind: "thinking.delta",
+				text: delta.thinking ?? "",
+				thinkingType: "raw-thinking" as const,
+			},
+		];
+	}
+
+	return [];
+}
+
+/** Map the result subtype to a turn completion status. */
+function mapResultStatus(
+	subtype: unknown,
+): "completed" | "interrupted" | "failed" {
+	if (subtype === "success") return "completed";
+	if (subtype === "interrupted") return "interrupted";
+	return "failed";
+}
+
+/**
+ * Read a numeric field that may appear in camelCase or snake_case.
+ * Returns undefined when neither variant is present.
+ */
+function readNumericField(
+	obj: Record<string, unknown>,
+	camelKey: string,
+	snakeKey: string,
+): number | undefined {
+	return (
+		(obj[camelKey] as number | undefined) ??
+		(obj[snakeKey] as number | undefined)
+	);
 }
 
 export function mapSdkMessage(
@@ -56,15 +112,11 @@ export function mapSdkMessage(
 	};
 
 	switch (msg.type) {
-		// Real SDK: { type: 'system', subtype: 'init', session_id, model, tools, ... }
-		// Test compat: { type: 'system/init', sessionId, model, tools }
 		case "system": {
 			if (msg.subtype !== "init") return [];
 			return [
 				{
-					timestamp: base.timestamp,
-					adapterId: ctx.adapterId,
-					adapterSessionId: ctx.adapterSessionId,
+					...base,
 					kind: "session.started",
 					model: msg.model as string,
 					tools: (msg.tools as string[]) ?? [],
@@ -75,12 +127,9 @@ export function mapSdkMessage(
 			];
 		}
 		case "system/init": {
-			// Legacy/test format
 			return [
 				{
-					timestamp: base.timestamp,
-					adapterId: ctx.adapterId,
-					adapterSessionId: ctx.adapterSessionId,
+					...base,
 					kind: "session.started",
 					model: msg.model as string,
 					tools: (msg.tools as string[]) ?? [],
@@ -97,33 +146,9 @@ export function mapSdkMessage(
 			};
 			if (!event || event.type !== "content_block_delta" || !event.delta)
 				return [];
-
-			if (event.delta.type === "text_delta") {
-				return [
-					{
-						...base,
-						kind: "message.delta",
-						text: event.delta.text ?? "",
-						role: "assistant" as const,
-					},
-				];
-			}
-
-			if (event.delta.type === "thinking_delta") {
-				return [
-					{
-						...base,
-						kind: "thinking.delta",
-						text: event.delta.thinking ?? "",
-						thinkingType: "raw-thinking" as const,
-					},
-				];
-			}
-
-			return [];
+			return mapDelta(event.delta, base);
 		}
 
-		// Raw API streaming events (SDK may yield these directly without stream_event wrapper)
 		case "content_block_delta": {
 			const delta = msg.delta as {
 				type: string;
@@ -131,30 +156,7 @@ export function mapSdkMessage(
 				thinking?: string;
 			};
 			if (!delta) return [];
-
-			if (delta.type === "text_delta") {
-				return [
-					{
-						...base,
-						kind: "message.delta",
-						text: delta.text ?? "",
-						role: "assistant" as const,
-					},
-				];
-			}
-
-			if (delta.type === "thinking_delta") {
-				return [
-					{
-						...base,
-						kind: "thinking.delta",
-						text: delta.thinking ?? "",
-						thinkingType: "raw-thinking" as const,
-					},
-				];
-			}
-
-			return [];
+			return mapDelta(delta, base);
 		}
 
 		case "assistant": {
@@ -184,45 +186,29 @@ export function mapSdkMessage(
 		}
 
 		case "result": {
-			// Real SDK: usage has camelCase (inputTokens, outputTokens)
-			// Test compat: usage has snake_case (input_tokens, output_tokens)
 			const rawUsage = msg.usage as Record<string, unknown> | undefined;
 			const events: NormalizedEvent[] = [];
 
-			let inputTokens = 0;
-			let outputTokens = 0;
-			let cacheReadTokens: number | undefined;
-			let cacheWriteTokens: number | undefined;
-			let hasUsage = false;
-
 			if (rawUsage) {
-				hasUsage = true;
-				inputTokens =
-					(rawUsage.inputTokens as number) ??
-					(rawUsage.input_tokens as number) ??
-					0;
-				outputTokens =
-					(rawUsage.outputTokens as number) ??
-					(rawUsage.output_tokens as number) ??
-					0;
+				const inputTokens =
+					readNumericField(rawUsage, "inputTokens", "input_tokens") ?? 0;
+				const outputTokens =
+					readNumericField(rawUsage, "outputTokens", "output_tokens") ?? 0;
+				const cacheReadTokens = readNumericField(
+					rawUsage,
+					"cacheReadInputTokens",
+					"cache_read_input_tokens",
+				);
+				const cacheWriteTokens = readNumericField(
+					rawUsage,
+					"cacheCreationInputTokens",
+					"cache_creation_input_tokens",
+				);
 
-				// Extract cache token fields (camelCase or snake_case)
-				const cacheRead =
-					(rawUsage.cacheReadInputTokens as number | undefined) ??
-					(rawUsage.cache_read_input_tokens as number | undefined);
-				if (cacheRead !== undefined) cacheReadTokens = cacheRead;
+				const totalCostUsd =
+					(msg.total_cost_usd as number | undefined) ??
+					(msg.cost_usd as number | undefined);
 
-				const cacheWrite =
-					(rawUsage.cacheCreationInputTokens as number | undefined) ??
-					(rawUsage.cache_creation_input_tokens as number | undefined);
-				if (cacheWrite !== undefined) cacheWriteTokens = cacheWrite;
-			}
-
-			const totalCostUsd =
-				(msg.total_cost_usd as number | undefined) ??
-				(msg.cost_usd as number | undefined);
-
-			if (hasUsage) {
 				events.push({
 					...base,
 					kind: "usage.updated",
@@ -233,23 +219,23 @@ export function mapSdkMessage(
 					cacheWriteTokens,
 					semantics: "session_delta_or_cached" as const,
 				});
-			}
 
-			const status =
-				msg.subtype === "success"
-					? "completed"
-					: msg.subtype === "interrupted"
-						? "interrupted"
-						: "failed";
-			events.push({
-				...base,
-				kind: "turn.completed",
-				status,
-				durationMs: (msg.duration_ms as number) ?? 0,
-				usage: hasUsage
-					? { inputTokens, outputTokens, totalCostUsd }
-					: undefined,
-			});
+				events.push({
+					...base,
+					kind: "turn.completed",
+					status: mapResultStatus(msg.subtype),
+					durationMs: (msg.duration_ms as number) ?? 0,
+					usage: { inputTokens, outputTokens, totalCostUsd },
+				});
+			} else {
+				events.push({
+					...base,
+					kind: "turn.completed",
+					status: mapResultStatus(msg.subtype),
+					durationMs: (msg.duration_ms as number) ?? 0,
+					usage: undefined,
+				});
+			}
 
 			return events;
 		}

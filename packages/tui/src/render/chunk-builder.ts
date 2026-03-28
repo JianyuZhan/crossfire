@@ -3,6 +3,7 @@ import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type {
 	CollapsedRoundSummary,
 	ContentChunk,
+	RenderBlock,
 	TuiRound,
 	TuiState,
 } from "../state/types.js";
@@ -109,15 +110,19 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
 		const leftBlocks = active.proposer
 			? snapshotToBlocks(active.proposer, "proposer", state.proposer.agentType)
 			: liveStateToBlocks(state.proposer);
-		const rightBlocks = active.challenger
-			? snapshotToBlocks(
-					active.challenger,
-					"challenger",
-					state.challenger.agentType,
-				)
-			: active.proposer
-				? liveStateToBlocks(state.challenger)
-				: idleBlocks("challenger", state.challenger.agentType);
+
+		let rightBlocks: RenderBlock[];
+		if (active.challenger) {
+			rightBlocks = snapshotToBlocks(
+				active.challenger,
+				"challenger",
+				state.challenger.agentType,
+			);
+		} else if (active.proposer) {
+			rightBlocks = liveStateToBlocks(state.challenger);
+		} else {
+			rightBlocks = idleBlocks("challenger", state.challenger.agentType);
+		}
 
 		chunks.push({
 			type: "round",
@@ -147,19 +152,20 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
 		const isDone = state.judge.judgeStatus === "done";
 		const stripped = stripInternalToolBlocks(state.judge.judgeMessageText);
 		const displayText =
-			stripped || (isDone ? state.judge.verdict?.reasoning : "") || "";
-		const judgeLines = displayText
-			? [screenLine([{ text: displayText, style: {} }])]
-			: !isDone
-				? [
-						screenLine([
-							{
-								text: "Evaluating...",
-								style: { color: "yellow", italic: true },
-							},
-						]),
-					]
-				: [];
+			stripped || (isDone ? (state.judge.verdict?.reasoning ?? "") : "");
+
+		let judgeLines: ReturnType<typeof screenLine>[];
+		if (displayText) {
+			judgeLines = [screenLine([{ text: displayText, style: {} }])];
+		} else if (!isDone) {
+			judgeLines = [
+				screenLine([
+					{ text: "Evaluating...", style: { color: "yellow", italic: true } },
+				]),
+			];
+		} else {
+			judgeLines = [];
+		}
 		chunks.push({
 			type: "judge",
 			roundNumber: state.judge.roundNumber,

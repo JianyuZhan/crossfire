@@ -43,7 +43,7 @@ export class JsonRpcClient {
 			handler(err);
 		}
 		// Reject all pending requests
-		for (const [id, pending] of this.pendingRequests) {
+		for (const [, pending] of this.pendingRequests) {
 			pending.reject(err);
 		}
 		this.pendingRequests.clear();
@@ -82,46 +82,67 @@ export class JsonRpcClient {
 	}
 
 	private handleLine(line: string): void {
-		let msg: any;
+		let msg: Record<string, unknown>;
 		try {
-			msg = JSON.parse(line);
+			msg = JSON.parse(line) as Record<string, unknown>;
 		} catch {
 			return;
 		}
 
-		if (msg.id !== undefined && !msg.method) {
-			// Response to our request
-			const pending = this.pendingRequests.get(msg.id);
-			if (pending) {
-				this.pendingRequests.delete(msg.id);
-				if (msg.error) {
-					pending.reject(new Error(msg.error.message));
-				} else {
-					pending.resolve(msg.result);
-				}
-			}
-		} else if (msg.id !== undefined && msg.method) {
-			// Server-initiated request (e.g., approval)
-			const handler = this.requestHandlers.get(msg.method);
-			if (handler) {
-				handler(msg.params).then((result) => {
-					this.writable.write(
-						`${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result })}\n`,
-					);
-				});
-			}
-		} else if (msg.method && msg.id === undefined) {
-			// Server notification
-			// Specific handlers
-			const handlers = this.notificationHandlers.get(msg.method);
-			if (handlers) {
-				for (const h of handlers) h(msg.params);
-			}
-			// Wildcard handlers
-			const wildcardHandlers = this.notificationHandlers.get("*");
-			if (wildcardHandlers) {
-				for (const h of wildcardHandlers) h(msg.method, msg.params);
-			}
+		const hasId = msg.id !== undefined;
+		const hasMethod = typeof msg.method === "string";
+
+		if (hasId && !hasMethod) {
+			this.handleResponse(msg);
+		} else if (hasId && hasMethod) {
+			this.handleServerRequest(msg);
+		} else if (hasMethod) {
+			this.handleNotification(msg);
+		}
+	}
+
+	private handleResponse(msg: Record<string, unknown>): void {
+		const pending = this.pendingRequests.get(msg.id as number);
+		if (!pending) return;
+		this.pendingRequests.delete(msg.id as number);
+
+		if (msg.error) {
+			const err = msg.error as Record<string, unknown>;
+			pending.reject(new Error(String(err.message)));
+		} else {
+			pending.resolve(msg.result);
+		}
+	}
+
+	private handleServerRequest(msg: Record<string, unknown>): void {
+		const handler = this.requestHandlers.get(msg.method as string);
+		if (!handler) return;
+
+		handler(msg.params).then(
+			(result) => {
+				this.writable.write(
+					`${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result })}\n`,
+				);
+			},
+			(err) => {
+				this.writable.write(
+					`${JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: String(err) } })}\n`,
+				);
+			},
+		);
+	}
+
+	private handleNotification(msg: Record<string, unknown>): void {
+		const method = msg.method as string;
+
+		const handlers = this.notificationHandlers.get(method);
+		if (handlers) {
+			for (const h of handlers) h(msg.params);
+		}
+
+		const wildcardHandlers = this.notificationHandlers.get("*");
+		if (wildcardHandlers) {
+			for (const h of wildcardHandlers) h(method, msg.params);
 		}
 	}
 }

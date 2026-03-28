@@ -102,14 +102,15 @@ function renderBlock(lines: string[]): string {
 	return output.join("\n");
 }
 
+const QUALITY_NOTICES: Record<string, string> = {
+	"local-structured":
+		'<div class="notice notice-warning">This report was generated from structured debate metadata. For full context, see the debate transcript.</div>',
+	"local-degraded":
+		'<div class="notice notice-error">This report was generated with limited data. Review the full debate transcript for complete analysis.</div>',
+};
+
 function qualityNotice(quality: string): string {
-	if (quality === "local-structured") {
-		return '<div class="notice notice-warning">This report was generated from structured debate metadata. For full context, see the debate transcript.</div>';
-	}
-	if (quality === "local-degraded") {
-		return '<div class="notice notice-error">This report was generated with limited data. Review the full debate transcript for complete analysis.</div>';
-	}
-	return "";
+	return QUALITY_NOTICES[quality] ?? "";
 }
 
 export interface MarkdownReportMeta {

@@ -224,6 +224,26 @@ export function replayPlan(
 	return plan;
 }
 
+/** Extracts arguments, risks, and evidence from a single side's DebateMeta. */
+function extractMetaContributions(
+	meta: DebateMeta,
+	side: "proposer" | "challenger",
+): {
+	arguments: RoundAnalysis["newArguments"];
+	risks: RoundAnalysis["risksIdentified"];
+	evidence: RoundAnalysis["evidenceCited"];
+} {
+	return {
+		arguments: meta.keyPoints.map((kp) => ({
+			side,
+			argument: kp,
+			strength: "moderate" as const,
+		})),
+		risks: (meta.riskFlags ?? []).map((r) => ({ ...r, raisedBy: side })),
+		evidence: (meta.evidence ?? []).map((e) => ({ ...e, side })),
+	};
+}
+
 /** Build a degraded RoundAnalysis from debate_meta fallback data. */
 export function buildFallbackRoundAnalysis(
 	roundNumber: number,
@@ -234,36 +254,15 @@ export function buildFallbackRoundAnalysis(
 	const risksIdentified: RoundAnalysis["risksIdentified"] = [];
 	const evidenceCited: RoundAnalysis["evidenceCited"] = [];
 
-	if (proposerMeta) {
-		for (const kp of proposerMeta.keyPoints) {
-			newArguments.push({
-				side: "proposer",
-				argument: kp,
-				strength: "moderate",
-			});
-		}
-		for (const r of proposerMeta.riskFlags ?? []) {
-			risksIdentified.push({ ...r, raisedBy: "proposer" });
-		}
-		for (const e of proposerMeta.evidence ?? []) {
-			evidenceCited.push({ ...e, side: "proposer" });
-		}
-	}
-
-	if (challengerMeta) {
-		for (const kp of challengerMeta.keyPoints) {
-			newArguments.push({
-				side: "challenger",
-				argument: kp,
-				strength: "moderate",
-			});
-		}
-		for (const r of challengerMeta.riskFlags ?? []) {
-			risksIdentified.push({ ...r, raisedBy: "challenger" });
-		}
-		for (const e of challengerMeta.evidence ?? []) {
-			evidenceCited.push({ ...e, side: "challenger" });
-		}
+	for (const [meta, side] of [
+		[proposerMeta, "proposer"],
+		[challengerMeta, "challenger"],
+	] as const) {
+		if (!meta) continue;
+		const contributions = extractMetaContributions(meta, side);
+		newArguments.push(...contributions.arguments);
+		risksIdentified.push(...contributions.risks);
+		evidenceCited.push(...contributions.evidence);
 	}
 
 	// Consensus: only mutual concessions (both sides concede overlapping points)

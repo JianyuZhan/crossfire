@@ -60,6 +60,16 @@ export interface ScoredRound {
 	};
 }
 
+/** Computes judgeImpact score from RoundSignals.judgeImpact flags. */
+function computeJudgeImpactScore(
+	judgeImpact: RoundSignals["judgeImpact"],
+): number {
+	if (judgeImpact.directionChange) return 1.0;
+	if (judgeImpact.weighted) return 0.5;
+	if (judgeImpact.hasVerdict) return 0.3;
+	return 0;
+}
+
 /**
  * Scores rounds for synthesis using Tier-1 signals.
  *
@@ -95,13 +105,7 @@ export function scoreRoundsForSynthesis(
 			const concession = signals.hasConcession ? 1.0 : 0;
 			const consensusDelta = signals.consensusDelta ? 0.8 : 0;
 			const riskDelta = signals.riskDelta ? 0.6 : 0;
-			const judgeImpact = signals.judgeImpact.directionChange
-				? 1.0
-				: signals.judgeImpact.weighted
-					? 0.5
-					: signals.judgeImpact.hasVerdict
-						? 0.3
-						: 0;
+			const judgeImpact = computeJudgeImpactScore(signals.judgeImpact);
 			const reference = referenceScores?.get(roundNumber) ?? 0;
 
 			const score =
@@ -127,20 +131,12 @@ export function scoreRoundsForSynthesis(
 				},
 			});
 		} else if (signals && isDegraded) {
-			// Degraded: zero novelty, concession, consensusDelta, riskDelta, reference; keep recency + judgeImpact
-			const judgeImpact = signals.judgeImpact.directionChange
-				? 1.0
-				: signals.judgeImpact.weighted
-					? 0.5
-					: signals.judgeImpact.hasVerdict
-						? 0.3
-						: 0;
-
-			const score = recency + judgeImpact;
+			// Degraded: keep recency + judgeImpact only
+			const judgeImpact = computeJudgeImpactScore(signals.judgeImpact);
 
 			scored.push({
 				roundNumber,
-				score,
+				score: recency + judgeImpact,
 				breakdown: {
 					recency,
 					novelty: 0,
@@ -404,6 +400,24 @@ function extractSnippet(entry: {
 	return text.length > 200 ? `${text.slice(0, 197)}...` : text.trim();
 }
 
+/** Reconstructs a cleanTranscript from state.turns via stripInternalBlocks. */
+function reconstructCleanTranscript(
+	turns: DebateState["turns"],
+): Map<number, { proposer?: string; challenger?: string }> {
+	const transcript = new Map<
+		number,
+		{ proposer?: string; challenger?: string }
+	>();
+	for (const turn of turns) {
+		if (!transcript.has(turn.roundNumber)) {
+			transcript.set(turn.roundNumber, {});
+		}
+		const entry = transcript.get(turn.roundNumber)!;
+		entry[turn.role] = stripInternalBlocks(turn.content);
+	}
+	return transcript;
+}
+
 /** Debug metadata returned alongside the adaptive synthesis prompt */
 export interface SynthesisDebugMetadata {
 	budgetTier: "short" | "medium" | "long";
@@ -603,18 +617,7 @@ export function buildFullTextSynthesisPrompt(
 	config: SynthesisPromptConfig,
 	roundSummaries?: string[],
 ): string {
-	// Reconstruct cleanTranscript from state.turns via stripInternalBlocks
-	const cleanTranscript = new Map<
-		number,
-		{ proposer?: string; challenger?: string }
-	>();
-	for (const turn of state.turns) {
-		if (!cleanTranscript.has(turn.roundNumber)) {
-			cleanTranscript.set(turn.roundNumber, {});
-		}
-		const entry = cleanTranscript.get(turn.roundNumber)!;
-		entry[turn.role] = stripInternalBlocks(turn.content);
-	}
+	const cleanTranscript = reconstructCleanTranscript(state.turns);
 
 	// Synthesize a best-effort EvolvingPlan from legacy parameters
 	const plan: EvolvingPlan = {
@@ -1099,15 +1102,7 @@ function assembleAdaptiveSynthesisPromptInner(
 	if (input.cleanTranscript && input.cleanTranscript.size > 0) {
 		transcript = input.cleanTranscript;
 	} else {
-		// Reconstruct from state.turns via stripInternalBlocks
-		transcript = new Map();
-		for (const turn of state.turns) {
-			if (!transcript.has(turn.roundNumber)) {
-				transcript.set(turn.roundNumber, {});
-			}
-			const entry = transcript.get(turn.roundNumber)!;
-			entry[turn.role] = stripInternalBlocks(turn.content);
-		}
+		transcript = reconstructCleanTranscript(state.turns);
 		if (state.turns.length > 0) {
 			warnings.push(
 				"cleanTranscript was empty; reconstructed from state.turns",
@@ -1262,17 +1257,16 @@ function assembleAdaptiveSynthesisPromptInner(
 	let phaseBlocks: PhaseBlock[] | undefined;
 	const phaseBlockDebug: SynthesisDebugMetadata["phaseBlocks"] = [];
 
-	if (tier === "long" && compressedRounds.length > 0) {
-		// Earliest compressed region: all compressed rounds before the first full-text round
-		const firstFullText =
-			fullTextRounds.length > 0 ? fullTextRounds[0] : Number.POSITIVE_INFINITY;
-		const earliestCompressed = compressedRounds.filter(
-			(r) => r < firstFullText,
-		);
+	// Compute earliest compressed region: compressed rounds before the first full-text round
+	const firstFullTextRound =
+		fullTextRounds.length > 0 ? fullTextRounds[0] : Number.POSITIVE_INFINITY;
+	const earliestCompressed =
+		tier === "long"
+			? compressedRounds.filter((r) => r < firstFullTextRound)
+			: [];
 
-		if (earliestCompressed.length > 0) {
-			phaseBlocks = buildPhaseBlocks(earliestCompressed, plan, state);
-		}
+	if (earliestCompressed.length > 0) {
+		phaseBlocks = buildPhaseBlocks(earliestCompressed, plan, state);
 	}
 
 	// Render rounds in ascending order
@@ -1280,31 +1274,14 @@ function assembleAdaptiveSynthesisPromptInner(
 	const phaseBlockCoveredRounds = new Set<number>();
 
 	// Compute promoted rounds from earliest compressed region for debug metadata
-	const earliestCompressedMax =
-		tier === "long" && compressedRounds.length > 0
-			? (() => {
-					const firstFullText =
-						fullTextRounds.length > 0
-							? fullTextRounds[0]
-							: Number.POSITIVE_INFINITY;
-					const earliest = compressedRounds.filter((r) => r < firstFullText);
-					return earliest.length > 0 ? Math.max(...earliest) : 0;
-				})()
-			: 0;
-	const earliestCompressedMin =
-		tier === "long" && compressedRounds.length > 0
-			? (() => {
-					const firstFullText =
-						fullTextRounds.length > 0
-							? fullTextRounds[0]
-							: Number.POSITIVE_INFINITY;
-					const earliest = compressedRounds.filter((r) => r < firstFullText);
-					return earliest.length > 0 ? Math.min(...earliest) : 0;
-				})()
-			: 0;
-	const promotedFromEarliest = fullTextRounds.filter(
-		(r) => r >= earliestCompressedMin && r <= earliestCompressedMax,
-	);
+	const promotedFromEarliest =
+		earliestCompressed.length > 0
+			? fullTextRounds.filter(
+					(r) =>
+						r >= earliestCompressed[0] &&
+						r <= earliestCompressed[earliestCompressed.length - 1],
+				)
+			: [];
 
 	if (phaseBlocks && phaseBlocks.length > 0) {
 		// Render phase blocks in order, then remaining compressed/full rounds

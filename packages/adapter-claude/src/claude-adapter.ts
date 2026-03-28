@@ -1,4 +1,5 @@
 import type {
+	AdapterCapabilities,
 	AgentAdapter,
 	ApprovalDecision,
 	LocalTurnMetrics,
@@ -8,9 +9,11 @@ import type {
 	TurnHandle,
 	TurnInput,
 } from "@crossfire/adapter-core";
-import { measureLocalMetrics, parseTurnId } from "@crossfire/adapter-core";
-import type { AdapterCapabilities } from "@crossfire/adapter-core";
-import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
+import {
+	CLAUDE_CAPABILITIES,
+	measureLocalMetrics,
+	parseTurnId,
+} from "@crossfire/adapter-core";
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { mapSdkMessage } from "./event-mapper.js";
 import { buildHooks } from "./hooks.js";
@@ -65,76 +68,64 @@ export class ClaudeAdapter implements AgentAdapter {
 		if (input.model) {
 			this.sessionModels.set(adapterSessionId, input.model);
 		}
-		const handle: SessionHandle = {
+		return {
 			adapterSessionId,
 			providerSessionId: undefined,
 			adapterId: "claude",
 			transcript: [],
 		};
-		return handle;
 	}
 
 	async sendTurn(handle: SessionHandle, input: TurnInput): Promise<TurnHandle> {
-		const turnHandle: TurnHandle = {
-			turnId: input.turnId,
-			status: "running",
-		};
-
 		const ctx = {
 			adapterId: "claude" as const,
 			adapterSessionId: handle.adapterSessionId,
 			turnId: input.turnId,
 		};
 
-		// Measure local metrics for this turn (Claude has no adapter overhead)
 		const localMetrics = measureLocalMetrics(input.prompt);
 
-		// Build hooks for this turn
 		const hooks = buildHooks(
 			(e) => this.emit(e),
 			{ adapterId: "claude", adapterSessionId: handle.adapterSessionId },
 			() => input.turnId,
 		);
 
-		// Build the canUseTool callback for approval flow
-		// SDK signature: (toolName: string, toolInput: Record<string, unknown>, options: { signal, suggestions, toolUseID, ... }) => Promise<PermissionResult>
+		// SDK calls canUseTool to request tool-use permission; we bridge it to
+		// the approval event flow and return a promise that blocks the SDK until
+		// approve() resolves it.
 		const canUseTool = (
 			toolName: string,
-			_toolInput: Record<string, unknown>,
+			toolInput: Record<string, unknown>,
 			options: { toolUseID: string; [key: string]: unknown },
 		): Promise<unknown> => {
 			const toolUseId = options.toolUseID ?? String(Date.now());
 			const requestId = `ar-${input.turnId}-${toolUseId}`;
 
-			// Emit approval.request
 			this.emit({
+				...ctx,
 				timestamp: Date.now(),
-				adapterId: "claude",
-				adapterSessionId: handle.adapterSessionId,
-				turnId: input.turnId,
 				kind: "approval.request",
 				requestId,
 				approvalType: "tool",
 				title: `Approve tool: ${toolName}`,
-				payload: { tool_name: toolName, tool_input: _toolInput },
+				payload: { tool_name: toolName, tool_input: toolInput },
 			});
 
-			// Return a promise that will be resolved when approve() is called
 			return new Promise((resolve) => {
 				this.pendingApprovals.set(requestId, {
 					requestId,
 					adapterSessionId: handle.adapterSessionId,
 					turnId: input.turnId,
-					resolve: (value: unknown) => {
-						// Transform to SDK PermissionResult format
-						const decision = value as {
+					resolve: (decision) => {
+						const { decision: verdict, updatedInput } = decision as {
 							decision: string;
 							updatedInput?: Record<string, unknown>;
 						};
-						if (decision.decision === "allow") {
+						if (verdict === "allow") {
 							resolve({
 								behavior: "allow",
-								updatedInput: decision.updatedInput ?? _toolInput,
+								updatedInput: updatedInput ?? toolInput,
 							});
 						} else {
 							resolve({
@@ -147,7 +138,6 @@ export class ClaudeAdapter implements AgentAdapter {
 			});
 		};
 
-		// Start the query
 		const query = this.queryFn({
 			prompt: input.prompt,
 			resume: handle.providerSessionId ?? undefined,
@@ -156,7 +146,6 @@ export class ClaudeAdapter implements AgentAdapter {
 			hooks,
 		});
 
-		// Store query context for interrupt and attach local metrics
 		this.queries.set(handle.adapterSessionId, {
 			query,
 			currentTurnId: input.turnId,
@@ -168,7 +157,7 @@ export class ClaudeAdapter implements AgentAdapter {
 			// Errors are handled inside processMessages via run.error emission
 		});
 
-		return turnHandle;
+		return { turnId: input.turnId, status: "running" };
 	}
 
 	onEvent(cb: (e: NormalizedEvent) => void): () => void {
@@ -227,6 +216,45 @@ export class ClaudeAdapter implements AgentAdapter {
 		}
 	}
 
+	/**
+	 * Consume an SDK message stream — maps each message to NormalizedEvents,
+	 * enriches them (session tracking, local metrics, transcript), and emits.
+	 */
+	private async consumeStream(
+		messages: AsyncGenerator<SdkMessage, void, unknown>,
+		ctx: { adapterId: "claude"; adapterSessionId: string; turnId: string },
+		handle: SessionHandle,
+		turnInput: TurnInput,
+	): Promise<void> {
+		for await (const msg of messages) {
+			const events = mapSdkMessage(msg, ctx);
+			for (const event of events) {
+				if (event.kind === "session.started") {
+					handle.providerSessionId = event.providerSessionId;
+				}
+				if (event.kind === "usage.updated") {
+					const queryCtx = this.queries.get(ctx.adapterSessionId);
+					if (queryCtx?.pendingLocalMetrics) {
+						event.localMetrics = queryCtx.pendingLocalMetrics;
+					}
+				}
+				if (event.kind === "message.final") {
+					const role = turnInput.role ?? parseTurnId(turnInput.turnId).role;
+					const roundNumber =
+						turnInput.roundNumber ?? parseTurnId(turnInput.turnId).roundNumber;
+					if (role && roundNumber !== undefined) {
+						handle.transcript.push({
+							roundNumber,
+							role,
+							content: event.text,
+						});
+					}
+				}
+				this.emit(event);
+			}
+		}
+	}
+
 	private async processMessages(
 		messages: AsyncGenerator<SdkMessage, void, unknown>,
 		ctx: { adapterId: "claude"; adapterSessionId: string; turnId: string },
@@ -234,63 +262,21 @@ export class ClaudeAdapter implements AgentAdapter {
 		turnInput: TurnInput,
 	): Promise<void> {
 		try {
-			for await (const msg of messages) {
-				const events = mapSdkMessage(msg, ctx);
-				for (const event of events) {
-					// When we get a session.started event, update the handle's providerSessionId
-					if (event.kind === "session.started") {
-						handle.providerSessionId = event.providerSessionId;
-					}
-					// Attach local metrics to usage.updated events
-					if (event.kind === "usage.updated") {
-						const queryCtx = this.queries.get(ctx.adapterSessionId);
-						if (queryCtx?.pendingLocalMetrics) {
-							event.localMetrics = queryCtx.pendingLocalMetrics;
-						}
-					}
-					// When a turn completes its final message, append to transcript
-					if (event.kind === "message.final") {
-						const role = turnInput.role ?? parseTurnId(turnInput.turnId).role;
-						const roundNumber =
-							turnInput.roundNumber ??
-							parseTurnId(turnInput.turnId).roundNumber;
-						if (role && roundNumber !== undefined) {
-							handle.transcript.push({
-								roundNumber,
-								role,
-								content: event.text,
-							});
-						}
-					}
-					this.emit(event);
-				}
-			}
+			await this.consumeStream(messages, ctx, handle, turnInput);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 
 			// Attempt recovery if recoveryContext is available and we had a provider session
 			if (handle.recoveryContext && handle.providerSessionId) {
 				this.emit({
+					...ctx,
 					timestamp: Date.now(),
-					adapterId: ctx.adapterId,
-					adapterSessionId: ctx.adapterSessionId,
-					turnId: ctx.turnId,
 					kind: "run.warning",
 					message: `Resume failed (${message}), attempting transcript recovery`,
 				});
 
-				// Build recovery prompt from transcript
-				const recoveryPrompt = buildTranscriptRecoveryPrompt({
-					systemPrompt: handle.recoveryContext.systemPrompt,
-					topic: handle.recoveryContext.topic,
-					transcript: handle.transcript,
-					schemaType: handle.recoveryContext.schemaType,
-				});
-
-				// Clear provider session to force a fresh session
 				handle.providerSessionId = undefined;
 
-				// Build hooks for the recovery turn
 				const hooks = buildHooks(
 					(e) => this.emit(e),
 					{
@@ -300,92 +286,53 @@ export class ClaudeAdapter implements AgentAdapter {
 					() => turnInput.turnId,
 				);
 
-				// Start a new query without resume
 				const recoveryQuery = this.queryFn({
-					prompt: recoveryPrompt,
+					prompt: buildTranscriptRecoveryPrompt({
+						systemPrompt: handle.recoveryContext.systemPrompt,
+						topic: handle.recoveryContext.topic,
+						transcript: handle.transcript,
+						schemaType: handle.recoveryContext.schemaType,
+					}),
 					resume: undefined,
 					model: this.sessionModels.get(handle.adapterSessionId),
 					hooks,
 				});
 
-				// Store recovery query context
 				this.queries.set(handle.adapterSessionId, {
 					query: recoveryQuery,
 					currentTurnId: turnInput.turnId,
 				});
 
-				// Process the recovery messages
-				await this.processRecoveryMessages(
-					recoveryQuery.messages,
-					ctx,
-					handle,
-					turnInput,
-				);
+				// Recovery does NOT recurse — errors here are terminal
+				try {
+					await this.consumeStream(
+						recoveryQuery.messages,
+						ctx,
+						handle,
+						turnInput,
+					);
+				} catch (recoveryErr) {
+					const recoveryMessage =
+						recoveryErr instanceof Error
+							? recoveryErr.message
+							: String(recoveryErr);
+					this.emit({
+						...ctx,
+						timestamp: Date.now(),
+						kind: "run.error",
+						message: recoveryMessage,
+						recoverable: false,
+					});
+				}
 				return;
 			}
 
 			this.emit({
+				...ctx,
 				timestamp: Date.now(),
-				adapterId: ctx.adapterId,
-				adapterSessionId: ctx.adapterSessionId,
-				turnId: ctx.turnId,
 				kind: "run.error",
 				message,
 				recoverable: true,
-			});
-		}
-	}
-
-	/**
-	 * Process messages for a recovery session. Does NOT attempt further recovery
-	 * to avoid infinite loops.
-	 */
-	private async processRecoveryMessages(
-		messages: AsyncGenerator<SdkMessage, void, unknown>,
-		ctx: { adapterId: "claude"; adapterSessionId: string; turnId: string },
-		handle: SessionHandle,
-		turnInput: TurnInput,
-	): Promise<void> {
-		try {
-			for await (const msg of messages) {
-				const events = mapSdkMessage(msg, ctx);
-				for (const event of events) {
-					if (event.kind === "session.started") {
-						handle.providerSessionId = event.providerSessionId;
-					}
-					// Attach local metrics to usage.updated events
-					if (event.kind === "usage.updated") {
-						const queryCtx = this.queries.get(ctx.adapterSessionId);
-						if (queryCtx?.pendingLocalMetrics) {
-							event.localMetrics = queryCtx.pendingLocalMetrics;
-						}
-					}
-					if (event.kind === "message.final") {
-						const role = turnInput.role ?? parseTurnId(turnInput.turnId).role;
-						const roundNumber =
-							turnInput.roundNumber ??
-							parseTurnId(turnInput.turnId).roundNumber;
-						if (role && roundNumber !== undefined) {
-							handle.transcript.push({
-								roundNumber,
-								role,
-								content: event.text,
-							});
-						}
-					}
-					this.emit(event);
-				}
-			}
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			this.emit({
-				timestamp: Date.now(),
-				adapterId: ctx.adapterId,
-				adapterSessionId: ctx.adapterSessionId,
-				turnId: ctx.turnId,
-				kind: "run.error",
-				message,
-				recoverable: false,
 			});
 		}
 	}

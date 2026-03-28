@@ -1,6 +1,8 @@
-// packages/adapter-core/src/types.ts
-
 import type { AdapterCapabilities } from "./capabilities.js";
+
+export type AdapterId = "claude" | "codex" | "gemini";
+
+export type DebateRole = "proposer" | "challenger" | "judge";
 
 export type NormalizedEvent =
 	| SessionStartedEvent
@@ -22,9 +24,9 @@ export type NormalizedEvent =
 
 export interface BaseEvent {
 	kind: string;
-	timestamp: number; // Unix milliseconds (Date.now())
-	adapterId: "claude" | "codex" | "gemini";
-	adapterSessionId: string; // Adapter-assigned session ID
+	timestamp: number;
+	adapterId: AdapterId;
+	adapterSessionId: string;
 	turnId?: string;
 }
 
@@ -126,34 +128,13 @@ export interface SubagentCompletedEvent extends BaseEvent {
 	subagentId: string;
 }
 
-// -- Usage --
+// -- Usage & metrics --
 
-export interface UsageUpdatedEvent extends BaseEvent {
-	kind: "usage.updated";
-	inputTokens: number;
-	outputTokens: number;
-	totalCostUsd?: number;
-	cacheReadTokens?: number;
-	cacheWriteTokens?: number;
-	semantics?: ProviderUsageSemantics;
-	localMetrics?: LocalTurnMetrics;
-}
-
-// --- Incremental Prompt & Token Tracking Types ---
-
-/** Record of a completed turn for universal transcript fallback */
-export interface TurnRecord {
-	roundNumber: number;
-	role: "proposer" | "challenger" | "judge";
-	content: string;
-	/** Lightweight extracted metadata — avoids circular dependency on orchestrator-core */
-	meta?: {
-		stance?: string;
-		confidence?: number;
-		keyPoints?: string[];
-		concessions?: string[];
-	};
-}
+export type ProviderUsageSemantics =
+	| "per_turn"
+	| "cumulative_thread_total"
+	| "session_delta_or_cached"
+	| "unknown";
 
 /** Local metrics measured at the adapter boundary before sending to provider */
 export interface LocalTurnMetrics {
@@ -167,11 +148,16 @@ export interface LocalTurnMetrics {
 	tokenEstimateMethod?: string;
 }
 
-export type ProviderUsageSemantics =
-	| "per_turn"
-	| "cumulative_thread_total"
-	| "session_delta_or_cached"
-	| "unknown";
+/** Shared usage shape used by UsageUpdatedEvent and TurnCompletedEvent */
+export interface UsageSnapshot {
+	inputTokens: number;
+	outputTokens: number;
+	totalCostUsd?: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
+	semantics?: ProviderUsageSemantics;
+	localMetrics?: LocalTurnMetrics;
+}
 
 export interface ProviderUsageMetrics {
 	inputTokens?: number;
@@ -182,21 +168,32 @@ export interface ProviderUsageMetrics {
 	semantics: ProviderUsageSemantics;
 }
 
+export interface UsageUpdatedEvent extends BaseEvent, UsageSnapshot {
+	kind: "usage.updated";
+}
+
+/** Record of a completed turn for universal transcript fallback */
+export interface TurnRecord {
+	roundNumber: number;
+	role: DebateRole;
+	content: string;
+	/** Lightweight extracted metadata -- avoids circular dependency on orchestrator-core */
+	meta?: {
+		stance?: string;
+		confidence?: number;
+		keyPoints?: string[];
+		concessions?: string[];
+	};
+}
+
 // -- Turn completion --
 
 export interface TurnCompletedEvent extends BaseEvent {
 	kind: "turn.completed";
 	status: "completed" | "interrupted" | "failed" | "timeout";
-	durationMs: number; // Wall-clock ms from sendTurn() call to turn end, measured by adapter
-	usage?: {
-		inputTokens: number;
-		outputTokens: number;
-		totalCostUsd?: number;
-		cacheReadTokens?: number;
-		cacheWriteTokens?: number;
-		semantics?: ProviderUsageSemantics;
-		localMetrics?: LocalTurnMetrics;
-	};
+	/** Wall-clock ms from sendTurn() call to turn end, measured by adapter */
+	durationMs: number;
+	usage?: UsageSnapshot;
 }
 
 // -- Errors --
@@ -227,18 +224,19 @@ export interface StartSessionInput {
 export interface RecoveryContext {
 	systemPrompt: string;
 	topic: string;
-	role: "proposer" | "challenger" | "judge";
+	role: DebateRole;
 	maxRounds: number;
 	schemaType: "debate_meta" | "judge_verdict";
 }
 
 export interface SessionHandle {
 	adapterSessionId: string;
-	providerSessionId: string | undefined; // undefined until provider session established. Codex: set during startSession() (thread/start). Claude/Gemini: set on first sendTurn().
-	adapterId: "claude" | "codex" | "gemini";
-	/** Universal transcript of completed turns — enables recovery prompt reconstruction */
+	/** undefined until provider session established. Codex: set during startSession(). Claude/Gemini: set on first sendTurn(). */
+	providerSessionId: string | undefined;
+	adapterId: AdapterId;
+	/** Universal transcript of completed turns -- enables recovery prompt reconstruction */
 	transcript: TurnRecord[];
-	/** Recovery context populated by the runner — enables transcript-based session recovery */
+	/** Recovery context populated by the runner -- enables transcript-based session recovery */
 	recoveryContext?: RecoveryContext;
 }
 
@@ -246,9 +244,9 @@ export interface TurnInput {
 	prompt: string;
 	turnId: string;
 	timeout?: number;
-	/** Role hint for transcript tracking — if omitted, parsed from turnId pattern {p|c|j}-{round} */
-	role?: "proposer" | "challenger" | "judge";
-	/** Round number hint for transcript tracking — if omitted, parsed from turnId pattern */
+	/** Role hint for transcript tracking -- if omitted, parsed from turnId pattern {p|c|j}-{round} */
+	role?: DebateRole;
+	/** Round number hint for transcript tracking -- if omitted, parsed from turnId pattern */
 	roundNumber?: number;
 }
 
@@ -263,23 +261,24 @@ export interface ApprovalDecision {
 	updatedInput?: unknown;
 }
 
+const TURN_ID_ROLE_MAP: Record<string, DebateRole> = {
+	p: "proposer",
+	c: "challenger",
+	j: "judge",
+};
+
 /**
  * Parse a turnId like "p-1", "c-2", "j-3" into role and roundNumber.
  * Returns undefined values when the pattern doesn't match.
  */
 export function parseTurnId(turnId: string): {
-	role: "proposer" | "challenger" | "judge" | undefined;
+	role: DebateRole | undefined;
 	roundNumber: number | undefined;
 } {
 	const match = turnId.match(/^([pcj])-(\d+)$/);
 	if (!match) return { role: undefined, roundNumber: undefined };
-	const roleMap: Record<string, "proposer" | "challenger" | "judge"> = {
-		p: "proposer",
-		c: "challenger",
-		j: "judge",
-	};
 	return {
-		role: roleMap[match[1]],
+		role: TURN_ID_ROLE_MAP[match[1]],
 		roundNumber: Number.parseInt(match[2], 10),
 	};
 }

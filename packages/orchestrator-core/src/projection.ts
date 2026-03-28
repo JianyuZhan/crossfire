@@ -1,11 +1,13 @@
 // packages/orchestrator-core/src/projection.ts
 import type { NormalizedEvent } from "@crossfire/adapter-core";
 import { checkConvergence } from "./convergence.js";
-import { DebateMetaSchema, JudgeVerdictSchema } from "./meta-tool.js";
+import { DebateMetaSchema } from "./meta-tool.js";
+import type { DebateMetaInput } from "./meta-tool.js";
 import type { OrchestratorEvent } from "./orchestrator-events.js";
 import type {
 	ConvergenceResult,
 	DebateConfig,
+	DebateMeta,
 	DebateRole,
 	DebateState,
 	DebateTurn,
@@ -27,6 +29,22 @@ const DEFAULT_CONVERGENCE: ConvergenceResult = {
 	mutualConcessions: 0,
 	bothWantToConclude: false,
 };
+
+/** Maps wire-format (snake_case) debate_meta to domain-format (camelCase) DebateMeta. */
+function wireMetaToDomain(data: DebateMetaInput): DebateMeta {
+	return {
+		stance: data.stance,
+		confidence: data.confidence,
+		keyPoints: data.key_points,
+		concessions: data.concessions,
+		wantsToConclude: data.wants_to_conclude,
+		requestIntervention: data.request_intervention,
+		rebuttals: data.rebuttals,
+		evidence: data.evidence,
+		riskFlags: data.risk_flags,
+		positionShifts: data.position_shifts,
+	};
+}
 
 export function projectState(events: AnyEvent[]): DebateState {
 	let config: DebateConfig = DEFAULT_CONFIG;
@@ -132,18 +150,7 @@ export function projectState(events: AnyEvent[]): DebateState {
 						if (meta) {
 							const parsed = DebateMetaSchema.safeParse(meta);
 							if (parsed.success) {
-								lastTurn.meta = {
-									stance: parsed.data.stance,
-									confidence: parsed.data.confidence,
-									keyPoints: parsed.data.key_points,
-									concessions: parsed.data.concessions,
-									wantsToConclude: parsed.data.wants_to_conclude,
-									requestIntervention: parsed.data.request_intervention,
-									rebuttals: parsed.data.rebuttals,
-									evidence: parsed.data.evidence,
-									riskFlags: parsed.data.risk_flags,
-									positionShifts: parsed.data.position_shifts,
-								};
+								lastTurn.meta = wireMetaToDomain(parsed.data);
 							}
 						}
 					}
@@ -156,19 +163,7 @@ export function projectState(events: AnyEvent[]): DebateState {
 				if (e.toolName === "debate_meta" && turns.length > 0) {
 					const parsed = DebateMetaSchema.safeParse(e.input);
 					if (parsed.success) {
-						const lastTurn = turns[turns.length - 1];
-						lastTurn.meta = {
-							stance: parsed.data.stance,
-							confidence: parsed.data.confidence,
-							keyPoints: parsed.data.key_points,
-							concessions: parsed.data.concessions,
-							wantsToConclude: parsed.data.wants_to_conclude,
-							requestIntervention: parsed.data.request_intervention,
-							rebuttals: parsed.data.rebuttals,
-							evidence: parsed.data.evidence,
-							riskFlags: parsed.data.risk_flags,
-							positionShifts: parsed.data.position_shifts,
-						};
+						turns[turns.length - 1].meta = wireMetaToDomain(parsed.data);
 					}
 				}
 				break;

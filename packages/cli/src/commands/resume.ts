@@ -46,17 +46,17 @@ export const resumeCommand = new Command("resume")
 			}
 
 			// Load profiles (CLI overrides or from index.json)
-			const proposerProfile = options.proposer
-				? loadProfile(options.proposer)
-				: loadProfile(meta.profiles.proposer.name);
-			const challengerProfile = options.challenger
-				? loadProfile(options.challenger)
-				: loadProfile(meta.profiles.challenger.name);
-			const judgeProfile = meta.profiles.judge
-				? options.judge
-					? loadProfile(options.judge)
-					: loadProfile(meta.profiles.judge.name)
-				: "none";
+			const proposerProfile = loadProfile(
+				options.proposer ?? meta.profiles.proposer.name,
+			);
+			const challengerProfile = loadProfile(
+				options.challenger ?? meta.profiles.challenger.name,
+			);
+
+			let judgeProfile: ReturnType<typeof loadProfile> | "none" = "none";
+			if (meta.profiles.judge) {
+				judgeProfile = loadProfile(options.judge ?? meta.profiles.judge.name);
+			}
 
 			const roles = resolveRoles({
 				proposer: {

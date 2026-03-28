@@ -12,7 +12,6 @@ import { collectEvents } from "./helpers.js";
  */
 describe("resource cleanup (infrastructure test)", () => {
 	it("collectEvents provides unsubscribe that stops delivery", () => {
-		const events: NormalizedEvent[] = [];
 		const listeners: Array<(e: NormalizedEvent) => void> = [];
 
 		// Mock adapter with onEvent method

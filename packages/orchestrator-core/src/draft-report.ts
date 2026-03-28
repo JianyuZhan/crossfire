@@ -253,12 +253,7 @@ export function draftToAuditReport(
 	// --- Consensus items ---
 	const consensusItems = mergedConsensus.map((c) => ({
 		title: c.title,
-		detail:
-			c.challengesSurvived.length > 0
-				? `Survived ${c.challengesSurvived.length} challenge(s): ${c.challengesSurvived.join("; ")}`
-				: c.supportingRounds.length > 0
-					? `Discussed in round(s) ${c.supportingRounds.join(", ")}.`
-					: "Agreed upon without significant challenge.",
+		detail: formatConsensusDetail(c),
 		nextSteps: extractActionStep(c.title),
 		supportingEvidence: c.evidence,
 	}));
@@ -305,12 +300,7 @@ export function draftToAuditReport(
 		return {
 			risk: r.risk,
 			severity: r.severity,
-			likelihood:
-				r.severity === "high"
-					? "high"
-					: r.severity === "low"
-						? "low"
-						: "medium",
+			likelihood: severityToLikelihood(r.severity),
 			mitigation,
 		};
 	});
@@ -331,6 +321,22 @@ export function draftToAuditReport(
 		riskMatrix,
 		evidenceRegistry,
 	};
+}
+
+function formatConsensusDetail(c: DraftReport["consensus"][number]): string {
+	if (c.challengesSurvived.length > 0) {
+		return `Survived ${c.challengesSurvived.length} challenge(s): ${c.challengesSurvived.join("; ")}`;
+	}
+	if (c.supportingRounds.length > 0) {
+		return `Discussed in round(s) ${c.supportingRounds.join(", ")}.`;
+	}
+	return "Agreed upon without significant challenge.";
+}
+
+function severityToLikelihood(severity: string): string {
+	if (severity === "high") return "high";
+	if (severity === "low") return "low";
+	return "medium";
 }
 
 /** Extract a brief action step from argument text, or return an honest label. */
