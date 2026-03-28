@@ -5,6 +5,10 @@ import type { CommandState } from "../state/types.js";
 
 export type ParsedCommand =
 	| { type: "stop" }
+	| {
+			type: "interrupt";
+			target: "current" | "proposer" | "challenger" | "judge";
+	  }
 	| { type: "pause" }
 	| { type: "resume" }
 	| {
@@ -31,6 +35,19 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
 	switch (cmd) {
 		case "/stop":
 			return { type: "stop" };
+		case "/interrupt": {
+			const target = parts[1];
+			if (!target) return { type: "interrupt", target: "current" };
+			if (
+				target !== "current" &&
+				target !== "proposer" &&
+				target !== "challenger" &&
+				target !== "judge"
+			) {
+				return { type: "unknown", raw: input };
+			}
+			return { type: "interrupt", target };
+		}
 		case "/pause":
 			return { type: "pause" };
 		case "/resume":

@@ -35,6 +35,20 @@ describe("parseCommand", () => {
 		expect(parseCommand("/pause", "normal")).toEqual({ type: "pause" });
 		expect(parseCommand("/resume", "normal")).toEqual({ type: "resume" });
 	});
+	it("parses /interrupt with and without explicit target", () => {
+		expect(parseCommand("/interrupt", "normal")).toEqual({
+			type: "interrupt",
+			target: "current",
+		});
+		expect(parseCommand("/interrupt proposer", "normal")).toEqual({
+			type: "interrupt",
+			target: "proposer",
+		});
+		expect(parseCommand("/interrupt judge", "normal")).toEqual({
+			type: "interrupt",
+			target: "judge",
+		});
+	});
 	it("parses /approve in approval mode", () => {
 		expect(parseCommand("/approve", "approval")).toEqual({ type: "approve" });
 		expect(parseCommand("/approve ar-1", "approval")).toEqual({

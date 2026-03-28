@@ -85,6 +85,62 @@ function createControllableAdapter(
 	};
 }
 
+function createInterruptibleAdapter(
+	id: "claude" | "codex" | "gemini",
+	prompts: Map<string, string>,
+	options?: { supportsInterrupt?: boolean },
+): {
+	adapter: AgentAdapter;
+	interruptCalls: string[];
+} {
+	const listeners: Set<(e: NormalizedEvent) => void> = new Set();
+	const sessionId = `${id}-s1`;
+	let activeTurnId: string | undefined;
+	const interruptCalls: string[] = [];
+	const adapter = {
+		id,
+		capabilities: {} as AgentAdapter["capabilities"],
+		async startSession() {
+			return {
+				adapterSessionId: sessionId,
+				providerSessionId: `p-${sessionId}`,
+				adapterId: id,
+				transcript: [],
+			};
+		},
+		async sendTurn(_handle: SessionHandle, input: TurnInput) {
+			activeTurnId = input.turnId;
+			prompts.set(input.turnId, input.prompt);
+			return { turnId: input.turnId, status: "running" as const };
+		},
+		onEvent(cb: (e: NormalizedEvent) => void) {
+			listeners.add(cb);
+			return () => listeners.delete(cb);
+		},
+		async close() {},
+	} satisfies AgentAdapter;
+
+	if (options?.supportsInterrupt !== false) {
+		adapter.interrupt = async (turnId: string) => {
+			interruptCalls.push(turnId);
+			const effectiveTurnId = activeTurnId ?? turnId;
+			for (const listener of listeners) {
+				listener({
+					kind: "turn.completed",
+					status: "interrupted",
+					durationMs: 10,
+					timestamp: Date.now(),
+					adapterId: id,
+					adapterSessionId: sessionId,
+					turnId: effectiveTurnId,
+				});
+			}
+		};
+	}
+
+	return { adapter, interruptCalls };
+}
+
 function turnCompletedEvents(
 	turnId: string,
 	adapterId: "claude" | "codex" | "gemini",
@@ -313,5 +369,129 @@ describe("runDebate user injections", () => {
 		expect(bus.snapshot().config.maxRounds).toBe(2);
 		expect(proposerPrompts.has("p-2")).toBe(true);
 		expect(challengerPrompts.has("c-2")).toBe(true);
+	});
+
+	it("interrupts the active turn and terminates the debate with interrupted reason", async () => {
+		const config: DebateConfig = {
+			topic: "Interrupt topic",
+			maxRounds: 1,
+			judgeEveryNRounds: 0,
+			convergenceThreshold: 0,
+		};
+		const bus = new DebateEventBus();
+		const proposer = createInterruptibleAdapter("claude", new Map());
+		const challenger = createPromptCapturingAdapter("codex", {}, new Map());
+
+		bus.subscribe((event) => {
+			if (event.kind === "round.started" && event.speaker === "proposer") {
+				setTimeout(() => {
+					bus.push({
+						kind: "turn.interrupt.requested",
+						target: "current",
+						timestamp: Date.now(),
+					});
+				}, 0);
+			}
+		});
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposer.adapter,
+				session: await proposer.adapter.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		const finalState = await runDebate(config, adapters, { bus });
+
+		expect(proposer.interruptCalls).toEqual(["p-1"]);
+		expect(finalState.terminationReason).toBe("interrupted");
+		expect(
+			bus
+				.getEvents()
+				.some(
+					(event) =>
+						event.kind === "debate.completed" &&
+						(event as { reason?: string }).reason === "interrupted",
+				),
+		).toBe(true);
+	});
+
+	it("emits run.warning when interrupt is requested for an unsupported adapter", async () => {
+		const config: DebateConfig = {
+			topic: "Interrupt warning topic",
+			maxRounds: 1,
+			judgeEveryNRounds: 0,
+			convergenceThreshold: 0,
+		};
+		const bus = new DebateEventBus();
+		const proposerPrompts = new Map<string, string>();
+		const proposer = createControllableAdapter("gemini", proposerPrompts);
+		const challenger = createPromptCapturingAdapter(
+			"codex",
+			{
+				"c-1": turnCompletedEvents("c-1", "codex", "codex-s1"),
+			},
+			new Map(),
+		);
+
+		bus.subscribe((event) => {
+			if (event.kind === "round.started" && event.speaker === "proposer") {
+				setTimeout(() => {
+					bus.push({
+						kind: "turn.interrupt.requested",
+						target: "proposer",
+						timestamp: Date.now(),
+					});
+				}, 0);
+				setTimeout(() => {
+					proposer.emit(turnCompletedEvents("p-1", "gemini", "gemini-s1"));
+				}, 5);
+			}
+		});
+		const unsupportedAdapter = {
+			...proposer.adapter,
+			interrupt: undefined,
+		};
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: unsupportedAdapter,
+				session: await unsupportedAdapter.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+			challenger: {
+				adapter: challenger,
+				session: await challenger.startSession({
+					profile: "test",
+					workingDirectory: "/tmp",
+				}),
+			},
+		};
+
+		await runDebate(config, adapters, { bus });
+
+		expect(
+			bus
+				.getEvents()
+				.some(
+					(event) =>
+						event.kind === "run.warning" &&
+						(event as { message?: string }).message?.includes(
+							"does not support interrupt",
+						),
+				),
+		).toBe(true);
 	});
 });

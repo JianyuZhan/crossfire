@@ -128,6 +128,7 @@ export function projectState(events: AnyEvent[]): DebateState {
 				break;
 
 			case "user.inject":
+			case "turn.interrupt.requested":
 			case "clarification.requested":
 			case "clarification.provided":
 			case "director.action":

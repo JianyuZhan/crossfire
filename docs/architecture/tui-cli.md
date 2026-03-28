@@ -83,7 +83,11 @@ Runner-wired commands in `crossfire start`:
 - `/inject`
 - `/inject!`
 - `/inject judge`
+- `/interrupt`
 - `/stop`
+- `/pause`
+- `/resume`
+- `/extend <N>`
 - approval commands
 
 Runner-wired commands in `crossfire resume`:
@@ -91,6 +95,7 @@ Runner-wired commands in `crossfire resume`:
 - `/inject`
 - `/inject!`
 - `/inject judge`
+- `/interrupt`
 - `/stop`
 - `/pause`
 - `/resume`
@@ -103,7 +108,8 @@ Parsed but not currently wired:
 
 Important wiring nuance:
 
-- `crossfire start` and `crossfire resume` now share the same live command handler, so stop / approval / inject / pause / resume / extend behavior stays aligned across fresh and resumed runs
+- `crossfire start` and `crossfire resume` now share the same live command handler, so stop / interrupt / approval / inject / pause / resume / extend behavior stays aligned across fresh and resumed runs
+- `/interrupt` is routed as a control event to the runner, which attempts provider-native `adapter.interrupt(turnId)` only for the currently active turn; unsupported adapters surface a warning instead
 - the TUI command status line reflects projected live pause state so operators can tell when execution is intentionally blocked between turns
 - `crossfire replay` is non-interactive and only exposes CLI flags such as `--speed` and `--from-round`; it does not surface the command parser
 

@@ -238,13 +238,14 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 | `/inject both <text>`       | Add context to both agents' next prompts         | ✅       |
 | `/inject! proposer <text>`  | High-priority injection (must-address directive) | ✅       |
 | `/inject judge <text>`      | Trigger judge immediately with user instruction  | ✅       |
+| `/interrupt [role]`         | Interrupt the active provider turn when supported | ✅       |
 | `/pause`                    | Pause the debate after the current turn          | ✅       |
 | `/resume`                   | Resume a paused live debate                      | ✅       |
 | `/extend <n>`               | Increase max rounds by N                         | ✅       |
 
 **Approval mode** (auto-activates on tool approval requests): `/approve`, `/deny` ✅
 
-`crossfire resume` now reuses the same live command wiring as `crossfire start`, so `/stop`, approval commands, inject commands, `/pause`, `/resume`, and `/extend` remain available while resuming an interrupted debate.
+`crossfire resume` now reuses the same live command wiring as `crossfire start`, so `/stop`, `/interrupt`, approval commands, inject commands, `/pause`, `/resume`, and `/extend` remain available while resuming an interrupted debate.
 
 ## Supported Agents
 
@@ -375,6 +376,7 @@ Layer guide:
 
 - `crossfire replay` is currently non-interactive and does not expose the live command parser
 - `/jump turn <turnId>` is parsed by the TUI but does not have a live handler yet
+- external history injection remains an internal adapter recovery capability; there is no user-facing `--history-file` or live import command yet
 - `replay --from-round` is not reliable across resumed multi-segment runs today
 
 ## Extending Crossfire

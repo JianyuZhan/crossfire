@@ -110,6 +110,14 @@ function createPauseGate(bus: DebateEventBus) {
 	};
 }
 
+interface ActiveTurnContext {
+	role: "proposer" | "challenger" | "judge";
+	turnId: string;
+	adapter: AgentAdapter;
+	adapterId: SessionHandle["adapterId"];
+	adapterSessionId: string;
+}
+
 export async function runDebate(
 	config: DebateConfig,
 	adapters: AdapterMap,
@@ -183,6 +191,7 @@ export async function runDebate(
 
 	// Track pending user-triggered judge requests via bus events
 	let pendingUserJudge: string | undefined;
+	let activeTurn: ActiveTurnContext | undefined;
 	const userInjectUnsub = bus.subscribe((event: AnyEvent) => {
 		if (event.kind === "user.inject" && "target" in event) {
 			const inject = event as {
@@ -204,6 +213,64 @@ export async function runDebate(
 		}
 	});
 	unsubs.push(userInjectUnsub);
+
+	const interruptUnsub = bus.subscribe((event: AnyEvent) => {
+		if (event.kind !== "turn.interrupt.requested") return;
+		const requestedTarget = (
+			event as {
+				target: "current" | "proposer" | "challenger" | "judge";
+			}
+		).target;
+		const effectiveTarget =
+			requestedTarget === "current" ? activeTurn?.role : requestedTarget;
+
+		if (!activeTurn || !effectiveTarget) {
+			bus.push({
+				kind: "run.warning",
+				message:
+					"Interrupt requested, but there is no active turn to interrupt.",
+				timestamp: Date.now(),
+				adapterId: adapters.proposer.session.adapterId,
+				adapterSessionId: adapters.proposer.session.adapterSessionId,
+			});
+			return;
+		}
+		if (activeTurn.role !== effectiveTarget) {
+			bus.push({
+				kind: "run.warning",
+				message: `Interrupt requested for ${effectiveTarget}, but active turn belongs to ${activeTurn.role}.`,
+				timestamp: Date.now(),
+				adapterId: activeTurn.adapterId,
+				adapterSessionId: activeTurn.adapterSessionId,
+				turnId: activeTurn.turnId,
+			});
+			return;
+		}
+		if (!activeTurn.adapter.interrupt) {
+			bus.push({
+				kind: "run.warning",
+				message: `Adapter ${activeTurn.adapter.id} does not support interrupt for ${activeTurn.role}.`,
+				timestamp: Date.now(),
+				adapterId: activeTurn.adapterId,
+				adapterSessionId: activeTurn.adapterSessionId,
+				turnId: activeTurn.turnId,
+			});
+			return;
+		}
+		void activeTurn.adapter.interrupt(activeTurn.turnId).catch((error) => {
+			bus.push({
+				kind: "run.warning",
+				message: `Interrupt failed for ${activeTurn?.role ?? effectiveTarget}: ${error instanceof Error ? error.message : String(error)}`,
+				timestamp: Date.now(),
+				adapterId: activeTurn?.adapterId ?? adapters.proposer.session.adapterId,
+				adapterSessionId:
+					activeTurn?.adapterSessionId ??
+					adapters.proposer.session.adapterSessionId,
+				turnId: activeTurn?.turnId,
+			});
+		});
+	});
+	unsubs.push(interruptUnsub);
 
 	/**
 	 * Build judge prompt based on turn count, using initial or incremental builder.
@@ -247,6 +314,15 @@ export async function runDebate(
 		return prompt;
 	}
 
+	function completeInterruptedDebate(): DebateState {
+		bus.push({
+			kind: "debate.completed",
+			reason: "interrupted",
+			timestamp: Date.now(),
+		});
+		return bus.snapshot();
+	}
+
 	/**
 	 * Execute a full judge invocation: emit started, build prompt, run turn,
 	 * emit completed, and return the verdict.
@@ -256,8 +332,8 @@ export async function runDebate(
 		roundNumber: number,
 		schemaRefreshOverride?: "full" | "reminder",
 		promptSuffix?: string,
-	): Promise<JudgeVerdict | undefined> {
-		if (!adapters.judge) return undefined;
+	): Promise<{ verdict?: JudgeVerdict; interrupted: boolean }> {
+		if (!adapters.judge) return { interrupted: false };
 		director.recordJudgeIntervention();
 		bus.push({
 			kind: "judge.started",
@@ -275,19 +351,31 @@ export async function runDebate(
 			schemaRefreshOverride,
 			promptSuffix,
 		);
-		const verdict = await runJudgeTurn(
+		activeTurn = {
+			role: "judge",
+			turnId,
+			adapter: adapters.judge.adapter,
+			adapterId: adapters.judge.session.adapterId,
+			adapterSessionId: adapters.judge.session.adapterSessionId,
+		};
+		const result = await runJudgeTurn(
 			adapters.judge.adapter,
 			adapters.judge.session,
 			bus,
 			{ turnId, prompt, roundNumber },
 		);
+		activeTurn = undefined;
+		if (result.status === "interrupted") {
+			return { interrupted: true };
+		}
+		const verdict = result.verdict;
 		bus.push({
 			kind: "judge.completed",
 			roundNumber,
 			verdict,
 			timestamp: Date.now(),
 		});
-		return verdict;
+		return { verdict, interrupted: false };
 	}
 
 	/**
@@ -360,12 +448,20 @@ export async function runDebate(
 			);
 			lastJudgeText = undefined;
 			const proposerTurnId = `p-${round}`;
+			activeTurn = {
+				role: "proposer",
+				turnId: proposerTurnId,
+				adapter: adapters.proposer.adapter,
+				adapterId: adapters.proposer.session.adapterId,
+				adapterSessionId: adapters.proposer.session.adapterSessionId,
+			};
 			await adapters.proposer.adapter.sendTurn(adapters.proposer.session, {
 				turnId: proposerTurnId,
 				prompt: proposerPrompt,
 			});
 			const proposerResult = await waitForTurnCompleted(bus, proposerTurnId);
-			if (proposerResult === "interrupted") return bus.snapshot();
+			activeTurn = undefined;
+			if (proposerResult === "interrupted") return completeInterruptedDebate();
 
 			// Track schema refresh failures
 			const stateAfterProposer = bus.snapshot();
@@ -432,6 +528,13 @@ export async function runDebate(
 			);
 			lastJudgeText = undefined;
 			const challengerTurnId = `c-${round}`;
+			activeTurn = {
+				role: "challenger",
+				turnId: challengerTurnId,
+				adapter: adapters.challenger.adapter,
+				adapterId: adapters.challenger.session.adapterId,
+				adapterSessionId: adapters.challenger.session.adapterSessionId,
+			};
 			await adapters.challenger.adapter.sendTurn(adapters.challenger.session, {
 				turnId: challengerTurnId,
 				prompt: challengerPrompt,
@@ -440,7 +543,9 @@ export async function runDebate(
 				bus,
 				challengerTurnId,
 			);
-			if (challengerResult === "interrupted") return bus.snapshot();
+			activeTurn = undefined;
+			if (challengerResult === "interrupted")
+				return completeInterruptedDebate();
 
 			// Track schema refresh failures
 			const stateAfterChallenger = bus.snapshot();
@@ -488,8 +593,9 @@ export async function runDebate(
 			if (action.type === "trigger-judge" && adapters.judge) {
 				await pauseGate.waitIfPaused();
 				syncRecoveryMaxRounds(adapters, bus.snapshot().config.maxRounds);
-				const verdict = await invokeJudge(`j-${round}`, round);
-				if (handleJudgeVerdict(verdict)) break;
+				const judgeResult = await invokeJudge(`j-${round}`, round);
+				if (judgeResult?.interrupted) return completeInterruptedDebate();
+				if (handleJudgeVerdict(judgeResult?.verdict)) break;
 			}
 
 			if (action.type === "inject-guidance") {
@@ -511,7 +617,8 @@ export async function runDebate(
 					"full",
 					`## User Instruction\n${userInstruction}`,
 				);
-				if (handleJudgeVerdict(verdict)) break;
+				if (verdict?.interrupted) return completeInterruptedDebate();
+				if (handleJudgeVerdict(verdict?.verdict)) break;
 			}
 		}
 
@@ -528,12 +635,16 @@ export async function runDebate(
 				await pauseGate.waitIfPaused();
 				const finalState = bus.snapshot();
 				syncRecoveryMaxRounds(adapters, finalState.config.maxRounds);
-				finalVerdict = await Promise.race([
+				const finalJudgeResult = await Promise.race([
 					invokeJudge("j-final", finalState.currentRound, "full"),
 					new Promise<undefined>((resolve) =>
 						setTimeout(() => resolve(undefined), 30_000),
 					),
 				]);
+				if (finalJudgeResult?.interrupted) {
+					return completeInterruptedDebate();
+				}
+				finalVerdict = finalJudgeResult?.verdict;
 			} catch (err) {
 				bus.push({
 					kind: "synthesis.error",
@@ -756,6 +867,7 @@ export async function runDebate(
 		});
 		return bus.snapshot();
 	} finally {
+		activeTurn = undefined;
 		pauseGate.dispose();
 		accUnsub();
 		for (const unsub of unsubs) unsub();
@@ -830,7 +942,12 @@ function waitForTurnCompleted(
 				(event as NormalizedEvent).turnId === turnId
 			) {
 				unsub();
-				resolve("completed");
+				resolve(
+					(event as { status?: "completed" | "interrupted" }).status ===
+						"interrupted"
+						? "interrupted"
+						: "completed",
+				);
 			} else if (
 				event.kind === "debate.completed" &&
 				"reason" in event &&

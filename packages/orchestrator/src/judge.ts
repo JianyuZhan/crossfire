@@ -17,6 +17,11 @@ export interface JudgeTurnInput {
 	roundNumber: number;
 }
 
+export interface JudgeTurnResult {
+	verdict?: JudgeVerdict;
+	status: "completed" | "interrupted";
+}
+
 /**
  * Extract any JSON object from text that looks like a judge verdict.
  * Tries multiple strategies: ```json blocks, bare JSON objects, prose parsing.
@@ -152,7 +157,7 @@ export async function runJudgeTurn(
 	handle: SessionHandle,
 	bus: DebateEventBus,
 	input: JudgeTurnInput,
-): Promise<JudgeVerdict | undefined> {
+): Promise<JudgeTurnResult> {
 	let verdict: JudgeVerdict | undefined;
 
 	// Listen for judge_verdict via tool.call OR fenced code block in message.final
@@ -201,7 +206,7 @@ export async function runJudgeTurn(
 	});
 
 	// Wait for turn.completed
-	await new Promise<void>((resolve) => {
+	const status = await new Promise<"completed" | "interrupted">((resolve) => {
 		const turnUnsub = bus.subscribe((event: AnyEvent) => {
 			if (
 				event.kind === "turn.completed" &&
@@ -209,11 +214,16 @@ export async function runJudgeTurn(
 				(event as NormalizedEvent).turnId === input.turnId
 			) {
 				turnUnsub();
-				resolve();
+				resolve(
+					(event as { status?: "completed" | "interrupted" }).status ===
+						"interrupted"
+						? "interrupted"
+						: "completed",
+				);
 			}
 		});
 	});
 
 	unsub();
-	return verdict;
+	return { verdict, status };
 }

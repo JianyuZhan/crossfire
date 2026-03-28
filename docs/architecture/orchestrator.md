@@ -27,13 +27,14 @@ Packages:
 
 ### OrchestratorEvent
 
-`OrchestratorEvent` currently has 17 kinds:
+`OrchestratorEvent` currently has 18 kinds:
 
 - `debate.started`
 - `debate.resumed`
 - `debate.paused`
 - `debate.unpaused`
 - `debate.extended`
+- `turn.interrupt.requested`
 - `round.started`
 - `round.completed`
 - `judge.started`
@@ -146,6 +147,7 @@ Current implementation status is important:
 - proposer / challenger / both `user.inject` events are consumed through the director guidance queue and appended to the next prompt for the targeted role(s)
 - `/pause` and `/resume` emit replay-safe `debate.paused` / `debate.unpaused` control events; the runner honors them at turn boundaries and before judge invocations
 - `/extend <N>` emits `debate.extended`, and projection updates `config.maxRounds` so replay, resume, and live execution all agree on the new round budget
+- `/interrupt [role]` emits `turn.interrupt.requested`; the runner routes it to the currently active provider turn, and a successful provider interrupt ends the debate with `terminationReason: "interrupted"`
 
 ## DebateEventBus
 
@@ -177,7 +179,8 @@ High-level flow:
 Important notes:
 
 - it waits for `turn.completed` on the bus
-- it blocks on projected pause state between turns and before judge invocations rather than interrupting an in-flight provider turn
+- it blocks on projected pause state between turns and before judge invocations
+- it can now route `/interrupt` requests to the active provider turn and terminates the debate with `debate.completed(reason="interrupted")` when the adapter reports `turn.completed(status="interrupted")`
 - it tracks schema refresh cadence for incremental prompts
 - it reads `maxRounds` from projected state during execution, so live `/extend <N>` changes affect subsequent loop bounds and recovery context
 - it consumes stored guidance from the director before the next targeted proposer / challenger prompt, so both degradation guidance and user injects affect turn construction

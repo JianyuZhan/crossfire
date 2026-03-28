@@ -241,6 +241,11 @@ interface StartSessionInput {
 
 When provider-native resume fails, adapters first look for `recoveryContext` and may rebuild context with `buildTranscriptRecoveryPrompt()`. Recovery is transcript-driven rather than provider-history-driven.
 
+Important scope note:
+
+- `supportsExternalHistoryInjection` currently describes adapter-level recovery capability, not a user-facing CLI or TUI feature
+- Crossfire does not yet expose a public `--history-file` flag or live history-import command; external history is still internal to transcript recovery paths
+
 Current high-level behavior:
 
 - Claude retries in a new query without `resume`; this path requires both `recoveryContext` and an existing provider session to have failed

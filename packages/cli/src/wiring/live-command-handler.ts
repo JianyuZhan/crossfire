@@ -66,6 +66,15 @@ export function createLiveCommandHandler({
 			return;
 		}
 
+		if (cmd.type === "interrupt") {
+			bus.push({
+				kind: "turn.interrupt.requested",
+				target: cmd.target,
+				timestamp: Date.now(),
+			});
+			return;
+		}
+
 		if (cmd.type === "approve" || cmd.type === "deny") {
 			const pending = findPendingApproval(store, cmd.requestId);
 			if (!pending) return;

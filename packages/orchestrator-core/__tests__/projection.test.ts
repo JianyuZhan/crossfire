@@ -429,6 +429,21 @@ describe("new Director event kinds", () => {
 		expect(state.turns).toHaveLength(0);
 	});
 
+	it("ignores turn.interrupt.requested events in projection", () => {
+		const interruptEvent = {
+			kind: "turn.interrupt.requested",
+			target: "current",
+			timestamp: 2,
+		} as unknown as AnyEvent;
+		const events: AnyEvent[] = [
+			{ kind: "debate.started", config, timestamp: 1 },
+			interruptEvent,
+		];
+		const state = projectState(events);
+		expect(state.phase).toBe("idle");
+		expect(state.turns).toHaveLength(0);
+	});
+
 	it("ignores director.action events in projection", () => {
 		const events: AnyEvent[] = [
 			{ kind: "debate.started", config, timestamp: 1 },

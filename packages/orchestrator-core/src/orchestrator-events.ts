@@ -81,6 +81,12 @@ export interface DebateExtendedEvent {
 	timestamp: number;
 }
 
+export interface TurnInterruptRequestedEvent {
+	kind: "turn.interrupt.requested";
+	target: "current" | "proposer" | "challenger" | "judge";
+	timestamp: number;
+}
+
 export interface UserInjectEvent {
 	kind: "user.inject";
 	target: "proposer" | "challenger" | "both" | "judge";
@@ -159,6 +165,7 @@ export type OrchestratorEvent =
 	| DebatePausedEvent
 	| DebateUnpausedEvent
 	| DebateExtendedEvent
+	| TurnInterruptRequestedEvent
 	| UserInjectEvent
 	| ClarificationRequestedEvent
 	| ClarificationProvidedEvent

@@ -217,4 +217,48 @@ describe("createLiveCommandHandler", () => {
 			}),
 		);
 	});
+
+	it("emits interrupt request events", () => {
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: createMockAdapter("claude"),
+				session: createSession("claude", "claude-proposer"),
+			},
+			challenger: {
+				adapter: createMockAdapter("codex"),
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+		const bus = { push: vi.fn() } as unknown as DebateEventBus;
+		const store = {
+			getState: () => ({
+				command: { pendingApprovals: [] },
+				debateState: { config: { maxRounds: 5 } },
+			}),
+		} as TuiStore;
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+
+		handler({ type: "interrupt", target: "current" });
+		handler({ type: "interrupt", target: "judge" });
+
+		expect(bus.push).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({
+				kind: "turn.interrupt.requested",
+				target: "current",
+			}),
+		);
+		expect(bus.push).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({
+				kind: "turn.interrupt.requested",
+				target: "judge",
+			}),
+		);
+	});
 });
