@@ -47,10 +47,10 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 - **实时终端 UI** — 分屏面板，实时展示思考过程、工具调用、消息流和收敛指标
 - **事件溯源** — 所有事件持久化为 JSONL。支持中断恢复，并可从同一事实来源回放已完成辩论
 - **结构化提取** — 智能体通过 tool call 上报立场、置信度、关键论点和让步（Zod 校验）
-- **裁判仲裁** — 可选的裁判智能体评分论证、检测停滞、可提前终止辩论
+- **裁判仲裁** — 可选的裁判智能体评分论证、检测停滞、可提前终止辩论，并优先评估证据责任而不是奖励无依据断言
 - **自适应最终综合** — 辩论结束后在独立综合会话中生成最终行动计划，模型综合失败时仍有本地回退
 - **增量提示词** — 第 1 轮发送完整上下文，第 2 轮起仅发送对手/裁判的新消息，利用提供商会话记忆实现每轮 ~O(1) token 开销
-- **配置文件系统** — YAML frontmatter + Markdown 系统提示词，按角色定制行为、模型和 MCP 服务器
+- **配置文件系统** — YAML frontmatter + Markdown 系统提示词，内置 proposer/challenger/judge 配置包含按角色定制的 research 与证据处理约束
 
 ## 适用场景
 
@@ -139,7 +139,7 @@ crossfire start \
 
 - **顶部栏** — 居中品牌标识、辩论 ID、轮次/阶段、提议者与挑战者的智能体信息、辩论主题
 - **可滚动内容区** — 按轮次展示智能体消息、思考过程和工具调用。支持方向键、`Ctrl+U`/`Ctrl+D`、`Home`/`End` 滚动
-- **指标栏** — 各智能体 token 用量与费用、收敛进度条与百分比、裁判判定、滚动状态（LIVE / SCROLLED）
+- **指标栏** — 各智能体 token 用量与费用、收敛进度条与百分比、裁判判定、滚动状态（LIVE / SCROLLED）。用量统计会按 provider 语义做归一化，因此部分 provider 的累计值会先转换为增量再显示
 - **命令输入** — 实时辩论中根据上下文切换提示符（`>`、`approval>`），用于运行时命令
 
 使用 `--headless` 可跳过 UI。事件和综合输出仍会落盘，之后可以回放或审阅。
@@ -275,8 +275,8 @@ mcp_servers:
 ---
 ## Your Role
 
-You are a skilled debater. Present clear arguments backed by evidence.
-Use the debate_meta tool to report your stance after each response.
+你是一名擅长技术辩论的智能体。请基于证据提出清晰论点。
+每次回复结束后，使用 `debate_meta` 工具上报你的立场。
 ```
 
 | 字段                    | 说明                                              | 必填 | 默认值     |
@@ -291,6 +291,12 @@ Use the debate_meta tool to report your stance after each response.
 **搜索路径：** `./profiles/` → `~/.config/crossfire/profiles/`
 
 **裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（例如 `claude/proposer` 默认使用 `claude/judge`）。
+
+内置角色契约是有区分的：
+
+- proposer 和 challenger 配置都包含 research requirements，要求重要主张尽量基于代码或其他可用证据
+- challenger 配置被要求在关键反驳前做验证，并尽量提出具体替代方案，而不只是反对
+- judge 配置优先评估证据责任；如果一方缺少依据，应在评分和 reasoning 中体现，而不是由裁判替其做大范围调查
 
 内置配置文件：
 
@@ -313,11 +319,13 @@ profiles/
 | `transcript.md`        | 同一份 transcript 的 Markdown 版本                           |
 | `events.jsonl`         | 完整事件日志（每行一条 JSON）— 唯一事实来源                  |
 | `index.json`           | 元数据、字节偏移、段清单、profile 信息和辩论配置             |
-| `synthesis-debug.json` | 综合提示词组装与综合结果的调试元数据，便于排查或分析输出质量 |
+| `synthesis-debug.json` | 综合提示词组装元数据加上综合运行期诊断信息，便于排查或分析输出质量 |
 
 恢复时会创建新的段文件（例如 `events-resumed-<ts>.jsonl`），并在 `index.json` 中追踪。
 
-如果基于模型的最终综合失败，Crossfire 仍会写出一个可用的回退版行动计划。
+面向人类阅读的 transcript / action plan 输出会在提取后自动剥离嵌入的 `debate_meta` / `judge_verdict` JSON 块；这些结构化载荷仍会保留在 `events.jsonl` 和派生状态里。
+
+如果基于模型的最终综合失败，Crossfire 仍会写出一个可用的回退版行动计划，而且该回退报告会结合 debate summary 做补强，而不只依赖稀疏的 draft 状态。
 
 ## 工作原理
 
@@ -325,11 +333,11 @@ profiles/
 2. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，把提供商特定协议统一为共享事件流。
 3. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 都订阅这个总线。
 4. **回合循环** — 编排器从投影状态构建提示词，发送给当前智能体，等待 `turn.completed`，再轮到另一方。每次决策前都会从事件重新投影状态。
-5. **结构化提取** — 智能体调用 `debate_meta` 上报立场、置信度、关键论点和让步。裁判调用 `judge_verdict` 给出评分和继续/停止建议。
+5. **结构化提取** — 智能体调用 `debate_meta` 上报立场、置信度、关键论点和让步。裁判调用 `judge_verdict` 给出评分和继续/停止建议，同时其提示词会优先惩罚缺乏依据的主张。
 6. **增量提示词** — 第 1 轮发送完整系统提示词、主题和输出格式；后续轮次仅发送对手最新回复和可选裁判反馈。
 7. **收敛检测** — Crossfire 跟踪立场差值、让步情况以及双方是否希望结束。达到阈值时可提前终止辩论。
 8. **持久化** — 事件每 100ms 批量写入 JSONL，并在回合或辩论完成时同步刷新。完整日志支持确定性回放和恢复。
-9. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，并记录综合调试元数据供审计使用。
+9. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，记录综合诊断元数据供审计使用；如果模型综合失败，则回退到经 debate summary 补强的本地报告。
 
 完整架构文档请从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 进入。
 

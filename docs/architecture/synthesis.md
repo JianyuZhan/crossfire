@@ -15,7 +15,7 @@ The action plan is the primary output of a debate. The synthesis system generate
 
 - `action-plan.md`
 - `action-plan.html`
-- `synthesis-debug.json` (full-fidelity debug metadata including prompt assembly details, LLM call results, and quality metrics)
+- `synthesis-debug.json` (prompt-assembly metadata plus runtime diagnostics for the synthesis session and final quality classification)
 
 The preferred path is LLM-backed final synthesis in an isolated adapter session. Local fallbacks guarantee output even when synthesis fails.
 
@@ -163,6 +163,12 @@ Output quality tiers:
 
 These tiers are surfaced in `synthesis.completed`, but rendering differs by output path: the markdown renderer shows notice treatment for `local-*` results, while the local fallback report renderer maps to its own `draft-filled` / `legacy-fallback` badges.
 
+Current classification rules:
+
+- `llm-full` only applies when `runFinalSynthesis()` completes without an error and yields markdown
+- synthesis runs that timeout or error may still retain partial text for diagnostics, but that partial output is not rendered as `llm-full`
+- fallback quality is classified from the enriched local report (`consensusItems`, `unresolvedIssues`, `argumentEvolution`), not from the sparse pre-render draft alone
+
 ## Component Responsibilities
 
 ### PlanAccumulator
@@ -186,8 +192,18 @@ These tiers are surfaced in `synthesis.completed`, but rendering differs by outp
 - sends exactly one synthesis turn
 - listens directly to adapter events for that session
 - prefers `message.final`, falls back to accumulated deltas
+- records `SynthesisDiagnostics`
+- preserves partial output for debugging even on timeout/error
 - always closes the temporary session
-- returns `SynthesisRunResult` with `markdown`, `durationMs`, `rawDeltaLength`, and optional `error`
+- returns `SynthesisRunResult` with `markdown`, `durationMs`, `rawDeltaLength`, optional `error`, and optional `diagnostics`
+
+`SynthesisDiagnostics` currently tracks:
+
+- whether the synthesis session was created successfully
+- time to first event
+- tool call count
+- event kind counts
+- a short preview of the captured final output, when available
 
 Adapter selection and concrete timeout policy are runner decisions, not intrinsic `runFinalSynthesis()` behavior.
 
@@ -199,15 +215,25 @@ Provides `getCleanTranscript()` for synthesis input and writes transcript output
 
 Removes embedded `debate_meta` and `judge_verdict` payload blocks so transcript/synthesis inputs stay human-readable and model-appropriate.
 
+Current detection behavior:
+
+- strips explicit fenced blocks tagged as `debate_meta` or `judge_verdict`
+- strips ` ```json ` blocks when parsed keys identify internal metadata
+- falls back to key-presence matching for incomplete or malformed JSON during streaming
+- strips unlabeled trailing JSON blocks prefixed by `debate_meta` or `judge_verdict`
+
+The TUI applies the parallel `stripInternalToolBlocks()` pass before rendering streamed assistant text, so these internal JSON payloads remain in `events.jsonl` but are removed from visible transcript-style output.
+
 ## Runner Integration
 
 The current runner:
 
 - chooses `judge ?? proposer` as the synthesis adapter
 - uses a `128_000` token budget for prompt assembly
-- prefixes the adaptive prompt with `buildInstructions()`
+- prefixes the adaptive prompt with `buildInstructions()`, including explicit no-exploration constraints
 - passes `180_000ms` as synthesis timeout
 - emits `synthesis.error` for `judge-final`, `prompt-assembly`, `llm-synthesis`, and `file-write` failures
 - writes markdown and HTML when synthesis succeeds
 - falls back to local report rendering when it does not
+- enriches fallback rendering with a subset of `debate.completed.summary` via `draftToAuditReport(draft, summary)`
 - includes `quality` plus optional lightweight debug audit data on `synthesis.completed`

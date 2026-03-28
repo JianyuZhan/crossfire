@@ -71,6 +71,7 @@ Each turn stores:
 
 - `debate_meta` is parsed primarily from adapter `tool.call` events during projection, with fallback extraction from `message.final` fenced JSON / generic JSON / prose output
 - `judge_verdict` is parsed during `runJudgeTurn()` and then emitted through `judge.completed`, with similar fenced JSON / raw JSON / prose fallbacks
+- visible transcript-style output strips these internal JSON payloads after extraction; the structured data remains preserved in the event log
 
 ### ConvergenceResult
 
@@ -191,6 +192,12 @@ Prompt builder families:
 - `buildJudgeIncrementalPrompt()`
 - `buildTranscriptRecoveryPrompt()`
 
+Current built-in role guidance also matters:
+
+- proposer and challenger prompts emphasize constructive adversarial review rather than rhetorical "winning"
+- challenger prompts explicitly require tool-backed verification before major rebuttals when evidence is available
+- judge prompts prioritize evidence responsibility and only ask for minimal fact-checking when both sides cite code but disagree
+
 ## Judge Turn
 
 `runJudgeTurn()` is responsible for:
@@ -199,6 +206,12 @@ Prompt builder families:
 - parsing `judge_verdict`
 - tolerating missing tool calls
 - returning graceful degradation rather than crashing the debate
+
+The current judge contract remains score-based, but prompt guidance is action-plan-oriented:
+
+- unsupported claims should be scored down rather than silently accepted
+- the judge should not take over as a general investigator for one side
+- direct fact-checking should stay minimal and targeted to contradictions in cited evidence
 
 ## Final Outcome
 
@@ -211,5 +224,11 @@ After the main loop exits, the runner:
 5. may emit `synthesis.error` for judge-final / prompt-assembly / llm-synthesis / file-write failures
 6. emits `synthesis.completed`
 7. emits `debate.completed` last
+
+Current fallback behavior is important:
+
+- successful LLM synthesis writes markdown/HTML directly and is classified as `llm-full`
+- timeout/error paths may retain partial synthesis text for diagnostics, but do not render that partial text as a successful final report
+- local fallback rendering uses `draftToAuditReport(draft, summary)` so the fallback report can consume `DebateSummary` fields such as consensus, unresolved items, and recommended action
 
 The runner does not currently append a separate “Final Outcome” markdown block to the transcript.

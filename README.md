@@ -47,10 +47,10 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 - **Real-time TUI** — Split-panel terminal UI with live streaming, thinking indicators, tool-call traces, and convergence metrics
 - **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates and replay completed ones from the same source of truth
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
-- **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and can end debates early
+- **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
 - **Adaptive final synthesis** — After the debate, Crossfire generates a final action plan in a fresh synthesis session with local fallback if model-backed synthesis fails
 - **Incremental prompts** — Turn 1 sends full context; Turn 2+ sends only new opponent/judge messages, leveraging provider session memory for ~O(1) per-turn cost
-- **Profiles** — YAML frontmatter + Markdown system prompts. Customize behavior, model, and MCP servers per role
+- **Profiles** — YAML frontmatter + Markdown system prompts. Built-in proposer/challenger/judge profiles include role-specific research and evidence-handling guidance
 
 ## Best For
 
@@ -139,7 +139,7 @@ The terminal UI is a full-screen Ink (React for CLI) application with four stack
 
 - **Header bar** — Centered branding, debate ID, round/phase, proposer & challenger agent info, and topic
 - **Scrollable content** — Round-by-round display of agent messages, thinking traces, and tool calls. Scroll with arrow keys, `Ctrl+U`/`Ctrl+D`, or `Home`/`End`
-- **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED)
+- **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED). Usage accounting is provider-aware, so some providers are normalized from cumulative usage before display
 - **Command input** — Context-aware live prompt (`>`, `approval>`) for runtime commands
 
 Use `--headless` to skip the TUI. Events and synthesis outputs are still persisted for later inspection.
@@ -292,6 +292,12 @@ Use the debate_meta tool to report your stance after each response.
 
 **Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (for example, `claude/proposer` defaults to `claude/judge`).
 
+Built-in role contracts are intentionally asymmetric:
+
+- proposer and challenger profiles include research requirements so important claims are grounded in code or other available evidence
+- challenger profiles are expected to verify key rebuttals and offer concrete alternatives, not just object
+- judge profiles prioritize evidence responsibility and should score unsupported claims down instead of doing broad replacement analysis
+
 Built-in profiles:
 
 ```text
@@ -313,11 +319,13 @@ Each debate produces files in its output directory:
 | `transcript.md`        | Same transcript in Markdown                                                      |
 | `events.jsonl`         | Complete event log (one JSON per line) — source of truth                         |
 | `index.json`           | Metadata, byte offsets, segment manifest, profile info, and debate config        |
-| `synthesis-debug.json` | Prompt-assembly and synthesis debug metadata for inspecting or troubleshooting output |
+| `synthesis-debug.json` | Prompt-assembly metadata plus synthesis runtime diagnostics for inspecting or troubleshooting output |
 
 On resume, a new segment file is created (for example, `events-resumed-<ts>.jsonl`) and tracked in `index.json`.
 
-If model-backed synthesis fails, Crossfire still writes a fallback action plan so the run produces a usable report.
+Visible transcript-style outputs automatically strip embedded `debate_meta` / `judge_verdict` JSON blocks after extraction. The structured payloads remain preserved in `events.jsonl` and derived state.
+
+If model-backed synthesis fails, Crossfire still writes a fallback action plan so the run produces a usable report. The fallback report is enriched from the debate summary rather than relying only on sparse draft state.
 
 ## How It Works
 
@@ -325,11 +333,11 @@ If model-backed synthesis fails, Crossfire still writes a fallback action plan s
 2. **Adapter creation** — Each role gets an `AgentAdapter` that normalizes provider-specific protocols into a shared event stream.
 3. **Event bus** — All events flow through `DebateEventBus`. The TUI, EventStore (JSONL persistence), and TranscriptWriter all subscribe here.
 4. **Turn loop** — The orchestrator builds prompts from projected state, sends them to the active agent, waits for `turn.completed`, then continues with the other side. State is re-projected from events before every decision.
-5. **Structured extraction** — Agents call `debate_meta` to report stance, confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendations.
+5. **Structured extraction** — Agents call `debate_meta` to report stance, confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendations, with prompt guidance that penalizes unsupported claims rather than quietly accepting them.
 6. **Incremental prompts** — Turn 1 sends the full system prompt, topic, and output schema; subsequent turns send only the opponent's latest response plus optional judge feedback.
 7. **Convergence** — Crossfire tracks stance delta, concessions, and whether both sides want to conclude. Debates can terminate early when convergence is high enough.
 8. **Persistence** — Events batch-flush to JSONL every 100ms, with sync flush on turn/debate completion. The full log enables deterministic replay and resume.
-9. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session and records synthesis metadata for auditing.
+9. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session, records synthesis diagnostics for auditing, and falls back to an enriched local report if model-backed synthesis fails.
 
 For the architecture reference set, start at **[docs/architecture/overview.md](docs/architecture/overview.md)**.
 

@@ -39,8 +39,9 @@ It tracks:
 Important implementation notes:
 
 - it does not re-project full debate state on every delta event
-- usage accounting is provider-aware
+- usage accounting is provider-aware, including normalization for providers that report cumulative usage
 - `thinkingText` is front-trimmed to about 4096 characters
+- visible assistant text is stripped of internal `debate_meta` / `judge_verdict` JSON blocks before rendering
 
 ## Render Pipeline
 
@@ -158,6 +159,12 @@ Search paths:
 
 - `./profiles`
 - `~/.config/crossfire/profiles`
+
+Built-in profile guidance is role-specific:
+
+- proposer and challenger profiles include research requirements that push agents toward evidence-backed claims
+- challenger profiles require code/tool verification before major rebuttals when evidence is available
+- judge profiles emphasize evidence responsibility and discourage broad replacement analysis on behalf of one side
 
 ## Commands
 
