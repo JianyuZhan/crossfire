@@ -139,6 +139,7 @@ describe("TuiStore", () => {
 			ev("approval.request", {
 				requestId: "ar-1",
 				adapterId: "claude",
+				adapterSessionId: "claude-session-1",
 				approvalType: "tool",
 				title: "Allow Bash?",
 				turnId: "p-1",
@@ -148,6 +149,9 @@ describe("TuiStore", () => {
 		expect(s.command.mode).toBe("approval");
 		expect(s.command.pendingApprovals).toHaveLength(1);
 		expect(s.command.pendingApprovals[0].title).toBe("Allow Bash?");
+		expect(s.command.pendingApprovals[0].adapterSessionId).toBe(
+			"claude-session-1",
+		);
 	});
 
 	it("clears streaming buffers on new round.started", () => {

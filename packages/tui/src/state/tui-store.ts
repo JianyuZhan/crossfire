@@ -704,6 +704,7 @@ export class TuiStore {
 				const e = event as {
 					requestId: string;
 					adapterId: string;
+					adapterSessionId: string;
 					approvalType: string;
 					title: string;
 					suggestion?: "allow" | "deny";
@@ -711,6 +712,7 @@ export class TuiStore {
 				this.state.command.pendingApprovals.push({
 					requestId: e.requestId,
 					adapterId: e.adapterId,
+					adapterSessionId: e.adapterSessionId,
 					approvalType: e.approvalType,
 					title: e.title,
 					suggestion: e.suggestion,

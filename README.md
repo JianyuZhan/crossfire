@@ -235,6 +235,7 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 | `/stop`                     | Stop immediately                                 | ✅       |
 | `/inject proposer <text>`   | Add context to proposer's next prompt            | ✅       |
 | `/inject challenger <text>` | Add context to challenger's next prompt          | ✅       |
+| `/inject both <text>`       | Add context to both agents' next prompts         | ✅       |
 | `/inject! proposer <text>`  | High-priority injection (must-address directive) | ✅       |
 | `/inject judge <text>`      | Trigger judge immediately with user instruction  | ✅       |
 | `/pause`                    | Pause the debate (finishes current turn)         | 🚧 NYI   |
@@ -245,7 +246,7 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 
 **Approval mode** (auto-activates on tool approval requests): `/approve`, `/deny` ✅
 
-`crossfire resume` currently reuses the TUI without wiring the same inject / approval / stop callbacks exposed by `crossfire start`.
+`crossfire resume` now reuses the same live command wiring as `crossfire start`, so `/stop`, approval commands, and inject commands remain available while resuming an interrupted debate.
 
 ## Supported Agents
 
@@ -375,7 +376,6 @@ Layer guide:
 ## Current Limitations
 
 - `crossfire replay` is currently non-interactive and does not expose the live command parser
-- `crossfire resume` does not currently wire inject / approval / stop callbacks like `crossfire start`
 - Some TUI commands are parsed but not yet wired to orchestrator behavior
 - `replay --from-round` is not reliable across resumed multi-segment runs today
 

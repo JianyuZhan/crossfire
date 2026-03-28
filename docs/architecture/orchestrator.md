@@ -138,8 +138,8 @@ Current implementation status is important:
 
 - clarification intent can be parsed and categorized, but the runner does not currently emit `clarification.requested` / `clarification.provided`
 - `requestIntervention` currently escalates to Judge rather than entering an `await-user` relay loop
-- `/inject judge` is live
-- other `user.inject` targets are audit-visible but not currently consumed in turn construction
+- `/inject judge` is live and triggers a full Judge turn with the user-provided suffix
+- proposer / challenger / both `user.inject` events are consumed through the director guidance queue and appended to the next prompt for the targeted role(s)
 
 ## DebateEventBus
 
@@ -172,7 +172,7 @@ Important notes:
 
 - it waits for `turn.completed` on the bus
 - it tracks schema refresh cadence for incremental prompts
-- it stores guidance produced by the director, but current prompt builders do not yet consume that stored guidance
+- it consumes stored guidance from the director before the next targeted proposer / challenger prompt, so both degradation guidance and user injects affect turn construction
 - `await-user` exists in the action type surface but is not currently produced by the live runner/director flow
 
 ## Context Builder

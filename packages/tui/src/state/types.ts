@@ -115,6 +115,7 @@ export interface MetricsState {
 export interface PendingApproval {
 	requestId: string;
 	adapterId: string;
+	adapterSessionId: string;
 	approvalType: string;
 	title: string;
 	suggestion?: "allow" | "deny";

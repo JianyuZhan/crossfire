@@ -12,6 +12,7 @@ import { createAdapters } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
+import { createLiveCommandHandler } from "../wiring/live-command-handler.js";
 
 function requirePositiveInt(value: string, label: string): number {
 	const n = Number.parseInt(value, 10);
@@ -229,67 +230,6 @@ export const startCommand = new Command("start")
 
 			let inkInstance: { clear: () => void; unmount: () => void } | undefined;
 			let userQuitResolve: (() => void) | undefined;
-			if (tuiBundle) {
-				inkInstance = render(
-					React.createElement(App, {
-						store: tuiBundle.store,
-						source: tuiBundle.source,
-						onCommand: (cmd: {
-							type: string;
-							requestId?: string;
-							target?: string;
-							text?: string;
-							priority?: string;
-						}) => {
-							if (cmd.type === "quit") {
-								// User explicitly quit — resolve the wait
-								userQuitResolve?.();
-							} else if (cmd.type === "stop") {
-								// During debate: trigger shutdown. After completion: treat as quit.
-								if (userQuitResolve) {
-									userQuitResolve();
-								} else {
-									triggerShutdown();
-								}
-							} else if (cmd.type === "approve" || cmd.type === "deny") {
-								const state = tuiBundle.store.getState();
-								const pending = state.command.pendingApprovals;
-								const requestId = cmd.requestId ?? pending[0]?.requestId;
-								if (requestId) {
-									const decision = cmd.type === "approve" ? "allow" : "deny";
-									for (const a of [
-										adapterBundle.adapters.proposer,
-										adapterBundle.adapters.challenger,
-									]) {
-										a.adapter.approve?.({ requestId, decision });
-									}
-								}
-							} else if (cmd.type === "inject" || cmd.type === "inject-judge") {
-								const targets =
-									cmd.type === "inject-judge"
-										? ["judge" as const]
-										: cmd.target === "both"
-											? (["proposer", "challenger"] as const)
-											: [cmd.target as "proposer" | "challenger"];
-								const priority =
-									cmd.type === "inject-judge"
-										? "high"
-										: ((cmd.priority ?? "normal") as "normal" | "high");
-								for (const target of targets) {
-									busBundle.bus.push({
-										kind: "user.inject",
-										target,
-										text: cmd.text ?? "",
-										priority,
-										timestamp: Date.now(),
-									});
-								}
-							}
-						},
-					}),
-				);
-			}
-
 			const abortController = new AbortController();
 			const triggerShutdown = () => {
 				if (userQuitResolve) {
@@ -307,6 +247,21 @@ export const startCommand = new Command("start")
 					timestamp: Date.now(),
 				});
 			};
+			if (tuiBundle) {
+				inkInstance = render(
+					React.createElement(App, {
+						store: tuiBundle.store,
+						source: tuiBundle.source,
+						onCommand: createLiveCommandHandler({
+							adapters: adapterBundle.adapters,
+							bus: busBundle.bus,
+							store: tuiBundle.store,
+							triggerShutdown,
+							getUserQuitHandler: () => userQuitResolve,
+						}),
+					}),
+				);
+			}
 
 			process.on("SIGINT", triggerShutdown);
 			try {

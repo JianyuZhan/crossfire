@@ -78,6 +78,14 @@ Runner-wired commands in `crossfire start`:
 - `/stop`
 - approval commands
 
+Runner-wired commands in `crossfire resume`:
+
+- `/inject`
+- `/inject!`
+- `/inject judge`
+- `/stop`
+- approval commands
+
 Parsed but not currently wired:
 
 - `/extend <N>`
@@ -87,7 +95,7 @@ Parsed but not currently wired:
 
 Important wiring nuance:
 
-- `crossfire resume` currently renders the same TUI without the command callback used by `crossfire start`, so inject / approval / stop commands are not wired there
+- `crossfire start` and `crossfire resume` now share the same live command handler, so stop / approval / inject behavior stays aligned across fresh and resumed runs
 - `crossfire replay` is non-interactive and only exposes CLI flags such as `--speed` and `--from-round`; it does not surface the command parser
 
 ## Persistence and Replay

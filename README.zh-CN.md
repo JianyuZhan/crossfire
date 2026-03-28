@@ -235,6 +235,7 @@ Configuration:
 | `/stop`                     | 立即停止                       | ✅       |
 | `/inject proposer <text>`   | 向提议者下一轮注入上下文       | ✅       |
 | `/inject challenger <text>` | 向挑战者下一轮注入上下文       | ✅       |
+| `/inject both <text>`       | 向双方下一轮都注入上下文       | ✅       |
 | `/inject! proposer <text>`  | 高优先级注入（必须处理的指令） | ✅       |
 | `/inject judge <text>`      | 立即触发裁判并附带用户指令     | ✅       |
 | `/pause`                    | 暂停辩论（等当前回合完成）     | 🚧 未实现 |
@@ -245,7 +246,7 @@ Configuration:
 
 **审批模式**（工具审批请求时自动激活）：`/approve`、`/deny` ✅
 
-`crossfire resume` 目前虽然复用了同一套 TUI，但还没有接入 `crossfire start` 下可用的 inject / approval / stop 回调。
+`crossfire resume` 现在复用了与 `crossfire start` 相同的实时命令接线，因此在恢复中断辩论时也可以继续使用 `/stop`、审批命令和 inject 命令。
 
 ## 支持的智能体
 
@@ -375,7 +376,6 @@ packages/
 ## 当前限制
 
 - `crossfire replay` 目前是非交互式的，不暴露实时辩论中的命令解析器
-- `crossfire resume` 目前没有接入 `crossfire start` 那套 inject / approval / stop 回调
 - 有些 TUI 命令已经能解析，但尚未真正接入编排器行为
 - 在多段恢复后的运行中，`replay --from-round` 目前不可靠
 

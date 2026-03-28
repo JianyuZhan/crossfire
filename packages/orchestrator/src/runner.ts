@@ -71,6 +71,11 @@ export function getSchemaRefreshMode(
 	return "reminder";
 }
 
+function appendOperationalGuidance(prompt: string, guidance?: string): string {
+	if (!guidance) return prompt;
+	return `${prompt}\n\n[ADDITIONAL GUIDANCE]\n${guidance}`;
+}
+
 export async function runDebate(
 	config: DebateConfig,
 	adapters: AdapterMap,
@@ -143,16 +148,27 @@ export async function runDebate(
 
 	// Track pending user-triggered judge requests via bus events
 	let pendingUserJudge: string | undefined;
-	const judgeInjectUnsub = bus.subscribe((event: AnyEvent) => {
-		if (
-			event.kind === "user.inject" &&
-			"target" in event &&
-			(event as { target: string }).target === "judge"
-		) {
-			pendingUserJudge = (event as { text: string }).text;
+	const userInjectUnsub = bus.subscribe((event: AnyEvent) => {
+		if (event.kind === "user.inject" && "target" in event) {
+			const inject = event as {
+				target: "proposer" | "challenger" | "both" | "judge";
+				text: string;
+				priority: "normal" | "high";
+			};
+			if (inject.target === "judge") {
+				pendingUserJudge = inject.text;
+				return;
+			}
+			const targets =
+				inject.target === "both"
+					? (["proposer", "challenger"] as const)
+					: [inject.target];
+			for (const target of targets) {
+				director.storeGuidance(target, inject.text, inject.priority, "user");
+			}
 		}
 	});
-	unsubs.push(judgeInjectUnsub);
+	unsubs.push(userInjectUnsub);
 
 	/**
 	 * Build judge prompt based on turn count, using initial or incremental builder.
@@ -293,6 +309,10 @@ export async function runDebate(
 					),
 				});
 			}
+			proposerPrompt = appendOperationalGuidance(
+				proposerPrompt,
+				director.getGuidance("proposer"),
+			);
 			lastJudgeText = undefined;
 			const proposerTurnId = `p-${round}`;
 			await adapters.proposer.adapter.sendTurn(adapters.proposer.session, {
@@ -355,6 +375,10 @@ export async function runDebate(
 					),
 				});
 			}
+			challengerPrompt = appendOperationalGuidance(
+				challengerPrompt,
+				director.getGuidance("challenger"),
+			);
 			lastJudgeText = undefined;
 			const challengerTurnId = `c-${round}`;
 			await adapters.challenger.adapter.sendTurn(adapters.challenger.session, {

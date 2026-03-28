@@ -12,6 +12,7 @@ import { createAdapters } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
+import { createLiveCommandHandler } from "../wiring/live-command-handler.js";
 
 export const resumeCommand = new Command("resume")
 	.description("Resume an existing debate")
@@ -103,16 +104,6 @@ export const resumeCommand = new Command("resume")
 			const tuiBundle = createTui(busBundle.bus, options.headless);
 
 			let inkInstance: { clear: () => void; unmount: () => void } | undefined;
-			if (tuiBundle) {
-				inkInstance = render(
-					React.createElement(App, {
-						store: tuiBundle.store,
-						source: tuiBundle.source,
-					}),
-				);
-			}
-
-			// SIGINT handler
 			const abortController = new AbortController();
 			const triggerShutdown = () => {
 				if (abortController.signal.aborted) {
@@ -125,6 +116,20 @@ export const resumeCommand = new Command("resume")
 					timestamp: Date.now(),
 				});
 			};
+			if (tuiBundle) {
+				inkInstance = render(
+					React.createElement(App, {
+						store: tuiBundle.store,
+						source: tuiBundle.source,
+						onCommand: createLiveCommandHandler({
+							adapters: adapterBundle.adapters,
+							bus: busBundle.bus,
+							store: tuiBundle.store,
+							triggerShutdown,
+						}),
+					}),
+				);
+			}
 			process.on("SIGINT", triggerShutdown);
 
 			try {
