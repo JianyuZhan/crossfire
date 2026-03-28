@@ -154,6 +154,33 @@ describe("TuiStore", () => {
 		);
 	});
 
+	it("tracks live pause state and updated maxRounds", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 3,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(ev("debate.paused", {}));
+		expect(store.getState().command.livePaused).toBe(true);
+
+		store.handleEvent(
+			ev("debate.extended", {
+				by: 2,
+				newMaxRounds: 5,
+			}),
+		);
+		expect(store.getState().metrics.maxRounds).toBe(5);
+
+		store.handleEvent(ev("debate.unpaused", {}));
+		expect(store.getState().command.livePaused).toBe(false);
+	});
+
 	it("clears streaming buffers on new round.started", () => {
 		const store = new TuiStore();
 		store.handleEvent(

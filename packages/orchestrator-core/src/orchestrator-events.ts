@@ -64,6 +64,23 @@ export interface DebateResumedEvent {
 	timestamp: number;
 }
 
+export interface DebatePausedEvent {
+	kind: "debate.paused";
+	timestamp: number;
+}
+
+export interface DebateUnpausedEvent {
+	kind: "debate.unpaused";
+	timestamp: number;
+}
+
+export interface DebateExtendedEvent {
+	kind: "debate.extended";
+	by: number;
+	newMaxRounds: number;
+	timestamp: number;
+}
+
 export interface UserInjectEvent {
 	kind: "user.inject";
 	target: "proposer" | "challenger" | "both" | "judge";
@@ -139,6 +156,9 @@ export type OrchestratorEvent =
 	| JudgeCompletedEvent
 	| DebateCompletedEvent
 	| DebateResumedEvent
+	| DebatePausedEvent
+	| DebateUnpausedEvent
+	| DebateExtendedEvent
 	| UserInjectEvent
 	| ClarificationRequestedEvent
 	| ClarificationProvidedEvent

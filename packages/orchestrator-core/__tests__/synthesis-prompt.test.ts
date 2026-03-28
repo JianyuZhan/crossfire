@@ -1647,6 +1647,7 @@ describe("assembleAdaptiveSynthesisPrompt", () => {
 					convergenceThreshold: 0.7,
 				},
 				phase: "completed",
+				paused: false,
 				currentRound: 1,
 				turns: [
 					{
@@ -1879,6 +1880,7 @@ describe("assembleAdaptiveSynthesisPrompt", () => {
 					convergenceThreshold: 0.7,
 				},
 				phase: "completed",
+				paused: false,
 				currentRound: 0,
 				turns: [],
 				convergence: {
@@ -2075,6 +2077,7 @@ describe("buildInstructions compression note", () => {
 				convergenceThreshold: 0.7,
 			},
 			phase: "completed",
+			paused: false,
 			currentRound: 10,
 			turns,
 			convergence: {
@@ -3728,6 +3731,7 @@ describe("computeReferenceScores", () => {
 				convergenceThreshold: 0.7,
 			},
 			phase: "completed",
+			paused: false,
 			currentRound: 0,
 			turns: [],
 			convergence: {
@@ -3756,6 +3760,7 @@ describe("computeReferenceScores", () => {
 				convergenceThreshold: 0.7,
 			},
 			phase: "completed",
+			paused: false,
 			currentRound: 2,
 			turns: [
 				{
@@ -3813,6 +3818,7 @@ describe("computeReferenceScores", () => {
 				convergenceThreshold: 0.7,
 			},
 			phase: "completed",
+			paused: false,
 			currentRound: 2,
 			turns: [
 				{
@@ -3873,6 +3879,7 @@ describe("computeReferenceScores", () => {
 				convergenceThreshold: 0.7,
 			},
 			phase: "completed",
+			paused: false,
 			currentRound: 4,
 			turns: [
 				{

@@ -76,6 +76,40 @@ function appendOperationalGuidance(prompt: string, guidance?: string): string {
 	return `${prompt}\n\n[ADDITIONAL GUIDANCE]\n${guidance}`;
 }
 
+function createPauseGate(bus: DebateEventBus) {
+	let paused = false;
+	let waiters: Array<() => void> = [];
+
+	const unsubscribe = bus.subscribe((event: AnyEvent) => {
+		if (event.kind === "debate.paused") {
+			paused = true;
+			return;
+		}
+		if (
+			event.kind === "debate.unpaused" ||
+			event.kind === "debate.started" ||
+			event.kind === "debate.resumed" ||
+			event.kind === "debate.completed"
+		) {
+			paused = false;
+			for (const resolve of waiters) resolve();
+			waiters = [];
+		}
+	});
+
+	return {
+		async waitIfPaused(): Promise<void> {
+			if (!paused) return;
+			await new Promise<void>((resolve) => {
+				waiters.push(resolve);
+			});
+		},
+		dispose(): void {
+			unsubscribe();
+		},
+	};
+}
+
 export async function runDebate(
 	config: DebateConfig,
 	adapters: AdapterMap,
@@ -100,6 +134,7 @@ export async function runDebate(
 	const synthesisEnabled = process.env.CROSSFIRE_SYNTHESIZER !== "0";
 	const accumulator = new PlanAccumulator();
 	const accUnsub = accumulator.subscribe(bus);
+	const pauseGate = createPauseGate(bus);
 
 	if (!isResume) {
 		bus.push({
@@ -185,7 +220,7 @@ export async function runDebate(
 		if (judgeTurnCount === 1) {
 			prompt = buildJudgeInitialPrompt({
 				topic: config.topic,
-				maxRounds: config.maxRounds,
+				maxRounds: bus.snapshot().config.maxRounds,
 				roundNumber,
 				proposerText,
 				challengerText,
@@ -194,7 +229,7 @@ export async function runDebate(
 		} else {
 			prompt = buildJudgeIncrementalPrompt({
 				roundNumber,
-				maxRounds: config.maxRounds,
+				maxRounds: bus.snapshot().config.maxRounds,
 				proposerText,
 				challengerText,
 				schemaRefreshMode:
@@ -275,7 +310,13 @@ export async function runDebate(
 	}
 
 	try {
-		for (let round = startRound; round <= config.maxRounds; round++) {
+		for (
+			let round = startRound;
+			round <= bus.snapshot().config.maxRounds;
+			round++
+		) {
+			await pauseGate.waitIfPaused();
+
 			// Proposer turn
 			bus.push({
 				kind: "round.started",
@@ -287,18 +328,22 @@ export async function runDebate(
 			const proposerState = bus.snapshot();
 			let proposerPrompt: string;
 			if (proposerTurnCount === 1) {
+				const currentMaxRounds = bus.snapshot().config.maxRounds;
+				syncRecoveryMaxRounds(adapters, currentMaxRounds);
 				proposerPrompt = buildInitialPrompt({
 					role: "proposer",
 					topic: config.topic,
-					maxRounds: config.maxRounds,
+					maxRounds: currentMaxRounds,
 					systemPrompt: config.proposerSystemPrompt,
 					schemaType: "debate_meta",
 				});
 			} else {
 				const opponentText = getLatestTurnContent(proposerState, "challenger");
+				const currentMaxRounds = proposerState.config.maxRounds;
+				syncRecoveryMaxRounds(adapters, currentMaxRounds);
 				proposerPrompt = buildIncrementalPrompt({
 					roundNumber: round,
-					maxRounds: config.maxRounds,
+					maxRounds: currentMaxRounds,
 					opponentRole: "challenger",
 					opponentText,
 					judgeText: lastJudgeText,
@@ -340,6 +385,8 @@ export async function runDebate(
 				timestamp: Date.now(),
 			});
 
+			await pauseGate.waitIfPaused();
+
 			// Challenger turn
 			bus.push({
 				kind: "round.started",
@@ -352,19 +399,23 @@ export async function runDebate(
 			let challengerPrompt: string;
 			if (challengerTurnCount === 1) {
 				const proposerText = getLatestTurnContent(challengerState, "proposer");
+				const currentMaxRounds = challengerState.config.maxRounds;
+				syncRecoveryMaxRounds(adapters, currentMaxRounds);
 				challengerPrompt = buildInitialPrompt({
 					role: "challenger",
 					topic: config.topic,
-					maxRounds: config.maxRounds,
+					maxRounds: currentMaxRounds,
 					systemPrompt: config.challengerSystemPrompt,
 					schemaType: "debate_meta",
 					operationalPreamble: `Proposer's opening response:\n\n${proposerText}`,
 				});
 			} else {
 				const opponentText = getLatestTurnContent(challengerState, "proposer");
+				const currentMaxRounds = challengerState.config.maxRounds;
+				syncRecoveryMaxRounds(adapters, currentMaxRounds);
 				challengerPrompt = buildIncrementalPrompt({
 					roundNumber: round,
-					maxRounds: config.maxRounds,
+					maxRounds: currentMaxRounds,
 					opponentRole: "proposer",
 					opponentText,
 					judgeText: lastJudgeText,
@@ -435,6 +486,8 @@ export async function runDebate(
 			}
 
 			if (action.type === "trigger-judge" && adapters.judge) {
+				await pauseGate.waitIfPaused();
+				syncRecoveryMaxRounds(adapters, bus.snapshot().config.maxRounds);
 				const verdict = await invokeJudge(`j-${round}`, round);
 				if (handleJudgeVerdict(verdict)) break;
 			}
@@ -472,7 +525,9 @@ export async function runDebate(
 			action.type === "end-debate" && action.reason === "judge-decision";
 		if (adapters.judge && !alreadyJudged) {
 			try {
+				await pauseGate.waitIfPaused();
 				const finalState = bus.snapshot();
+				syncRecoveryMaxRounds(adapters, finalState.config.maxRounds);
 				finalVerdict = await Promise.race([
 					invokeJudge("j-final", finalState.currentRound, "full"),
 					new Promise<undefined>((resolve) =>
@@ -701,6 +756,7 @@ export async function runDebate(
 		});
 		return bus.snapshot();
 	} finally {
+		pauseGate.dispose();
 		accUnsub();
 		for (const unsub of unsubs) unsub();
 	}
@@ -747,6 +803,18 @@ function populateRecoveryContext(
 			maxRounds: config.maxRounds,
 			schemaType: "judge_verdict",
 		};
+	}
+}
+
+function syncRecoveryMaxRounds(adapters: AdapterMap, maxRounds: number): void {
+	if (adapters.proposer.session.recoveryContext?.maxRounds !== undefined) {
+		adapters.proposer.session.recoveryContext.maxRounds = maxRounds;
+	}
+	if (adapters.challenger.session.recoveryContext?.maxRounds !== undefined) {
+		adapters.challenger.session.recoveryContext.maxRounds = maxRounds;
+	}
+	if (adapters.judge?.session.recoveryContext) {
+		adapters.judge.session.recoveryContext.maxRounds = maxRounds;
 	}
 }
 

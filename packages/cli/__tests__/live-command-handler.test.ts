@@ -166,4 +166,55 @@ describe("createLiveCommandHandler", () => {
 		expect(quit).toHaveBeenCalledTimes(1);
 		expect(triggerShutdown).not.toHaveBeenCalled();
 	});
+
+	it("emits pause, resume, and extend control events", () => {
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: createMockAdapter("claude"),
+				session: createSession("claude", "claude-proposer"),
+			},
+			challenger: {
+				adapter: createMockAdapter("codex"),
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+		const bus = { push: vi.fn() } as unknown as DebateEventBus;
+		const store = {
+			getState: () => ({
+				command: { pendingApprovals: [] },
+				debateState: { config: { maxRounds: 5 } },
+			}),
+		} as TuiStore;
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+
+		handler({ type: "pause" });
+		handler({ type: "resume" });
+		handler({ type: "extend", rounds: 2 });
+
+		expect(bus.push).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({
+				kind: "debate.paused",
+			}),
+		);
+		expect(bus.push).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({
+				kind: "debate.unpaused",
+			}),
+		);
+		expect(bus.push).toHaveBeenNthCalledWith(
+			3,
+			expect.objectContaining({
+				kind: "debate.extended",
+				by: 2,
+				newMaxRounds: 7,
+			}),
+		);
+	});
 });

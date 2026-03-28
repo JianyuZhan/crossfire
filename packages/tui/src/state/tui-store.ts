@@ -81,6 +81,7 @@ const DEFAULT_CONFIG = {
 const DEFAULT_DEBATE_STATE: DebateState = {
 	config: DEFAULT_CONFIG,
 	phase: "idle",
+	paused: false,
 	currentRound: 0,
 	turns: [],
 	convergence: {
@@ -130,6 +131,9 @@ export class TuiStore {
 	// Only re-project full state on structural events (not high-frequency deltas)
 	private static readonly STRUCTURAL_KINDS = new Set([
 		"debate.started",
+		"debate.paused",
+		"debate.unpaused",
+		"debate.extended",
 		"round.started",
 		"round.completed",
 		"judge.started",
@@ -521,6 +525,7 @@ export class TuiStore {
 					};
 				};
 				this.state.metrics.maxRounds = e.config.maxRounds;
+				this.state.command.livePaused = false;
 				if ((event as { debateId?: string }).debateId) {
 					this.state.metrics.debateId = (
 						event as { debateId: string }
@@ -730,6 +735,21 @@ export class TuiStore {
 					this.state.command.mode = "normal";
 				break;
 			}
+			case "debate.paused": {
+				this.state.command.livePaused = true;
+				break;
+			}
+			case "debate.unpaused":
+			case "debate.resumed": {
+				this.state.command.livePaused = false;
+				break;
+			}
+			case "debate.extended": {
+				this.state.metrics.maxRounds = (
+					event as { newMaxRounds: number }
+				).newMaxRounds;
+				break;
+			}
 			case "usage.updated": {
 				const e = event as {
 					inputTokens: number;
@@ -855,6 +875,7 @@ export class TuiStore {
 			}
 			case "debate.completed": {
 				// Keep judge panel visible on debate end (user wants to read it)
+				this.state.command.livePaused = false;
 				this.state.summaryGenerating = false;
 				const e = event as {
 					summary?: Record<string, unknown>;

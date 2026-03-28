@@ -92,6 +92,33 @@ export function createLiveCommandHandler({
 			return;
 		}
 
+		if (cmd.type === "pause") {
+			bus.push({
+				kind: "debate.paused",
+				timestamp: Date.now(),
+			});
+			return;
+		}
+
+		if (cmd.type === "resume") {
+			bus.push({
+				kind: "debate.unpaused",
+				timestamp: Date.now(),
+			});
+			return;
+		}
+
+		if (cmd.type === "extend") {
+			const currentMaxRounds = store.getState().debateState.config.maxRounds;
+			bus.push({
+				kind: "debate.extended",
+				by: cmd.rounds,
+				newMaxRounds: currentMaxRounds + cmd.rounds,
+				timestamp: Date.now(),
+			});
+			return;
+		}
+
 		if (cmd.type === "inject") {
 			const targets =
 				cmd.target === "both"

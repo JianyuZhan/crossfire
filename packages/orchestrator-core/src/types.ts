@@ -83,6 +83,7 @@ export interface DebateTurn {
 export interface DebateState {
 	config: DebateConfig;
 	phase: "idle" | "proposer-turn" | "challenger-turn" | "judging" | "completed";
+	paused: boolean;
 	currentRound: number;
 	turns: DebateTurn[];
 	convergence: ConvergenceResult;

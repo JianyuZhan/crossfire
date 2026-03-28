@@ -238,15 +238,13 @@ Configuration:
 | `/inject both <text>`       | 向双方下一轮都注入上下文       | ✅       |
 | `/inject! proposer <text>`  | 高优先级注入（必须处理的指令） | ✅       |
 | `/inject judge <text>`      | 立即触发裁判并附带用户指令     | ✅       |
-| `/pause`                    | 暂停辩论（等当前回合完成）     | 🚧 未实现 |
-| `/resume`                   | 恢复暂停的辩论                 | 🚧 未实现 |
-| `/extend <n>`               | 增加 N 轮最大轮数              | 🚧 未实现 |
-
-> 🚧 **未实现** 表示命令已被 TUI 解析，但尚未接入编排器逻辑。
+| `/pause`                    | 在当前回合结束后暂停辩论       | ✅       |
+| `/resume`                   | 恢复已暂停的实时辩论           | ✅       |
+| `/extend <n>`               | 增加 N 轮最大轮数              | ✅       |
 
 **审批模式**（工具审批请求时自动激活）：`/approve`、`/deny` ✅
 
-`crossfire resume` 现在复用了与 `crossfire start` 相同的实时命令接线，因此在恢复中断辩论时也可以继续使用 `/stop`、审批命令和 inject 命令。
+`crossfire resume` 现在复用了与 `crossfire start` 相同的实时命令接线，因此在恢复中断辩论时也可以继续使用 `/stop`、审批命令、inject 命令，以及 `/pause`、`/resume`、`/extend`。
 
 ## 支持的智能体
 
@@ -376,7 +374,7 @@ packages/
 ## 当前限制
 
 - `crossfire replay` 目前是非交互式的，不暴露实时辩论中的命令解析器
-- 有些 TUI 命令已经能解析，但尚未真正接入编排器行为
+- `/jump turn <turnId>` 已能被 TUI 解析，但目前还没有实时处理逻辑
 - 在多段恢复后的运行中，`replay --from-round` 目前不可靠
 
 ## 扩展 Crossfire

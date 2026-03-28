@@ -13,6 +13,7 @@ export function CommandStatusLine({
 	if (
 		state.mode === "normal" &&
 		state.pendingApprovals.length === 0 &&
+		!state.livePaused &&
 		state.replaySpeed === undefined &&
 		!state.replayPaused
 	) {
@@ -26,6 +27,7 @@ export function CommandStatusLine({
 				{state.mode === "replay" && "REPLAY MODE"}
 				{state.pendingApprovals.length > 0 &&
 					` | PENDING: ${state.pendingApprovals.map((a) => `"${a.title}"`).join(", ")} [/approve or /deny]`}
+				{state.livePaused && " | PAUSED"}
 				{state.replaySpeed !== undefined && ` | Speed: ${state.replaySpeed}x`}
 				{state.replayPaused && " | PAUSED"}
 			</Text>

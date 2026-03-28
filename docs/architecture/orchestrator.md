@@ -27,10 +27,13 @@ Packages:
 
 ### OrchestratorEvent
 
-`OrchestratorEvent` currently has 14 kinds:
+`OrchestratorEvent` currently has 17 kinds:
 
 - `debate.started`
 - `debate.resumed`
+- `debate.paused`
+- `debate.unpaused`
+- `debate.extended`
 - `round.started`
 - `round.completed`
 - `judge.started`
@@ -52,6 +55,7 @@ Notable detail: `judge.completed.verdict` is optional.
 
 - config
 - phase
+- paused
 - current round
 - turns
 - convergence
@@ -140,6 +144,8 @@ Current implementation status is important:
 - `requestIntervention` currently escalates to Judge rather than entering an `await-user` relay loop
 - `/inject judge` is live and triggers a full Judge turn with the user-provided suffix
 - proposer / challenger / both `user.inject` events are consumed through the director guidance queue and appended to the next prompt for the targeted role(s)
+- `/pause` and `/resume` emit replay-safe `debate.paused` / `debate.unpaused` control events; the runner honors them at turn boundaries and before judge invocations
+- `/extend <N>` emits `debate.extended`, and projection updates `config.maxRounds` so replay, resume, and live execution all agree on the new round budget
 
 ## DebateEventBus
 
@@ -171,7 +177,9 @@ High-level flow:
 Important notes:
 
 - it waits for `turn.completed` on the bus
+- it blocks on projected pause state between turns and before judge invocations rather than interrupting an in-flight provider turn
 - it tracks schema refresh cadence for incremental prompts
+- it reads `maxRounds` from projected state during execution, so live `/extend <N>` changes affect subsequent loop bounds and recovery context
 - it consumes stored guidance from the director before the next targeted proposer / challenger prompt, so both degradation guidance and user injects affect turn construction
 - `await-user` exists in the action type surface but is not currently produced by the live runner/director flow
 

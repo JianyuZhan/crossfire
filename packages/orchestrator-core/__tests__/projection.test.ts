@@ -333,9 +333,13 @@ Here is what I think about this topic.
 	});
 
 	it("ignores unknown event kinds", () => {
+		const unknownEvent = {
+			kind: "unknown.event",
+			timestamp: 1001,
+		} as unknown as AnyEvent;
 		const events: AnyEvent[] = [
 			{ kind: "debate.started", config, timestamp: 1000 },
-			{ kind: "unknown.event" as any, timestamp: 1001 },
+			unknownEvent,
 		];
 		expect(() => projectState(events)).not.toThrow();
 	});
@@ -376,6 +380,35 @@ Here is what I think about this topic.
 
 		// State should be identical with or without debate.resumed - it's just a marker
 		expect(stateWithResume).toEqual(stateWithoutResume);
+	});
+
+	it("tracks live pause and unpause state", () => {
+		const events: AnyEvent[] = [
+			{ kind: "debate.started", config, timestamp: 1000 },
+			{ kind: "debate.paused", timestamp: 1001 },
+		];
+		const paused = projectState(events);
+		expect(paused.paused).toBe(true);
+
+		const unpaused = projectState([
+			...events,
+			{ kind: "debate.unpaused", timestamp: 1002 },
+		]);
+		expect(unpaused.paused).toBe(false);
+	});
+
+	it("updates maxRounds when debate.extended is emitted", () => {
+		const events: AnyEvent[] = [
+			{ kind: "debate.started", config, timestamp: 1000 },
+			{
+				kind: "debate.extended",
+				by: 2,
+				newMaxRounds: 12,
+				timestamp: 1001,
+			},
+		];
+		const state = projectState(events);
+		expect(state.config.maxRounds).toBe(12);
 	});
 });
 

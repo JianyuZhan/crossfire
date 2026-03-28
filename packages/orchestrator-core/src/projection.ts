@@ -49,6 +49,7 @@ function wireMetaToDomain(data: DebateMetaInput): DebateMeta {
 export function projectState(events: AnyEvent[]): DebateState {
 	let config: DebateConfig = DEFAULT_CONFIG;
 	let phase: DebateState["phase"] = "idle";
+	let paused = false;
 	let currentRound = 0;
 	const turns: DebateTurn[] = [];
 	let terminationReason: DebateState["terminationReason"];
@@ -59,6 +60,7 @@ export function projectState(events: AnyEvent[]): DebateState {
 		switch (event.kind) {
 			case "debate.started":
 				config = (event as { config: DebateConfig }).config;
+				paused = false;
 				break;
 
 			case "round.started": {
@@ -101,12 +103,28 @@ export function projectState(events: AnyEvent[]): DebateState {
 			case "debate.completed": {
 				const e = event as { reason: DebateState["terminationReason"] };
 				phase = "completed";
+				paused = false;
 				terminationReason = e.reason;
 				break;
 			}
 
 			case "debate.resumed":
-				// No-op: state was already rebuilt from prior events
+				paused = false;
+				break;
+
+			case "debate.paused":
+				paused = true;
+				break;
+
+			case "debate.unpaused":
+				paused = false;
+				break;
+
+			case "debate.extended":
+				config = {
+					...config,
+					maxRounds: (event as { newMaxRounds: number }).newMaxRounds,
+				};
 				break;
 
 			case "user.inject":
@@ -177,6 +195,7 @@ export function projectState(events: AnyEvent[]): DebateState {
 	const state: DebateState = {
 		config,
 		phase,
+		paused,
 		currentRound,
 		turns,
 		convergence: DEFAULT_CONVERGENCE,

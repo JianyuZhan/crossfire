@@ -124,6 +124,7 @@ export interface PendingApproval {
 export interface CommandState {
 	mode: "normal" | "approval" | "replay";
 	pendingApprovals: PendingApproval[];
+	livePaused?: boolean;
 	replaySpeed?: number;
 	replayPaused?: boolean;
 }

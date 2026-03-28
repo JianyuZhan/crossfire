@@ -381,6 +381,7 @@ describe("runDebate", () => {
 				convergenceThreshold: 0.3,
 			},
 			phase: "completed",
+			paused: false,
 			currentRound: 1,
 			turns: [
 				{
