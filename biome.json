@@ -1,7 +1,14 @@
 {
 	"$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
 	"files": {
-		"ignore": [".claude/**", ".turbo/**", "run_output/**", "dist/**"]
+		"ignore": [
+			".claude/**",
+			".turbo/**",
+			"run_output/**",
+			"dist/**",
+			"node_modules/**",
+			".pnpm-store/**"
+		]
 	},
 	"organizeImports": { "enabled": true },
 	"linter": {
@@ -11,6 +18,9 @@
 			"suspicious": {
 				"noExplicitAny": "warn",
 				"noArrayIndexKey": "warn"
+			},
+			"a11y": {
+				"useValidAriaRole": "off"
 			},
 			"correctness": {
 				"useYield": "warn"

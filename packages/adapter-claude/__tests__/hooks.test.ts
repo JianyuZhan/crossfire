@@ -10,8 +10,8 @@ const CTX = {
 const DUMMY_SIGNAL = new AbortController().signal;
 
 /** Helper: invoke the first hook callback in a matcher */
-// biome-ignore lint: test helper with loose types
 async function callHook(
+	// biome-ignore lint/suspicious/noExplicitAny: test helper with loose types
 	matcher: { hooks: Array<any> },
 	input: Record<string, unknown>,
 	toolUseID?: string,

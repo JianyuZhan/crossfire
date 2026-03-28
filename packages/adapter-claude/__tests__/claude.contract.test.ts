@@ -7,11 +7,11 @@ import {
 import { ClaudeAdapter } from "../src/claude-adapter.js";
 import type { QueryFn, SdkMessage } from "../src/types.js";
 
-// biome-ignore lint: loose type for test mock hooks
 type MockHooks = Record<
 	string,
 	Array<{
 		hooks: Array<
+			// biome-ignore lint/suspicious/noExplicitAny: loose type for test mock hooks
 			(input: any, toolUseID: string | undefined, opts: any) => Promise<any>
 		>;
 	}>
