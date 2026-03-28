@@ -4,11 +4,20 @@ import type {
 	SessionHandle,
 } from "@crossfire/adapter-core";
 
+export interface SynthesisDiagnostics {
+	sessionCreated: boolean;
+	firstEventMs: number | undefined;
+	toolCallCount: number;
+	eventKindCounts: Record<string, number>;
+	capturedFinalPreview: string | undefined;
+}
+
 export interface SynthesisRunResult {
 	markdown: string | undefined;
 	durationMs: number;
 	rawDeltaLength: number;
 	error?: string;
+	diagnostics?: SynthesisDiagnostics;
 }
 
 /**
@@ -27,16 +36,26 @@ export async function runFinalSynthesis(
 	let session: SessionHandle | undefined;
 	let eventUnsub: (() => void) | undefined;
 
+	// Hoisted so catch block can access intermediate data
+	let longestFinal: string | undefined;
+	let deltaBuffer = "";
+	const diagnostics: SynthesisDiagnostics = {
+		sessionCreated: false,
+		firstEventMs: undefined,
+		toolCallCount: 0,
+		eventKindCounts: {},
+		capturedFinalPreview: undefined,
+	};
+
 	try {
 		session = await adapter.startSession({
 			profile: "",
 			workingDirectory: ".",
 		});
+		diagnostics.sessionCreated = true;
 		const sessionId = session.adapterSessionId;
 		const turnId = "synthesis-final";
 
-		let longestFinal: string | undefined;
-		let deltaBuffer = "";
 		let resolveCompletion: () => void;
 
 		const completionPromise = new Promise<void>((resolve) => {
@@ -49,6 +68,16 @@ export async function runFinalSynthesis(
 			if (event.adapterSessionId !== sessionId) return;
 			if (event.turnId !== turnId) return;
 
+			// Track diagnostics
+			if (diagnostics.firstEventMs === undefined) {
+				diagnostics.firstEventMs = Date.now() - startTime;
+			}
+			diagnostics.eventKindCounts[event.kind] =
+				(diagnostics.eventKindCounts[event.kind] ?? 0) + 1;
+
+			if (event.kind === "tool.call") {
+				diagnostics.toolCallCount++;
+			}
 			if (event.kind === "message.delta") {
 				deltaBuffer += event.text;
 			}
@@ -82,18 +111,25 @@ export async function runFinalSynthesis(
 			if (timeoutId) clearTimeout(timeoutId);
 		}
 
+		diagnostics.capturedFinalPreview = longestFinal?.slice(0, 200);
+
 		return {
 			markdown:
 				longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined),
 			durationMs: Date.now() - startTime,
 			rawDeltaLength: deltaBuffer.length,
+			diagnostics,
 		};
 	} catch (err) {
+		diagnostics.capturedFinalPreview = longestFinal?.slice(0, 200);
+
 		return {
-			markdown: undefined,
+			markdown:
+				longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined),
 			durationMs: Date.now() - startTime,
-			rawDeltaLength: 0,
+			rawDeltaLength: deltaBuffer.length,
 			error: err instanceof Error ? err.message : String(err),
+			diagnostics,
 		};
 	} finally {
 		if (eventUnsub) eventUnsub();

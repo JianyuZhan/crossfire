@@ -15,6 +15,7 @@ import {
 	assembleAdaptiveSynthesisPrompt,
 	buildCompressedRound,
 	buildFullTextSynthesisPrompt,
+	buildInstructions,
 	buildLayer1,
 	buildPhaseBlocks,
 	buildQuoteSnippets,
@@ -2093,6 +2094,14 @@ describe("buildInstructions compression note", () => {
 		// (we can't control tier from outside, but with this data it should be non-short)
 		// At minimum it should not throw
 		expect(prompt.length).toBeGreaterThan(0);
+	});
+});
+
+describe("buildInstructions no-exploration constraint", () => {
+	it("buildInstructions includes constraint against code exploration", () => {
+		const instructions = buildInstructions("short");
+		expect(instructions).toContain("DO NOT");
+		expect(instructions).toContain("tools");
 	});
 });
 

@@ -693,6 +693,14 @@ Your goal is to produce a deeply actionable, well-organized report that captures
 			"\n\n**Note:** Earlier rounds have been compressed to save context space. The structured plan above captures the key points; the most recent rounds are shown in full.";
 	}
 
+	instructions += `
+
+## Important Constraints
+
+- **DO NOT explore the codebase or use tools.** All information you need is provided in the transcript and structured plan above.
+- Synthesize ONLY from the debate content provided. Do not run commands, read files, or start subagents.
+- If information seems incomplete, note the gap in your synthesis rather than investigating it yourself.`;
+
 	instructions +=
 		"\n\nNow, here is the debate transcript and judge feedback:\n";
 

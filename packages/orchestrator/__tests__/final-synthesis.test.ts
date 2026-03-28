@@ -199,6 +199,138 @@ describe("runFinalSynthesis", () => {
 			expect(result.durationMs).toBeGreaterThanOrEqual(50);
 		});
 
+		it("preserves captured deltas and finals on timeout", async () => {
+			let onEventCb: ((e: Record<string, unknown>) => void) | undefined;
+			const mockAdapter = {
+				id: "mock",
+				startSession: vi.fn().mockResolvedValue({
+					adapterSessionId: "synth-session-1",
+					providerSessionId: undefined,
+					adapterId: "mock",
+				}),
+				sendTurn: vi.fn().mockImplementation(async () => {
+					if (onEventCb) {
+						const cb = onEventCb;
+						queueMicrotask(() => {
+							cb({
+								kind: "message.delta",
+								turnId: "synthesis-final",
+								text: "I'll start by exploring...",
+								timestamp: Date.now(),
+								adapterId: "mock",
+								adapterSessionId: "synth-session-1",
+							});
+							cb({
+								kind: "message.final",
+								turnId: "synthesis-final",
+								text: "I'll start by exploring the codebase",
+								role: "assistant",
+								timestamp: Date.now(),
+								adapterId: "mock",
+								adapterSessionId: "synth-session-1",
+							});
+							// No turn.completed → will timeout
+						});
+					}
+				}),
+				close: vi.fn().mockResolvedValue(undefined),
+				onEvent: vi
+					.fn()
+					.mockImplementation((cb: (e: Record<string, unknown>) => void) => {
+						onEventCb = cb;
+						return () => {
+							onEventCb = undefined;
+						};
+					}),
+			};
+
+			const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+			const result = await runFinalSynthesis(
+				mockAdapter as any,
+				"test prompt",
+				100,
+			);
+
+			expect(result.error).toBe("synthesis timeout");
+			// Key assertion: intermediate data is NOT discarded
+			expect(result.rawDeltaLength).toBeGreaterThan(0);
+			expect(result.markdown).toContain("exploring");
+		});
+
+		it("includes diagnostics in result", async () => {
+			let onEventCb: ((e: Record<string, unknown>) => void) | undefined;
+			const mockAdapter = {
+				id: "mock",
+				startSession: vi.fn().mockResolvedValue({
+					adapterSessionId: "synth-session-1",
+					providerSessionId: undefined,
+					adapterId: "mock",
+				}),
+				sendTurn: vi.fn().mockImplementation(async () => {
+					if (onEventCb) {
+						const cb = onEventCb;
+						queueMicrotask(() => {
+							cb({
+								kind: "message.delta",
+								turnId: "synthesis-final",
+								text: "Hello",
+								timestamp: Date.now(),
+								adapterId: "mock",
+								adapterSessionId: "synth-session-1",
+							});
+							cb({
+								kind: "tool.call",
+								turnId: "synthesis-final",
+								toolName: "Glob",
+								timestamp: Date.now(),
+								adapterId: "mock",
+								adapterSessionId: "synth-session-1",
+							});
+							cb({
+								kind: "message.final",
+								turnId: "synthesis-final",
+								text: "Hello world",
+								role: "assistant",
+								timestamp: Date.now(),
+								adapterId: "mock",
+								adapterSessionId: "synth-session-1",
+							});
+							cb({
+								kind: "turn.completed",
+								turnId: "synthesis-final",
+								status: "completed",
+								timestamp: Date.now(),
+								adapterId: "mock",
+								adapterSessionId: "synth-session-1",
+							});
+						});
+					}
+				}),
+				close: vi.fn().mockResolvedValue(undefined),
+				onEvent: vi
+					.fn()
+					.mockImplementation((cb: (e: Record<string, unknown>) => void) => {
+						onEventCb = cb;
+						return () => {
+							onEventCb = undefined;
+						};
+					}),
+			};
+
+			const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+			const result = await runFinalSynthesis(
+				mockAdapter as any,
+				"test prompt",
+				10_000,
+			);
+
+			expect(result.diagnostics).toBeDefined();
+			expect(result.diagnostics!.sessionCreated).toBe(true);
+			expect(result.diagnostics!.toolCallCount).toBe(1);
+			expect(result.diagnostics!.eventKindCounts["message.delta"]).toBe(1);
+			expect(result.diagnostics!.eventKindCounts["message.final"]).toBe(1);
+		});
+
 		it("returns error info on adapter failure", async () => {
 			const mockAdapter = createMockAdapter([]);
 			mockAdapter.startSession = vi

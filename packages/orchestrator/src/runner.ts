@@ -713,6 +713,7 @@ export async function runDebate(
 									rawDeltaLength: synthRunResult.rawDeltaLength,
 									hadMarkdown: !!synthRunResult.markdown,
 									error: synthRunResult.error,
+									diagnostics: synthRunResult.diagnostics,
 								}
 							: undefined,
 					};
