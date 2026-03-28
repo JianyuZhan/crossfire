@@ -638,7 +638,12 @@ export async function runDebate(
 							});
 						}
 
-						markdownResult = synthRunResult.markdown;
+						// Only treat as successful LLM output if no error occurred.
+						// A timed-out synthesis may have partial text useful for diagnostics,
+						// but must not be classified as llm-full.
+						if (!synthRunResult.error) {
+							markdownResult = synthRunResult.markdown;
+						}
 					} catch (err) {
 						bus.push({
 							kind: "synthesis.error",
@@ -678,9 +683,9 @@ export async function runDebate(
 					// Fallback: improved local template
 					const report = draftToAuditReport(draft, summary);
 					const totalItems =
-						draft.consensus.length +
-						draft.unresolved.length +
-						draft.argumentTrajectories.length;
+						report.consensusItems.length +
+						report.unresolvedIssues.length +
+						report.argumentEvolution.length;
 					synthesisQuality =
 						totalItems >= 3 ? "local-structured" : "local-degraded";
 					const fallbackMeta: ReportMeta = {
