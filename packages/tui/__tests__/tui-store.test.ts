@@ -157,6 +157,10 @@ describe("TuiStore", () => {
 				adapterSessionId: "claude-session-1",
 				approvalType: "tool",
 				title: "Allow Bash?",
+				payload: {
+					tool_name: "Bash",
+					tool_input: { command: "ls -la /tmp/somewhere" },
+				},
 				turnId: "p-1",
 			}),
 		);
@@ -166,6 +170,10 @@ describe("TuiStore", () => {
 		expect(s.command.pendingApprovals[0].title).toBe("Allow Bash?");
 		expect(s.command.pendingApprovals[0].adapterSessionId).toBe(
 			"claude-session-1",
+		);
+		expect(s.command.pendingApprovals[0].detail).toContain("Tool: Bash");
+		expect(s.command.pendingApprovals[0].detail).toContain(
+			"ls -la /tmp/somewhere",
 		);
 	});
 

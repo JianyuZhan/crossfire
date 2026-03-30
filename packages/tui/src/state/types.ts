@@ -130,6 +130,7 @@ export interface PendingApproval {
 	adapterSessionId: string;
 	approvalType: string;
 	title: string;
+	detail?: string;
 	suggestion?: "allow" | "deny";
 }
 

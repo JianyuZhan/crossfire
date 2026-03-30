@@ -73,6 +73,66 @@ function defaultCommand(): CommandState {
 	return { mode: "normal", pendingApprovals: [] };
 }
 
+function truncateSummary(text: string, max = 160): string {
+	const compact = text.replace(/\s+/g, " ").trim();
+	if (compact.length <= max) return compact;
+	return `${compact.slice(0, max - 1)}…`;
+}
+
+function summarizeValue(value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value === "string") return truncateSummary(value);
+	try {
+		return truncateSummary(JSON.stringify(value));
+	} catch {
+		return undefined;
+	}
+}
+
+function summarizeApprovalDetail(event: {
+	approvalType: string;
+	title: string;
+	payload?: unknown;
+}): string | undefined {
+	const payload =
+		event.payload && typeof event.payload === "object"
+			? (event.payload as Record<string, unknown>)
+			: undefined;
+	if (!payload) return undefined;
+
+	switch (event.approvalType) {
+		case "tool": {
+			const toolName = payload.tool_name ?? payload.name;
+			const toolInput =
+				payload.tool_input ?? payload.input ?? payload.updatedInput;
+			if (typeof toolName === "string") {
+				const inputSummary = summarizeValue(toolInput);
+				return inputSummary
+					? `Tool: ${toolName} ${inputSummary}`
+					: `Tool: ${toolName}`;
+			}
+			break;
+		}
+		case "command":
+			if (typeof payload.command === "string") {
+				return `Command: ${truncateSummary(payload.command)}`;
+			}
+			break;
+		case "file-change":
+			if (typeof payload.path === "string") {
+				return `File change: ${truncateSummary(payload.path)}`;
+			}
+			break;
+		case "user-input":
+			if (typeof payload.prompt === "string") {
+				return `Prompt: ${truncateSummary(payload.prompt)}`;
+			}
+			break;
+	}
+
+	return summarizeValue(payload) ?? truncateSummary(event.title);
+}
+
 const DEFAULT_CONFIG = {
 	topic: "",
 	maxRounds: 10,
@@ -727,6 +787,7 @@ export class TuiStore {
 					adapterSessionId: string;
 					approvalType: string;
 					title: string;
+					payload?: unknown;
 					suggestion?: "allow" | "deny";
 				};
 				this.state.command.pendingApprovals.push({
@@ -735,6 +796,7 @@ export class TuiStore {
 					adapterSessionId: e.adapterSessionId,
 					approvalType: e.approvalType,
 					title: e.title,
+					detail: summarizeApprovalDetail(e),
 					suggestion: e.suggestion,
 				});
 				this.state.command.mode = "approval";

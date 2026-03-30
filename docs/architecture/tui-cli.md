@@ -44,6 +44,7 @@ Important implementation notes:
 - thinking is no longer a purely transient status-only string; the latest retained thinking summary is kept visible while tools/messages stream and can be copied into completed round snapshots
 - `plan.updated` and `subagent.*` are projected into live panel state and completed snapshots rather than being dropped on the floor
 - visible assistant text is stripped of internal `debate_meta` / `judge_verdict` JSON blocks before rendering
+- approval requests retain a short detail summary derived from provider payloads so the operator can see what is waiting before approving it
 
 ## Render Pipeline
 
@@ -67,6 +68,8 @@ Current block-level rendering now includes:
 - retained thinking summaries, including `reasoning-summary` vs `raw-thinking` labeling
 - plan steps from `plan.updated`
 - subagent lifecycle entries from `subagent.started` / `subagent.completed`
+- wrapped tool-call lines instead of single-line truncation
+- multi-line approval cards in the fixed command area, with per-request approve / deny hints
 
 ## Command Parsing and Current Wiring
 
@@ -110,7 +113,7 @@ Important wiring nuance:
 
 - `crossfire start` and `crossfire resume` now share the same live command handler, so stop / interrupt / approval / inject / pause / resume / extend behavior stays aligned across fresh and resumed runs
 - `/interrupt` is routed as a control event to the runner, which attempts provider-native `adapter.interrupt(turnId)` only for the currently active turn; unsupported adapters surface a warning instead
-- the TUI command status line reflects projected live pause state so operators can tell when execution is intentionally blocked between turns
+- the TUI command status area reflects projected live pause state and expands pending approvals into a taller fixed region so commands stay visible while operator action is required
 - `crossfire replay` is non-interactive and only exposes CLI flags such as `--speed` and `--from-round`; it does not surface the command parser
 
 ## Persistence and Replay

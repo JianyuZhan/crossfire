@@ -68,22 +68,26 @@ export function mapCodexNotification(
 
 	switch (method) {
 		case "item/agentMessage/delta": {
+			const text = String(params.text ?? "");
+			if (text.length === 0) return [];
 			return [
 				{
 					...base,
 					kind: "message.delta",
-					text: String(params.text ?? ""),
+					text,
 					role: "assistant",
 				} satisfies NormalizedEvent,
 			];
 		}
 
 		case "item/reasoning/summaryTextDelta": {
+			const text = String(params.text ?? "");
+			if (text.length === 0) return [];
 			return [
 				{
 					...base,
 					kind: "thinking.delta",
-					text: String(params.text ?? ""),
+					text,
 					thinkingType: "reasoning-summary",
 				} satisfies NormalizedEvent,
 			];
@@ -115,17 +119,6 @@ export function mapCodexNotification(
 						toolUseId: id,
 						toolName: "file_edit",
 						input: params,
-					} satisfies NormalizedEvent,
-				];
-			}
-
-			if (type === "reasoning") {
-				return [
-					{
-						...base,
-						kind: "thinking.delta",
-						text: "",
-						thinkingType: "reasoning-summary",
 					} satisfies NormalizedEvent,
 				];
 			}

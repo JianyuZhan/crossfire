@@ -25,4 +25,7 @@ export { JudgePanel } from "./components/judge-panel.js";
 export { MetricsBar } from "./components/metrics-bar.js";
 export type { ParsedCommand } from "./components/command-input.js";
 export { CommandInput, parseCommand } from "./components/command-input.js";
-export { CommandStatusLine } from "./components/command-status-line.js";
+export {
+	CommandStatusLine,
+	commandStatusLineHeight,
+} from "./components/command-status-line.js";

@@ -5,7 +5,10 @@ import {
 	CommandInput,
 	type ParsedCommand,
 } from "./components/command-input.js";
-import { CommandStatusLine } from "./components/command-status-line.js";
+import {
+	CommandStatusLine,
+	commandStatusLineHeight,
+} from "./components/command-status-line.js";
 import { HeaderBar, headerBarHeight } from "./components/header-bar.js";
 import { MetricsBar, metricsBarHeight } from "./components/metrics-bar.js";
 import { ScrollableContent } from "./components/scrollable-content.js";
@@ -24,17 +27,11 @@ const PAGE_DOWN = "\x1b[6~";
 const HOME_SEQS = ["\x1b[H", "\x1b[1~"];
 const END_SEQS = ["\x1b[F", "\x1b[4~"];
 
-function computeFixedAreaHeight(state: TuiState): number {
+function computeFixedAreaHeight(state: TuiState, width: number): number {
 	let h = headerBarHeight(); // header with border (constant height)
 	h += metricsBarHeight() + 2; // MetricsBar content + border
 	h += 1; // CommandInput
-	// CommandStatusLine only shows in approval/replay mode
-	if (
-		state.command.mode !== "normal" ||
-		state.command.pendingApprovals.length > 0
-	) {
-		h += 1;
-	}
+	h += commandStatusLineHeight(state.command, width);
 	return h;
 }
 
@@ -62,7 +59,7 @@ export function App({
 		const stdout = process.stdout;
 		const onResize = () => {
 			store.setViewportDimensions(
-				stdout.rows - computeFixedAreaHeight(store.getState()),
+				stdout.rows - computeFixedAreaHeight(store.getState(), stdout.columns),
 				stdout.columns,
 			);
 		};
@@ -74,7 +71,10 @@ export function App({
 	}, [store]);
 
 	// Resize effect B: re-measure when fixed-area-affecting state changes
-	const fixedAreaHeight = computeFixedAreaHeight(snapshot.state);
+	const fixedAreaHeight = computeFixedAreaHeight(
+		snapshot.state,
+		process.stdout.columns,
+	);
 	useEffect(() => {
 		const stdout = process.stdout;
 		store.setViewportDimensions(stdout.rows - fixedAreaHeight, stdout.columns);
@@ -144,7 +144,7 @@ export function App({
 			/>
 			<ScrollableContent lines={visibleLines} viewport={viewport} />
 			<MetricsBar state={state.metrics} viewport={viewport} />
-			<CommandStatusLine state={state.command} />
+			<CommandStatusLine state={state.command} width={viewport.contentWidth} />
 			<CommandInput state={state.command} onCommand={handleCommand} />
 		</Box>
 	);

@@ -1,14 +1,80 @@
 import { Box, Text } from "ink";
 import type React from "react";
+import stringWidth from "string-width";
 import type { CommandState } from "../state/types.js";
 
 interface CommandStatusLineProps {
 	state: CommandState;
+	width?: number;
 }
 
-export function CommandStatusLine({
-	state,
-}: CommandStatusLineProps): React.ReactElement | null {
+const MAX_VISIBLE_APPROVALS = 3;
+
+function wrapPlainText(text: string, width: number): string[] {
+	if (!text) return [""];
+	const maxWidth = Math.max(12, width);
+	const words = text.split(/\s+/);
+	const lines: string[] = [];
+	let current = "";
+
+	for (const word of words) {
+		const candidate = current ? `${current} ${word}` : word;
+		if (stringWidth(candidate) <= maxWidth) {
+			current = candidate;
+			continue;
+		}
+		if (current) lines.push(current);
+		if (stringWidth(word) <= maxWidth) {
+			current = word;
+			continue;
+		}
+		let chunk = "";
+		for (const ch of word) {
+			const next = chunk + ch;
+			if (stringWidth(next) > maxWidth && chunk) {
+				lines.push(chunk);
+				chunk = ch;
+			} else {
+				chunk = next;
+			}
+		}
+		current = chunk;
+	}
+
+	if (current) lines.push(current);
+	return lines.length > 0 ? lines : [""];
+}
+
+function buildApprovalLines(state: CommandState, width: number): string[] {
+	const contentWidth = Math.max(24, width - 2);
+	const lines = [
+		`APPROVAL REQUIRED (${state.pendingApprovals.length} pending)`,
+	];
+	const visible = state.pendingApprovals.slice(0, MAX_VISIBLE_APPROVALS);
+
+	for (let i = 0; i < visible.length; i++) {
+		const approval = visible[i];
+		lines.push(
+			`${i + 1}. ${approval.adapterId} ${approval.approvalType.toUpperCase()} ${approval.suggestion === "allow" ? "[suggest allow]" : approval.suggestion === "deny" ? "[suggest deny]" : ""}`.trim(),
+		);
+		for (const line of wrapPlainText(
+			approval.detail ?? approval.title,
+			contentWidth - 2,
+		)) {
+			lines.push(`  ${line}`);
+		}
+		lines.push(
+			`  Approve: /approve ${approval.requestId}    Reject: /deny ${approval.requestId}`,
+		);
+	}
+
+	const hidden = state.pendingApprovals.length - visible.length;
+	if (hidden > 0) lines.push(`...and ${hidden} more pending approvals`);
+
+	return lines;
+}
+
+function buildStatusLines(state: CommandState, width: number): string[] {
 	// Hide in normal mode with nothing special to show
 	if (
 		state.mode === "normal" &&
@@ -17,20 +83,68 @@ export function CommandStatusLine({
 		state.replaySpeed === undefined &&
 		!state.replayPaused
 	) {
-		return null;
+		return [];
 	}
 
+	if (state.pendingApprovals.length > 0) {
+		return buildApprovalLines(state, width);
+	}
+
+	const parts: string[] = [];
+	if (state.mode === "approval") parts.push("APPROVAL MODE");
+	if (state.mode === "replay") parts.push("REPLAY MODE");
+	if (state.livePaused) parts.push("PAUSED");
+	if (state.replaySpeed !== undefined)
+		parts.push(`Speed: ${state.replaySpeed}x`);
+	if (state.replayPaused) parts.push("PAUSED");
+	return [parts.join(" | ")];
+}
+
+export function commandStatusLineHeight(
+	state: CommandState,
+	width: number,
+): number {
+	return buildStatusLines(state, width).length;
+}
+
+export function CommandStatusLine({
+	state,
+	width,
+}: CommandStatusLineProps): React.ReactElement | null {
+	const lines = buildStatusLines(state, width ?? process.stdout.columns ?? 80);
+	if (lines.length === 0) return null;
+
 	return (
-		<Box paddingX={1}>
-			<Text dimColor>
-				{state.mode === "approval" && "APPROVAL MODE"}
-				{state.mode === "replay" && "REPLAY MODE"}
-				{state.pendingApprovals.length > 0 &&
-					` | PENDING: ${state.pendingApprovals.map((a) => `"${a.title}"`).join(", ")} [/approve or /deny]`}
-				{state.livePaused && " | PAUSED"}
-				{state.replaySpeed !== undefined && ` | Speed: ${state.replaySpeed}x`}
-				{state.replayPaused && " | PAUSED"}
-			</Text>
+		<Box paddingX={1} flexDirection="column">
+			{lines.map((line, index) => {
+				const isApprovalHeader =
+					state.pendingApprovals.length > 0 && index === 0;
+				const isApprovalEntry =
+					state.pendingApprovals.length > 0 &&
+					index > 0 &&
+					!/^\s/.test(line) &&
+					!line.startsWith("...");
+				const isActionLine = /^\s+Approve: /.test(line);
+				return (
+					<Text
+						key={`${index}-${line}`}
+						backgroundColor={isApprovalHeader ? "yellow" : undefined}
+						color={
+							isApprovalHeader
+								? "black"
+								: isActionLine
+									? "green"
+									: isApprovalEntry
+										? "cyan"
+										: undefined
+						}
+						bold={isApprovalHeader || isApprovalEntry}
+						dimColor={!isApprovalHeader && !isApprovalEntry && !isActionLine}
+					>
+						{line}
+					</Text>
+				);
+			})}
 		</Box>
 	);
 }

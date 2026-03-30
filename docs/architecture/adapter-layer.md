@@ -216,6 +216,7 @@ interface StartSessionInput {
 - approval requests are normalized as `command`, `file-change`, or `user-input`
 - `debate_meta` and `judge_verdict` are invoked through shell commands; successful command output is parsed back into synthetic `tool.call` events so downstream projection can read structured metadata
 - Codex emits `thinking.delta` as reasoning summaries, not raw thinking
+- empty Codex reasoning and assistant delta notifications are ignored during normalization so the TUI does not churn on blank streaming frames
 - in current observed behavior, Codex often delays visible `message.delta` output until late in the turn and then emits many deltas in a short burst; this still satisfies the streaming contract, but can feel less continuously streamed than Claude
 - meta-tool instructions are appended only on the first turn of a session; local metrics account for this first-turn adapter overhead
 - `thread/tokenUsage/updated` is normalized as `usage.updated` with `semantics: "cumulative_thread_total"`

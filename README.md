@@ -44,7 +44,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 - **Action-plan first** — The primary output is `action-plan.html` / `action-plan.md`, not just a debate transcript
 - **Multi-provider** — Mix and match Claude (Agent SDK), Codex (JSON-RPC), and Gemini (subprocess) in any role
-- **Real-time TUI** — Split-panel terminal UI with live streaming, retained thinking summaries, plan/subagent traces, tool-call traces, and convergence metrics
+- **Real-time TUI** — Split-panel terminal UI with live streaming, retained thinking summaries, wrapped tool-call traces, highlighted approval cards, and convergence metrics
 - **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates and replay completed ones from the same source of truth
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
@@ -61,7 +61,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 ## What You Get
 
-- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, retained thinking summaries, plan/subagent activity, judge feedback, and convergence tracking
+- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, retained thinking summaries, wrapped tool details, approval prompts, judge feedback, and convergence tracking
 - **Action plan outputs** — Final report in Markdown and HTML for sharing, editing, or automation
 - **Full transcript** — Human-readable transcript in Markdown and HTML
 - **Replayable audit trail** — Event-sourced JSONL logs plus `index.json` metadata for replay, resume, and status inspection
@@ -138,9 +138,9 @@ In the example above, output lands in `run_output/microservices/` because `--out
 The terminal UI is a full-screen Ink (React for CLI) application with four stacked regions:
 
 - **Header bar** — Centered branding, debate ID, round/phase, proposer & challenger agent info, and topic
-- **Scrollable content** — Round-by-round display of agent messages, thinking traces, and tool calls. Scroll with arrow keys, `Ctrl+U`/`Ctrl+D`, or `Home`/`End`
+- **Scrollable content** — Round-by-round display of agent messages, thinking traces, and wrapped tool calls so long commands and inputs stay readable. Scroll with arrow keys, `Ctrl+U`/`Ctrl+D`, or `Home`/`End`
 - **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED). Usage accounting is provider-aware, so some providers are normalized from cumulative usage before display
-- **Command input** — Context-aware live prompt (`>`, `approval>`) for runtime commands
+- **Command/approval area** — Context-aware live prompt (`>`, `approval>`) plus expanded approval cards that show the pending tool/command and explicit `/approve <id>` / `/deny <id>` actions
 
 Use `--headless` to skip the TUI. Events and synthesis outputs are still persisted for later inspection.
 
@@ -243,7 +243,8 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 | `/resume`                   | Resume a paused live debate                      | ✅       |
 | `/extend <n>`               | Increase max rounds by N                         | ✅       |
 
-**Approval mode** (auto-activates on tool approval requests): `/approve`, `/deny` ✅
+**Approval mode** (auto-activates on approval requests): `/approve`, `/deny` ✅  
+The TUI expands pending approvals into a dedicated highlighted block with the provider, approval type, request summary, and per-request approve/reject commands.
 
 `crossfire resume` now reuses the same live command wiring as `crossfire start`, so `/stop`, `/interrupt`, approval commands, inject commands, `/pause`, `/resume`, and `/extend` remain available while resuming an interrupted debate.
 

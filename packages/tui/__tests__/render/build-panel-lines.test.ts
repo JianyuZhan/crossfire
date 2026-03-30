@@ -27,19 +27,26 @@ describe("buildPanelLines", () => {
 		expect(lines).toHaveLength(4);
 	});
 
-	it("renders tool-call as single line", () => {
+	it("wraps long tool-call lines instead of truncating them", () => {
 		const blocks: RenderBlock[] = [
 			{ kind: "agent-header", role: "challenger", status: "tool" },
 			{
 				kind: "tool-call",
-				toolName: "debate_meta",
-				status: "success",
-				summary: "scores",
+				toolName: "WebFetch",
+				status: "running",
+				summary:
+					'{"url":"https://example.com/really/long/path","prompt":"Explain the detailed architecture and edge cases"}',
 			},
 		];
-		const lines = buildPanelLines(blocks, 40);
-		// 2 (header) + 1 (tool) = 3
-		expect(lines).toHaveLength(3);
+		const lines = buildPanelLines(blocks, 36);
+		expect(lines.length).toBeGreaterThan(3);
+		const text = lines
+			.slice(2)
+			.flatMap((line) => line.segments.map((segment) => segment.text))
+			.join("\n");
+		expect(text).toContain("WebFetch");
+		expect(text).toContain("https://example.com/real");
+		expect(text).toContain('ly/long/path","prompt":"Explain');
 	});
 
 	it("limits error to max 3 lines", () => {

@@ -289,9 +289,10 @@ export function buildPanelLines(
 						: "";
 				const text = `${prefix} ${block.toolName}${summary}${elapsed}`;
 				result.push(
-					screenLine([
-						{ text: truncate(text, panelWidth), style: { dim: true } },
-					]),
+					...wrapText(text, panelWidth, {
+						continuationIndent: 3,
+						style: { dim: true },
+					}),
 				);
 				break;
 			}
