@@ -84,6 +84,186 @@ describe("createLiveCommandHandler", () => {
 		expect(challengerAdapter.approve).not.toHaveBeenCalled();
 	});
 
+	it("supports approving all pending requests in one command", () => {
+		const proposerAdapter = createMockAdapter("claude");
+		const challengerAdapter = createMockAdapter("codex");
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposerAdapter,
+				session: createSession("claude", "claude-proposer"),
+			},
+			challenger: {
+				adapter: challengerAdapter,
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+
+		const store = {
+			getState: () => ({
+				command: {
+					pendingApprovals: [
+						{
+							requestId: "ar-1",
+							adapterId: "claude",
+							adapterSessionId: "claude-proposer",
+							approvalType: "tool",
+							title: "Approval 1",
+						},
+						{
+							requestId: "ar-2",
+							adapterId: "codex",
+							adapterSessionId: "codex-challenger",
+							approvalType: "command",
+							title: "Approval 2",
+						},
+					],
+				},
+			}),
+		} as TuiStore;
+
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus: { push: vi.fn() } as unknown as DebateEventBus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+
+		handler({ type: "approve", selector: { kind: "all" } });
+
+		expect(proposerAdapter.approve).toHaveBeenCalledWith({
+			requestId: "ar-1",
+			decision: "allow",
+		});
+		expect(challengerAdapter.approve).toHaveBeenCalledWith({
+			requestId: "ar-2",
+			decision: "allow",
+		});
+	});
+
+	it("supports approval by visible index", () => {
+		const proposerAdapter = createMockAdapter("claude");
+		const challengerAdapter = createMockAdapter("codex");
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposerAdapter,
+				session: createSession("claude", "claude-proposer"),
+			},
+			challenger: {
+				adapter: challengerAdapter,
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+
+		const store = {
+			getState: () => ({
+				command: {
+					pendingApprovals: [
+						{
+							requestId: "ar-1",
+							adapterId: "claude",
+							adapterSessionId: "claude-proposer",
+							approvalType: "tool",
+							title: "Approval 1",
+						},
+						{
+							requestId: "ar-2",
+							adapterId: "codex",
+							adapterSessionId: "codex-challenger",
+							approvalType: "command",
+							title: "Approval 2",
+						},
+					],
+				},
+			}),
+		} as TuiStore;
+
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus: { push: vi.fn() } as unknown as DebateEventBus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+
+		handler({ type: "deny", selector: { kind: "index", index: 2 } });
+
+		expect(proposerAdapter.approve).not.toHaveBeenCalled();
+		expect(challengerAdapter.approve).toHaveBeenCalledWith({
+			requestId: "ar-2",
+			decision: "deny",
+		});
+	});
+
+	it("supports selecting a provider approval option by index", () => {
+		const proposerAdapter = createMockAdapter("claude");
+
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposerAdapter,
+				session: createSession("claude", "claude-proposer"),
+			},
+			challenger: {
+				adapter: createMockAdapter("codex"),
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+
+		const store = {
+			getState: () => ({
+				command: {
+					pendingApprovals: [
+						{
+							requestId: "ar-1",
+							adapterId: "claude",
+							adapterSessionId: "claude-proposer",
+							approvalType: "tool",
+							title: "Approval 1",
+							options: [
+								{
+									id: "allow",
+									label: "Allow once",
+									kind: "allow",
+									isDefault: true,
+								},
+								{
+									id: "allow-session",
+									label: "Allow for session",
+									kind: "allow-always",
+									scope: "session",
+								},
+								{
+									id: "deny",
+									label: "Reject",
+									kind: "deny",
+								},
+							],
+						},
+					],
+				},
+			}),
+		} as TuiStore;
+
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus: { push: vi.fn() } as unknown as DebateEventBus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+
+		handler({
+			type: "approve",
+			selector: { kind: "index", index: 1 },
+			optionIndex: 2,
+		});
+
+		expect(proposerAdapter.approve).toHaveBeenCalledWith({
+			requestId: "ar-1",
+			decision: "allow-always",
+			optionId: "allow-session",
+		});
+	});
+
 	it("emits inject events for both proposer and challenger", () => {
 		const proposerAdapter = createMockAdapter("claude");
 		const challengerAdapter = createMockAdapter("codex");

@@ -3,6 +3,11 @@ import type React from "react";
 import { useState } from "react";
 import type { CommandState } from "../state/types.js";
 
+type ApprovalSelector =
+	| { kind: "all" }
+	| { kind: "index"; index: number }
+	| { kind: "request"; requestId: string };
+
 export type ParsedCommand =
 	| { type: "stop" }
 	| {
@@ -19,8 +24,8 @@ export type ParsedCommand =
 	  }
 	| { type: "inject-judge"; text: string }
 	| { type: "extend"; rounds: number }
-	| { type: "approve"; requestId?: string }
-	| { type: "deny"; requestId?: string }
+	| { type: "approve"; selector?: ApprovalSelector; optionIndex?: number }
+	| { type: "deny"; selector?: ApprovalSelector; optionIndex?: number }
 	| { type: "speed"; multiplier: number }
 	| { type: "jump"; target: "round" | "turn"; value: number | string }
 	| { type: "expand"; roundNumber: number }
@@ -28,6 +33,23 @@ export type ParsedCommand =
 	| { type: "top" }
 	| { type: "bottom" }
 	| { type: "unknown"; raw: string };
+
+function parseApprovalSelector(raw?: string): ApprovalSelector | undefined {
+	if (!raw) return undefined;
+	if (raw === "all") return { kind: "all" };
+	const index = Number.parseInt(raw, 10);
+	if (!Number.isNaN(index) && index > 0) {
+		return { kind: "index", index };
+	}
+	return { kind: "request", requestId: raw };
+}
+
+function parseOptionIndex(raw?: string): number | undefined {
+	if (!raw) return undefined;
+	const index = Number.parseInt(raw, 10);
+	if (Number.isNaN(index) || index <= 0) return undefined;
+	return index;
+}
 
 export function parseCommand(input: string, mode: string): ParsedCommand {
 	const parts = input.trim().split(/\s+/);
@@ -83,9 +105,17 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
 			return { type: "extend", rounds: n };
 		}
 		case "/approve":
-			return { type: "approve", requestId: parts[1] };
+			return {
+				type: "approve",
+				selector: parseApprovalSelector(parts[1]),
+				optionIndex: parseOptionIndex(parts[2]),
+			};
 		case "/deny":
-			return { type: "deny", requestId: parts[1] };
+			return {
+				type: "deny",
+				selector: parseApprovalSelector(parts[1]),
+				optionIndex: parseOptionIndex(parts[2]),
+			};
 		case "/speed": {
 			const n = Number.parseFloat(parts[1]);
 			if (Number.isNaN(n)) return { type: "unknown", raw: input };

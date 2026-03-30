@@ -53,11 +53,32 @@ describe("parseCommand", () => {
 		expect(parseCommand("/approve", "approval")).toEqual({ type: "approve" });
 		expect(parseCommand("/approve ar-1", "approval")).toEqual({
 			type: "approve",
-			requestId: "ar-1",
+			selector: { kind: "request", requestId: "ar-1" },
+		});
+		expect(parseCommand("/approve 2", "approval")).toEqual({
+			type: "approve",
+			selector: { kind: "index", index: 2 },
+		});
+		expect(parseCommand("/approve all", "approval")).toEqual({
+			type: "approve",
+			selector: { kind: "all" },
+		});
+		expect(parseCommand("/approve 1 2", "approval")).toEqual({
+			type: "approve",
+			selector: { kind: "index", index: 1 },
+			optionIndex: 2,
 		});
 	});
 	it("parses /deny in approval mode", () => {
 		expect(parseCommand("/deny", "approval")).toEqual({ type: "deny" });
+		expect(parseCommand("/deny 3", "approval")).toEqual({
+			type: "deny",
+			selector: { kind: "index", index: 3 },
+		});
+		expect(parseCommand("/deny all", "approval")).toEqual({
+			type: "deny",
+			selector: { kind: "all" },
+		});
 	});
 	it("parses /speed in replay mode", () => {
 		expect(parseCommand("/speed 5", "replay")).toEqual({

@@ -797,6 +797,89 @@ describe("ClaudeAdapter", () => {
 			const resolved = events.filter((e) => e.kind === "approval.resolved");
 			expect(resolved).toHaveLength(1);
 		});
+
+		it("maps allow-always to updatedPermissions suggestions", async () => {
+			let permissionResult:
+				| {
+						behavior: string;
+						updatedInput?: Record<string, unknown>;
+						updatedPermissions?: unknown[];
+				  }
+				| undefined;
+			const suggestions = [
+				{
+					type: "addRules",
+					behavior: "allow",
+					destination: "session",
+					rules: [{ toolName: "bash", ruleContent: "rm -rf /tmp/demo" }],
+				},
+			];
+			const queryFn: QueryFn = (opts) => {
+				async function* approvalGen(): AsyncGenerator<SdkMessage> {
+					yield {
+						type: "system/init",
+						sessionId: "ps1",
+						model: "haiku",
+						tools: ["bash"],
+					};
+					if (opts.canUseTool) {
+						permissionResult = (await opts.canUseTool(
+							"bash",
+							{ command: "rm -rf /tmp/demo" },
+							{
+								toolUseID: "tu1",
+								suggestions,
+								decisionReason: "command writes outside the sandbox",
+							},
+						)) as {
+							behavior: string;
+							updatedInput?: Record<string, unknown>;
+							updatedPermissions?: unknown[];
+						};
+					}
+					yield {
+						type: "result",
+						subtype: "success",
+						usage: { input_tokens: 10, output_tokens: 5 },
+						duration_ms: 100,
+					};
+				}
+				return { messages: approvalGen(), interrupt: vi.fn() };
+			};
+
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "approve me", turnId: "t1" });
+
+			const req = await waitForEvent(
+				events,
+				(e) => e.kind === "approval.request",
+			);
+			expect(req.kind).toBe("approval.request");
+			if (req.kind === "approval.request") {
+				expect(req.options?.map((option) => option.id)).toEqual([
+					"allow",
+					"allow-session",
+					"deny",
+				]);
+				await adapter.approve?.({
+					requestId: req.requestId,
+					decision: "allow-always",
+					optionId: "allow-session",
+				});
+			}
+
+			await waitForTurnCompleted(events, "t1");
+			expect(permissionResult).toEqual({
+				behavior: "allow",
+				updatedInput: { command: "rm -rf /tmp/demo" },
+				updatedPermissions: suggestions,
+			});
+		});
 	});
 
 	describe("hooks integration via sendTurn", () => {

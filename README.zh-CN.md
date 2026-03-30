@@ -140,7 +140,7 @@ crossfire start \
 - **顶部栏** — 居中品牌标识、辩论 ID、轮次/阶段、提议者与挑战者的智能体信息、辩论主题
 - **可滚动内容区** — 按轮次展示智能体消息、思考过程和自动换行的工具调用，长命令和长参数不会再被硬截断。支持方向键、`Ctrl+U`/`Ctrl+D`、`Home`/`End` 滚动
 - **指标栏** — 各智能体 token 用量与费用、收敛进度条与百分比、裁判判定、滚动状态（LIVE / SCROLLED）。用量统计会按 provider 语义做归一化，因此部分 provider 的累计值会先转换为增量再显示
-- **命令/审批区** — 实时辩论中根据上下文切换提示符（`>`、`approval>`），并在有待审批请求时展开高亮卡片，显示待调用的工具/命令以及明确的 `/approve <id>` / `/deny <id>` 操作
+- **命令/审批区** — 实时辩论中根据上下文切换提示符（`>`、`approval>`），并在有待审批请求时展开高亮卡片，显示待调用的工具/命令、批量操作，以及带 provider 语义的短命令，如 `/approve 2`、`/approve 2 2` 或 `/approve all`
 
 使用 `--headless` 可跳过 UI。事件和综合输出仍会落盘，之后可以回放或审阅。
 
@@ -243,8 +243,8 @@ Configuration:
 | `/resume`                   | 恢复已暂停的实时辩论           | ✅       |
 | `/extend <n>`               | 增加 N 轮最大轮数              | ✅       |
 
-**审批模式**（有审批请求时自动激活）：`/approve`、`/deny` ✅  
-TUI 会把待处理审批展开成高亮区块，显示 provider、审批类型、请求摘要，以及逐条 `/approve <id>` / `/deny <id>` 指令。
+**审批模式**（有审批请求时自动激活）：`/approve`、`/deny`、`/approve <序号>`、`/deny <序号>`、`/approve <序号> <选项序号>`、`/deny <序号> <选项序号>`、`/approve all`、`/deny all` ✅  
+TUI 会把待处理审批展开成高亮区块，显示 provider、审批类型、请求摘要、逐条序号快捷命令、provider-aware 的选项行，以及批量 approve / reject 指令。Claude 现在会在这里暴露 session 级 allow 选项；Codex 在 provider 发送原生决策列表时也会直接展示。
 
 `crossfire resume` 现在复用了与 `crossfire start` 相同的实时命令接线，因此在恢复中断辩论时也可以继续使用 `/stop`、`/interrupt`、审批命令、inject 命令，以及 `/pause`、`/resume`、`/extend`。
 

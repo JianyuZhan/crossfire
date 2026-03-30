@@ -99,6 +99,16 @@ const ToolResultSchema = z.object({
 });
 
 // Approval
+const ApprovalOptionSchema = z.object({
+	id: z.string(),
+	label: z.string(),
+	kind: z.enum(["allow", "deny", "allow-always", "other"]),
+	scope: z
+		.enum(["once", "session", "project", "user", "local", "global"])
+		.optional(),
+	isDefault: z.boolean().optional(),
+});
+
 const ApprovalRequestSchema = z.object({
 	...BaseEventFields,
 	kind: z.literal("approval.request"),
@@ -107,6 +117,7 @@ const ApprovalRequestSchema = z.object({
 	title: z.string(),
 	payload: z.unknown(),
 	suggestion: z.enum(["allow", "deny"]).optional(),
+	options: z.array(ApprovalOptionSchema).optional(),
 });
 
 const ApprovalResolvedSchema = z.object({
@@ -114,6 +125,7 @@ const ApprovalResolvedSchema = z.object({
 	kind: z.literal("approval.resolved"),
 	requestId: z.string(),
 	decision: z.enum(["allow", "deny", "allow-always"]),
+	optionId: z.string().optional(),
 });
 
 // Subagent

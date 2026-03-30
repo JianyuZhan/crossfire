@@ -161,6 +161,20 @@ describe("TuiStore", () => {
 					tool_name: "Bash",
 					tool_input: { command: "ls -la /tmp/somewhere" },
 				},
+				options: [
+					{
+						id: "allow",
+						label: "Allow once",
+						kind: "allow",
+						isDefault: true,
+					},
+					{
+						id: "allow-session",
+						label: "Allow for session",
+						kind: "allow-always",
+						scope: "session",
+					},
+				],
 				turnId: "p-1",
 			}),
 		);
@@ -175,6 +189,8 @@ describe("TuiStore", () => {
 		expect(s.command.pendingApprovals[0].detail).toContain(
 			"ls -la /tmp/somewhere",
 		);
+		expect(s.command.pendingApprovals[0].options).toHaveLength(2);
+		expect(s.command.pendingApprovals[0].options?.[1]?.scope).toBe("session");
 	});
 
 	it("tracks live pause state and updated maxRounds", () => {

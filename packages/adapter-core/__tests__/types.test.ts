@@ -13,6 +13,8 @@ import {
 } from "../src/errors.js";
 import {
 	type AgentAdapter,
+	type ApprovalDecision,
+	type ApprovalOption,
 	type ApprovalRequestEvent,
 	type BaseEvent,
 	type LocalTurnMetrics,
@@ -127,6 +129,46 @@ describe("NormalizedEvent types", () => {
 			payload: { command: "rm -rf /" },
 		};
 		expect(event.approvalType).toBe("command");
+	});
+
+	it("ApprovalRequestEvent accepts approval options", () => {
+		const options: ApprovalOption[] = [
+			{
+				id: "allow",
+				label: "Allow once",
+				kind: "allow",
+				isDefault: true,
+			},
+			{
+				id: "allow-session",
+				label: "Allow for session",
+				kind: "allow-always",
+				scope: "session",
+			},
+		];
+		const event: ApprovalRequestEvent = {
+			kind: "approval.request",
+			timestamp: Date.now(),
+			adapterId: "claude",
+			adapterSessionId: "s1",
+			turnId: "t1",
+			requestId: "r1",
+			approvalType: "tool",
+			title: "Allow Bash?",
+			payload: { command: "ls" },
+			options,
+		};
+		expect(event.options).toHaveLength(2);
+		expect(event.options?.[1]?.scope).toBe("session");
+	});
+
+	it("ApprovalDecision accepts provider option selection", () => {
+		const decision: ApprovalDecision = {
+			requestId: "r1",
+			decision: "allow-always",
+			optionId: "allow-session",
+		};
+		expect(decision.optionId).toBe("allow-session");
 	});
 
 	it("ThinkingDeltaEvent distinguishes raw-thinking from reasoning-summary", () => {

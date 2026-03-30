@@ -2,6 +2,7 @@ import {
 	type AdapterCapabilities,
 	type AgentAdapter,
 	type ApprovalDecision,
+	type ApprovalOption,
 	CODEX_CAPABILITIES,
 	type LocalTurnMetrics,
 	type NormalizedEvent,
@@ -56,6 +57,7 @@ interface PendingApproval {
 	requestId: string;
 	adapterSessionId: string;
 	turnId: string;
+	options?: ApprovalOption[];
 	resolveServerRequest: (result: unknown) => void;
 }
 
@@ -77,6 +79,121 @@ judge_verdict '{"leading":"proposer","score":{"proposer":7,"challenger":5},"reas
 Pass the complete JSON as a single quoted argument. Do NOT omit any required fields.`;
 
 let sessionCounter = 0;
+
+function humanizeDecision(decisionId: string): string {
+	return decisionId
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.replace(/[_-]+/g, " ")
+		.replace(/^\w/, (ch) => ch.toUpperCase());
+}
+
+function mapDecisionKind(decisionId: string): ApprovalOption["kind"] {
+	const normalized = decisionId.toLowerCase();
+	if (
+		normalized.includes("decline") ||
+		normalized.includes("reject") ||
+		normalized.includes("deny") ||
+		normalized.includes("cancel")
+	) {
+		return "deny";
+	}
+	if (
+		normalized.includes("acceptforsession") ||
+		normalized.includes("allow_always") ||
+		normalized.includes("allowalways") ||
+		normalized.includes("always")
+	) {
+		return "allow-always";
+	}
+	if (
+		normalized.includes("accept") ||
+		normalized.includes("allow") ||
+		normalized.includes("grant") ||
+		normalized.includes("apply")
+	) {
+		return "allow";
+	}
+	return "other";
+}
+
+function mapDecisionScope(
+	decisionId: string,
+): ApprovalOption["scope"] | undefined {
+	const normalized = decisionId.toLowerCase();
+	if (normalized.includes("session")) return "session";
+	return undefined;
+}
+
+function extractApprovalOptions(
+	params: Record<string, unknown>,
+): ApprovalOption[] | undefined {
+	const rawOptions = params.availableDecisions;
+	if (!Array.isArray(rawOptions) || rawOptions.length === 0) return undefined;
+
+	const options: ApprovalOption[] = [];
+	for (let index = 0; index < rawOptions.length; index++) {
+		const rawOption = rawOptions[index];
+		if (typeof rawOption === "string") {
+			options.push({
+				id: rawOption,
+				label: humanizeDecision(rawOption),
+				kind: mapDecisionKind(rawOption),
+				scope: mapDecisionScope(rawOption),
+				isDefault: index === 0,
+			});
+			continue;
+		}
+		if (typeof rawOption !== "object" || rawOption === null) continue;
+		const option = rawOption as Record<string, unknown>;
+		const idValue = option.id ?? option.decision ?? option.kind ?? option.name;
+		if (typeof idValue !== "string" || idValue.length === 0) continue;
+		const label =
+			typeof option.label === "string"
+				? option.label
+				: typeof option.title === "string"
+					? option.title
+					: typeof option.name === "string"
+						? option.name
+						: humanizeDecision(idValue);
+		options.push({
+			id: idValue,
+			label,
+			kind: mapDecisionKind(idValue),
+			scope:
+				typeof option.scope === "string"
+					? (option.scope as ApprovalOption["scope"])
+					: mapDecisionScope(idValue),
+			isDefault:
+				typeof option.isDefault === "boolean"
+					? option.isDefault
+					: typeof option.default === "boolean"
+						? option.default
+						: index === 0,
+		});
+	}
+
+	return options.length > 0 ? options : undefined;
+}
+
+function findSelectedOption(
+	pending: PendingApproval,
+	req: ApprovalDecision,
+): ApprovalOption | undefined {
+	if (req.optionId) {
+		return pending.options?.find((option) => option.id === req.optionId);
+	}
+	if (req.decision === "allow-always") {
+		return pending.options?.find((option) => option.kind === "allow-always");
+	}
+	if (req.decision === "deny") {
+		return pending.options?.find((option) => option.kind === "deny");
+	}
+	return (
+		pending.options?.find(
+			(option) => option.isDefault && option.kind !== "deny",
+		) ?? pending.options?.find((option) => option.kind === "allow")
+	);
+}
 
 /**
  * CodexAdapter implements the AgentAdapter interface for the Codex CLI app-server.
@@ -235,7 +352,10 @@ export class CodexAdapter implements AgentAdapter {
 		input: TurnInput,
 		err: unknown,
 	): Promise<TurnHandle> {
-		const recovery = handle.recoveryContext!;
+		const recovery = handle.recoveryContext;
+		if (!recovery) {
+			throw err;
+		}
 		const message = err instanceof Error ? err.message : String(err);
 
 		this.emit({
@@ -298,7 +418,16 @@ export class CodexAdapter implements AgentAdapter {
 			kind: "approval.resolved",
 			requestId: req.requestId,
 			decision: req.decision,
+			optionId: req.optionId,
 		});
+
+		const selectedOption = findSelectedOption(pending, req);
+		if (selectedOption) {
+			pending.resolveServerRequest({
+				decision: selectedOption.id,
+			});
+			return;
+		}
 
 		pending.resolveServerRequest({
 			approved: req.decision === "allow" || req.decision === "allow-always",
@@ -420,9 +549,11 @@ export class CodexAdapter implements AgentAdapter {
 			this.client.onRequest(method, async (params) => {
 				const ctx = this.getCurrentContext();
 				if (!ctx) return {};
+				const pendingTurnId = ctx.turnId ?? "unknown-turn";
 
 				const paramsObj = (params ?? {}) as Record<string, unknown>;
-				const requestId = `ar-${ctx.turnId}-${paramsObj.id ?? Date.now()}`;
+				const requestId = `ar-${pendingTurnId}-${paramsObj.id ?? Date.now()}`;
+				const options = extractApprovalOptions(paramsObj);
 
 				// Emit approval.request
 				this.emit({
@@ -437,6 +568,7 @@ export class CodexAdapter implements AgentAdapter {
 						paramsObj.command ?? paramsObj.path ?? paramsObj.prompt ?? method,
 					),
 					payload: paramsObj,
+					options,
 				});
 
 				// Return a promise that blocks the JSON-RPC response until approve() is called
@@ -444,7 +576,8 @@ export class CodexAdapter implements AgentAdapter {
 					this.pendingApprovals.set(requestId, {
 						requestId,
 						adapterSessionId: ctx.adapterSessionId,
-						turnId: ctx.turnId!,
+						turnId: pendingTurnId,
+						options,
 						resolveServerRequest: resolve,
 					});
 				});

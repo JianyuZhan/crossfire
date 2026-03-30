@@ -1,3 +1,4 @@
+import type { ApprovalOption } from "@crossfire/adapter-core";
 import type { AdapterMap, DebateEventBus } from "@crossfire/orchestrator";
 import type { ParsedCommand, TuiStore } from "@crossfire/tui";
 
@@ -7,7 +8,13 @@ interface PendingApprovalLike {
 	requestId: string;
 	adapterId: string;
 	adapterSessionId: string;
+	options?: ApprovalOption[];
 }
+
+type ApprovalSelector =
+	| { kind: "all" }
+	| { kind: "index"; index: number }
+	| { kind: "request"; requestId: string };
 
 interface LiveCommandHandlerOptions {
 	adapters: AdapterMap;
@@ -17,16 +24,31 @@ interface LiveCommandHandlerOptions {
 	getUserQuitHandler?: () => (() => void) | undefined;
 }
 
-function findPendingApproval(
+function findPendingApprovals(
 	store: TuiStore,
-	requestId?: string,
-): PendingApprovalLike | undefined {
+	selector?: ApprovalSelector,
+): PendingApprovalLike[] {
 	const pending = store.getState().command
 		.pendingApprovals as PendingApprovalLike[];
-	if (requestId) {
-		return pending.find((approval) => approval.requestId === requestId);
+
+	if (!selector) {
+		return pending[0] ? [pending[0]] : [];
 	}
-	return pending[0];
+
+	switch (selector.kind) {
+		case "all":
+			return pending;
+		case "index": {
+			const approval = pending[selector.index - 1];
+			return approval ? [approval] : [];
+		}
+		case "request": {
+			const approval = pending.find(
+				(entry) => entry.requestId === selector.requestId,
+			);
+			return approval ? [approval] : [];
+		}
+	}
 }
 
 function findAdapterBySessionId(
@@ -41,6 +63,49 @@ function findAdapterBySessionId(
 		}
 	}
 	return undefined;
+}
+
+function mapOptionKindToDecision(
+	option: ApprovalOption,
+	fallback: "approve" | "deny",
+): "allow" | "deny" | "allow-always" {
+	switch (option.kind) {
+		case "deny":
+			return "deny";
+		case "allow-always":
+			return "allow-always";
+		case "allow":
+			return "allow";
+		case "other":
+			return fallback === "deny" ? "deny" : "allow";
+	}
+}
+
+function pickApprovalOption(
+	approval: PendingApprovalLike,
+	commandType: "approve" | "deny",
+	optionIndex?: number,
+): ApprovalOption | undefined {
+	if (!approval.options || approval.options.length === 0) return undefined;
+	if (optionIndex !== undefined) {
+		return approval.options[optionIndex - 1];
+	}
+	if (commandType === "deny") {
+		return (
+			approval.options.find(
+				(option) => option.isDefault && option.kind === "deny",
+			) ?? approval.options.find((option) => option.kind === "deny")
+		);
+	}
+	return (
+		approval.options.find(
+			(option) =>
+				option.isDefault &&
+				(option.kind === "allow" || option.kind === "allow-always"),
+		) ??
+		approval.options.find((option) => option.kind === "allow") ??
+		approval.options.find((option) => option.kind === "allow-always")
+	);
 }
 
 export function createLiveCommandHandler({
@@ -76,17 +141,25 @@ export function createLiveCommandHandler({
 		}
 
 		if (cmd.type === "approve" || cmd.type === "deny") {
-			const pending = findPendingApproval(store, cmd.requestId);
-			if (!pending) return;
-			const adapter = findAdapterBySessionId(
-				adapters,
-				pending.adapterSessionId,
-			);
-			if (!adapter?.approve) return;
-			void adapter.approve({
-				requestId: pending.requestId,
-				decision: cmd.type === "approve" ? "allow" : "deny",
-			});
+			const pending = findPendingApprovals(store, cmd.selector);
+			if (pending.length === 0) return;
+			for (const approval of pending) {
+				const adapter = findAdapterBySessionId(
+					adapters,
+					approval.adapterSessionId,
+				);
+				if (!adapter?.approve) continue;
+				const option = pickApprovalOption(approval, cmd.type, cmd.optionIndex);
+				void adapter.approve({
+					requestId: approval.requestId,
+					decision: option
+						? mapOptionKindToDecision(option, cmd.type)
+						: cmd.type === "approve"
+							? "allow"
+							: "deny",
+					optionId: option?.id,
+				});
+			}
 			return;
 		}
 

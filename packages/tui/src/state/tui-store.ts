@@ -1,3 +1,4 @@
+import type { ApprovalOption } from "@crossfire/adapter-core";
 import {
 	type AnyEvent,
 	type DebateState,
@@ -789,6 +790,7 @@ export class TuiStore {
 					title: string;
 					payload?: unknown;
 					suggestion?: "allow" | "deny";
+					options?: ApprovalOption[];
 				};
 				this.state.command.pendingApprovals.push({
 					requestId: e.requestId,
@@ -798,6 +800,7 @@ export class TuiStore {
 					title: e.title,
 					detail: summarizeApprovalDetail(e),
 					suggestion: e.suggestion,
+					options: e.options,
 				});
 				this.state.command.mode = "approval";
 				break;

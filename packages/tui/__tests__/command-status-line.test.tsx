@@ -34,6 +34,25 @@ describe("CommandStatusLine", () => {
 					detail:
 						'Command: curl https://example.com/very/long/path --header "Authorization: Bearer ..."',
 					suggestion: "allow",
+					options: [
+						{
+							id: "accept",
+							label: "Allow once",
+							kind: "allow",
+							isDefault: true,
+						},
+						{
+							id: "acceptForSession",
+							label: "Allow for session",
+							kind: "allow-always",
+							scope: "session",
+						},
+						{
+							id: "decline",
+							label: "Reject",
+							kind: "deny",
+						},
+					],
 				},
 			],
 		});
@@ -43,10 +62,12 @@ describe("CommandStatusLine", () => {
 		);
 		const output = lastFrame();
 		expect(output).toContain("APPROVAL REQUIRED");
+		expect(output).toContain("/approve all");
 		expect(output).toContain("codex");
 		expect(output).toContain("Command:");
-		expect(output).toContain("/approve ar-c-1-call-1");
-		expect(output).toContain("/deny ar-c-1-call-1");
+		expect(output).toContain("Allow once");
+		expect(output).toContain("/approve 1 2");
+		expect(output).toContain("/deny 1");
 	});
 
 	it("reports taller fixed height when approvals are visible", () => {

@@ -1,3 +1,4 @@
+import type { ApprovalOption } from "@crossfire/adapter-core";
 import type { DebateState, JudgeVerdict } from "@crossfire/orchestrator-core";
 
 export interface LiveToolEntry {
@@ -132,6 +133,7 @@ export interface PendingApproval {
 	title: string;
 	detail?: string;
 	suggestion?: "allow" | "deny";
+	options?: ApprovalOption[];
 }
 
 export interface CommandState {

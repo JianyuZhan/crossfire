@@ -42,6 +42,25 @@ interface AgentAdapter {
 }
 ```
 
+Approval-specific shared types:
+
+```ts
+interface ApprovalOption {
+  id: string;
+  label: string;
+  kind: "allow" | "deny" | "allow-always" | "other";
+  scope?: "once" | "session" | "project" | "user" | "local" | "global";
+  isDefault?: boolean;
+}
+
+interface ApprovalDecision {
+  requestId: string;
+  decision: "allow" | "deny" | "allow-always";
+  updatedInput?: unknown;
+  optionId?: string;
+}
+```
+
 Behavioral notes:
 
 - `startSession()` allocates an adapter session and returns a `SessionHandle`. `providerSessionId` may still be `undefined` at this point for Claude and Gemini.
@@ -113,6 +132,8 @@ Why these events and fields matter:
 - `usage.updated` is the main usage-accounting contract used by the TUI and metrics views; consumers should not rely on `turn.completed.usage` always being present
 - `semantics` is required because providers do not report usage the same way; for example, Codex reports cumulative thread totals, so consumers must delta those values locally
 - `cacheReadTokens` and `localMetrics` are not decorative metadata; current consumers use them to show cache behavior and local prompt-size overhead
+- `approval.request` may include normalized or provider-native `options[]`; consumers may use those to render richer approval UIs without losing a stable fallback path
+- `approval.resolved.optionId` captures the specific provider option selected when approval is not just a plain allow/deny
 - the event vocabulary is therefore a shared runtime contract between adapters and consumers, not an arbitrary naming layer
 
 ## Capability Model
@@ -201,7 +222,9 @@ interface StartSessionInput {
 - session state is tracked in a local query-context map keyed by `adapterSessionId`
 - tool and subagent lifecycle visibility comes from SDK hooks: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, and `SubagentStop`
 - approval support is bridged through `canUseTool(toolName, input, options)`, which emits `approval.request` and blocks until `approve()` resolves it
-- `approve()` may also pass `updatedInput`
+- `approval.request.payload` now retains Claude `suggestions`, `blockedPath`, and `decisionReason` metadata for display/debugging
+- Claude does not expose a provider-native button array; Crossfire derives normalized options such as `Allow once`, `Allow for session`, and `Reject`
+- `approve()` may pass both `updatedInput` and session-scoped `updatedPermissions`, so Claude's "allow for session" flow is now preserved instead of being flattened to plain allow
 - local prompt metrics are attached to the first `usage.updated` event observed for the turn
 - on stream failure, if `recoveryContext` and a prior `providerSessionId` exist, the adapter emits `run.warning`, clears resume state, and retries once with a transcript recovery prompt
 - if transcript recovery also fails, the adapter emits a terminal `run.error`
@@ -214,6 +237,8 @@ interface StartSessionInput {
 - `sendTurn()` uses `turn/start`
 - the current adapter effectively assumes one live active session per adapter instance because event routing uses one shared JSON-RPC client plus a wildcard notification handler
 - approval requests are normalized as `command`, `file-change`, or `user-input`
+- when Codex includes `availableDecisions`, Crossfire preserves them as `approval.request.options[]` instead of flattening them immediately to allow/deny
+- `approve()` now forwards a selected native `optionId` back to Codex as `{ decision: optionId }`; it only falls back to `{ approved: boolean }` when no richer native option exists
 - `debate_meta` and `judge_verdict` are invoked through shell commands; successful command output is parsed back into synthetic `tool.call` events so downstream projection can read structured metadata
 - Codex emits `thinking.delta` as reasoning summaries, not raw thinking
 - empty Codex reasoning and assistant delta notifications are ignored during normalization so the TUI does not churn on blank streaming frames

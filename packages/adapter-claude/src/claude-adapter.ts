@@ -2,6 +2,7 @@ import type {
 	AdapterCapabilities,
 	AgentAdapter,
 	ApprovalDecision,
+	ApprovalOption,
 	LocalTurnMetrics,
 	NormalizedEvent,
 	SessionHandle,
@@ -17,7 +18,14 @@ import {
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { mapSdkMessage } from "./event-mapper.js";
 import { buildHooks } from "./hooks.js";
-import type { QueryFn, QueryResult, SdkMessage } from "./types.js";
+import type {
+	ClaudeCanUseToolOptions,
+	ClaudePermissionResult,
+	ClaudePermissionUpdate,
+	QueryFn,
+	QueryResult,
+	SdkMessage,
+} from "./types.js";
 
 /** Options for constructing a ClaudeAdapter */
 export interface ClaudeAdapterOptions {
@@ -36,10 +44,41 @@ interface PendingApproval {
 	requestId: string;
 	adapterSessionId: string;
 	turnId: string;
-	resolve: (value: unknown) => void;
+	toolInput: Record<string, unknown>;
+	suggestions?: ClaudePermissionUpdate[];
+	resolve: (value: ClaudePermissionResult) => void;
 }
 
 let sessionCounter = 0;
+
+function buildApprovalOptions(
+	suggestions?: ClaudePermissionUpdate[],
+): ApprovalOption[] {
+	const options: ApprovalOption[] = [
+		{
+			id: "allow",
+			label: "Allow once",
+			kind: "allow",
+			scope: "once",
+			isDefault: true,
+		},
+	];
+	if (suggestions && suggestions.length > 0) {
+		options.push({
+			id: "allow-session",
+			label: "Allow for session",
+			kind: "allow-always",
+			scope: "session",
+		});
+	}
+	options.push({
+		id: "deny",
+		label: "Reject",
+		kind: "deny",
+		isDefault: true,
+	});
+	return options;
+}
 
 /**
  * ClaudeAdapter implements the AgentAdapter interface for the Claude Agent SDK.
@@ -97,10 +136,11 @@ export class ClaudeAdapter implements AgentAdapter {
 		const canUseTool = (
 			toolName: string,
 			toolInput: Record<string, unknown>,
-			options: { toolUseID: string; [key: string]: unknown },
-		): Promise<unknown> => {
+			options: ClaudeCanUseToolOptions,
+		): Promise<ClaudePermissionResult> => {
 			const toolUseId = options.toolUseID ?? String(Date.now());
 			const requestId = `ar-${input.turnId}-${toolUseId}`;
+			const approvalOptions = buildApprovalOptions(options.suggestions);
 
 			this.emit({
 				...ctx,
@@ -109,7 +149,16 @@ export class ClaudeAdapter implements AgentAdapter {
 				requestId,
 				approvalType: "tool",
 				title: `Approve tool: ${toolName}`,
-				payload: { tool_name: toolName, tool_input: toolInput },
+				payload: {
+					tool_name: toolName,
+					tool_input: toolInput,
+					suggestions: options.suggestions,
+					blocked_path: options.blockedPath,
+					decision_reason: options.decisionReason,
+					agent_id: options.agentID,
+				},
+				suggestion: "allow",
+				options: approvalOptions,
 			});
 
 			return new Promise((resolve) => {
@@ -117,23 +166,9 @@ export class ClaudeAdapter implements AgentAdapter {
 					requestId,
 					adapterSessionId: handle.adapterSessionId,
 					turnId: input.turnId,
-					resolve: (decision) => {
-						const { decision: verdict, updatedInput } = decision as {
-							decision: string;
-							updatedInput?: Record<string, unknown>;
-						};
-						if (verdict === "allow") {
-							resolve({
-								behavior: "allow",
-								updatedInput: updatedInput ?? toolInput,
-							});
-						} else {
-							resolve({
-								behavior: "deny",
-								message: "User denied tool use",
-							});
-						}
-					},
+					toolInput,
+					suggestions: options.suggestions,
+					resolve,
 				});
 			});
 		};
@@ -180,12 +215,29 @@ export class ClaudeAdapter implements AgentAdapter {
 				kind: "approval.resolved",
 				requestId: req.requestId,
 				decision: req.decision,
+				optionId: req.optionId,
 			});
 
-			// Resolve the canUseTool promise to unblock the generator
+			if (req.decision === "deny" || req.optionId === "deny") {
+				pending.resolve({
+					behavior: "deny",
+					message: "User denied tool use",
+				});
+				return;
+			}
+
+			const shouldPersist =
+				req.decision === "allow-always" || req.optionId === "allow-session";
 			pending.resolve({
-				decision: req.decision,
-				updatedInput: req.updatedInput,
+				behavior: "allow",
+				updatedInput:
+					(req.updatedInput as Record<string, unknown> | undefined) ??
+					pending.toolInput,
+				...(shouldPersist &&
+				pending.suggestions &&
+				pending.suggestions.length > 0
+					? { updatedPermissions: pending.suggestions }
+					: {}),
 			});
 		}
 	}

@@ -45,10 +45,24 @@ function wrapPlainText(text: string, width: number): string[] {
 	return lines.length > 0 ? lines : [""];
 }
 
+function commandForOption(
+	approvalIndex: number,
+	optionIndex: number,
+	optionKind: "allow" | "deny" | "allow-always" | "other",
+	useShortcut: boolean,
+): string {
+	const base = optionKind === "deny" ? "/deny" : "/approve";
+	if (useShortcut) {
+		return `${base} ${approvalIndex}`;
+	}
+	return `${base} ${approvalIndex} ${optionIndex + 1}`;
+}
+
 function buildApprovalLines(state: CommandState, width: number): string[] {
 	const contentWidth = Math.max(24, width - 2);
 	const lines = [
 		`APPROVAL REQUIRED (${state.pendingApprovals.length} pending)`,
+		"Quick actions: /approve all    /deny all",
 	];
 	const visible = state.pendingApprovals.slice(0, MAX_VISIBLE_APPROVALS);
 
@@ -63,9 +77,50 @@ function buildApprovalLines(state: CommandState, width: number): string[] {
 		)) {
 			lines.push(`  ${line}`);
 		}
-		lines.push(
-			`  Approve: /approve ${approval.requestId}    Reject: /deny ${approval.requestId}`,
-		);
+		if (approval.options && approval.options.length > 0) {
+			const defaultAllowIndex =
+				approval.options.findIndex(
+					(option) =>
+						option.isDefault &&
+						(option.kind === "allow" || option.kind === "allow-always"),
+				) ?? -1;
+			const fallbackAllowIndex =
+				defaultAllowIndex >= 0
+					? defaultAllowIndex
+					: approval.options.findIndex(
+							(option) =>
+								option.kind === "allow" || option.kind === "allow-always",
+						);
+			const defaultDenyIndex =
+				approval.options.findIndex(
+					(option) => option.isDefault && option.kind === "deny",
+				) ?? -1;
+			const fallbackDenyIndex =
+				defaultDenyIndex >= 0
+					? defaultDenyIndex
+					: approval.options.findIndex((option) => option.kind === "deny");
+			for (
+				let optionIndex = 0;
+				optionIndex < approval.options.length;
+				optionIndex++
+			) {
+				const option = approval.options[optionIndex];
+				const isDefaultAllow =
+					(option.kind === "allow" || option.kind === "allow-always") &&
+					optionIndex === fallbackAllowIndex;
+				const isDefaultDeny =
+					option.kind === "deny" && optionIndex === fallbackDenyIndex;
+				const command = commandForOption(
+					i + 1,
+					optionIndex,
+					option.kind,
+					isDefaultAllow || isDefaultDeny,
+				);
+				lines.push(`  ${optionIndex + 1}. ${option.label}: ${command}`);
+			}
+		} else {
+			lines.push(`  Approve: /approve ${i + 1}    Reject: /deny ${i + 1}`);
+		}
 	}
 
 	const hidden = state.pendingApprovals.length - visible.length;
@@ -124,7 +179,9 @@ export function CommandStatusLine({
 					index > 0 &&
 					!/^\s/.test(line) &&
 					!line.startsWith("...");
-				const isActionLine = /^\s+Approve: /.test(line);
+				const isActionLine =
+					/^\s+Approve: /.test(line) ||
+					/^\s+\d+\. .+: \/(approve|deny)/.test(line);
 				return (
 					<Text
 						key={`${index}-${line}`}

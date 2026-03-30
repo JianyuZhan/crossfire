@@ -107,12 +107,22 @@ export interface ApprovalRequestEvent extends BaseEvent {
 	title: string;
 	payload: unknown;
 	suggestion?: "allow" | "deny";
+	options?: ApprovalOption[];
 }
 
 export interface ApprovalResolvedEvent extends BaseEvent {
 	kind: "approval.resolved";
 	requestId: string;
 	decision: "allow" | "deny" | "allow-always";
+	optionId?: string;
+}
+
+export interface ApprovalOption {
+	id: string;
+	label: string;
+	kind: "allow" | "deny" | "allow-always" | "other";
+	scope?: "once" | "session" | "project" | "user" | "local" | "global";
+	isDefault?: boolean;
 }
 
 // -- Subagent --
@@ -259,6 +269,7 @@ export interface ApprovalDecision {
 	requestId: string;
 	decision: "allow" | "deny" | "allow-always";
 	updatedInput?: unknown;
+	optionId?: string;
 }
 
 const TURN_ID_ROLE_MAP: Record<string, DebateRole> = {

@@ -132,6 +132,47 @@ describe("NormalizedEventSchema", () => {
 		}
 	});
 
+	it("accepts approval.request with approval options", () => {
+		const event = {
+			kind: "approval.request",
+			timestamp: Date.now(),
+			adapterId: "claude",
+			adapterSessionId: "s1",
+			requestId: "r1",
+			approvalType: "tool",
+			title: "Allow Bash?",
+			payload: { command: "ls" },
+			options: [
+				{
+					id: "allow",
+					label: "Allow once",
+					kind: "allow",
+					isDefault: true,
+				},
+				{
+					id: "allow-session",
+					label: "Allow for session",
+					kind: "allow-always",
+					scope: "session",
+				},
+			],
+		};
+		expect(NormalizedEventSchema.safeParse(event).success).toBe(true);
+	});
+
+	it("accepts approval.resolved with provider option selection", () => {
+		const event = {
+			kind: "approval.resolved",
+			timestamp: Date.now(),
+			adapterId: "codex",
+			adapterSessionId: "s1",
+			requestId: "r1",
+			decision: "allow",
+			optionId: "acceptWithExecpolicyAmendment",
+		};
+		expect(NormalizedEventSchema.safeParse(event).success).toBe(true);
+	});
+
 	it("accepts valid turn.completed with usage", () => {
 		const event = {
 			kind: "turn.completed",

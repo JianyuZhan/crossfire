@@ -574,6 +574,66 @@ describe("CodexAdapter", () => {
 			expect(responseMsg.result).toEqual({ approved: true });
 		});
 
+		it("preserves Codex native approval options and selected decision", async () => {
+			const { events } = collectEvents(adapter);
+
+			const sessionPromise = adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {});
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-1" },
+			});
+			const handle = await sessionPromise;
+
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "approve me",
+				turnId: "t1",
+			});
+			const turnMsg = await mock.readNextMessage();
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-t1", status: "running" },
+			});
+			await turnPromise;
+
+			mock.sendServerRequest(100, "item/commandExecution/requestApproval", {
+				command: "git push",
+				id: "cmd1",
+				availableDecisions: ["accept", "acceptForSession", "decline"],
+			});
+
+			const req = await waitForEvent(
+				events,
+				(e) => e.kind === "approval.request",
+			);
+			expect(req.kind).toBe("approval.request");
+			if (req.kind === "approval.request") {
+				expect(req.options?.map((option) => option.id)).toEqual([
+					"accept",
+					"acceptForSession",
+					"decline",
+				]);
+				expect(req.options?.[1]).toMatchObject({
+					kind: "allow-always",
+					scope: "session",
+				});
+
+				await adapter.approve?.({
+					requestId: req.requestId,
+					decision: "allow-always",
+					optionId: "acceptForSession",
+				});
+			}
+
+			const responseMsg = await mock.readNextMessage();
+			expect(responseMsg.id).toBe(100);
+			expect(responseMsg.result).toEqual({ decision: "acceptForSession" });
+		});
+
 		it("handles fileChange approval requests", async () => {
 			const { events } = collectEvents(adapter);
 

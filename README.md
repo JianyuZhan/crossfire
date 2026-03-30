@@ -140,7 +140,7 @@ The terminal UI is a full-screen Ink (React for CLI) application with four stack
 - **Header bar** — Centered branding, debate ID, round/phase, proposer & challenger agent info, and topic
 - **Scrollable content** — Round-by-round display of agent messages, thinking traces, and wrapped tool calls so long commands and inputs stay readable. Scroll with arrow keys, `Ctrl+U`/`Ctrl+D`, or `Home`/`End`
 - **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED). Usage accounting is provider-aware, so some providers are normalized from cumulative usage before display
-- **Command/approval area** — Context-aware live prompt (`>`, `approval>`) plus expanded approval cards that show the pending tool/command and explicit `/approve <id>` / `/deny <id>` actions
+- **Command/approval area** — Context-aware live prompt (`>`, `approval>`) plus expanded approval cards that show the pending tool/command, batch actions, and provider-aware shortcuts such as `/approve 2`, `/approve 2 2`, or `/approve all`
 
 Use `--headless` to skip the TUI. Events and synthesis outputs are still persisted for later inspection.
 
@@ -243,8 +243,8 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 | `/resume`                   | Resume a paused live debate                      | ✅       |
 | `/extend <n>`               | Increase max rounds by N                         | ✅       |
 
-**Approval mode** (auto-activates on approval requests): `/approve`, `/deny` ✅  
-The TUI expands pending approvals into a dedicated highlighted block with the provider, approval type, request summary, and per-request approve/reject commands.
+**Approval mode** (auto-activates on approval requests): `/approve`, `/deny`, `/approve <index>`, `/deny <index>`, `/approve <index> <option>`, `/deny <index> <option>`, `/approve all`, `/deny all` ✅  
+The TUI expands pending approvals into a dedicated highlighted block with the provider, approval type, request summary, per-row index shortcuts, provider-aware option rows, and batch approve / reject commands. Claude now exposes a session-level allow option in that block, while Codex approvals can surface native decision variants when the provider sends them.
 
 `crossfire resume` now reuses the same live command wiring as `crossfire start`, so `/stop`, `/interrupt`, approval commands, inject commands, `/pause`, `/resume`, and `/extend` remain available while resuming an interrupted debate.
 
