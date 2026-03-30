@@ -13,6 +13,7 @@ describe("snapshotToBlocks", () => {
 	it("produces agent-header + message for basic snapshot", () => {
 		const snap: AgentTurnSnapshot = {
 			messageText: "Hello world",
+			narrationTexts: [],
 			tools: [],
 			warnings: [],
 			turnDurationMs: 1500,
@@ -26,6 +27,7 @@ describe("snapshotToBlocks", () => {
 	it("includes tool-call blocks", () => {
 		const snap: AgentTurnSnapshot = {
 			messageText: "result",
+			narrationTexts: [],
 			tools: [
 				{
 					toolUseId: "1",
@@ -49,6 +51,7 @@ describe("liveStateToBlocks", () => {
 			agentType: "claude",
 			status: "thinking",
 			thinkingText: "Let me think...",
+			narrationTexts: [],
 			currentMessageText: "",
 			tools: [],
 			warnings: [],
@@ -63,6 +66,7 @@ describe("liveStateToBlocks", () => {
 			agentType: "codex",
 			status: "speaking",
 			thinkingText: "First reason about the repo shape",
+			narrationTexts: [],
 			currentMessageText: "Here is the answer...",
 			tools: [],
 			warnings: [],
@@ -77,6 +81,7 @@ describe("liveStateToBlocks", () => {
 			role: "challenger",
 			status: "tool",
 			thinkingText: "",
+			narrationTexts: [],
 			currentMessageText: "",
 			tools: [],
 			warnings: [],
@@ -103,6 +108,7 @@ describe("liveStateToBlocks", () => {
 			role: "challenger",
 			status: "speaking",
 			thinkingText: "",
+			narrationTexts: [],
 			currentMessageText: "In progress...",
 			tools: [],
 			warnings: [],
@@ -111,6 +117,66 @@ describe("liveStateToBlocks", () => {
 		const msg = blocks.find((b) => b.kind === "message");
 		expect(msg).toBeDefined();
 		if (msg?.kind === "message") expect(msg.isFinal).toBe(false);
+	});
+
+	it("keeps narration blocks visible while tools are running", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			status: "tool",
+			thinkingText: "",
+			narrationTexts: ["Let me verify a few sources first."],
+			currentMessageText: "",
+			tools: [],
+			warnings: [],
+		};
+		const blocks = liveStateToBlocks(state);
+		const msg = blocks.find((b) => b.kind === "message");
+		expect(msg).toBeDefined();
+		if (msg?.kind === "message") {
+			expect(msg.text).toBe("Let me verify a few sources first.");
+			expect(msg.isFinal).toBe(false);
+		}
+	});
+
+	it("adds tool progress counts to the live header label", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			status: "tool",
+			thinkingText: "",
+			narrationTexts: [],
+			currentMessageText: "",
+			tools: [
+				{
+					toolUseId: "t1",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "running",
+					expanded: true,
+				},
+				{
+					toolUseId: "t2",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "done",
+					expanded: true,
+				},
+				{
+					toolUseId: "t3",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "error",
+					expanded: true,
+				},
+			],
+			warnings: [],
+		};
+		const header = liveStateToBlocks(state)[0];
+		expect(header.kind).toBe("agent-header");
+		if (header.kind === "agent-header") {
+			expect(header.statusLabel).toContain("1 running");
+			expect(header.statusLabel).toContain("1 done");
+			expect(header.statusLabel).toContain("1 error");
+		}
 	});
 });
 

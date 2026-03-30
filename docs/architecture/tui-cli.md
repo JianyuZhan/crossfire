@@ -42,10 +42,13 @@ Important implementation notes:
 - usage accounting is provider-aware, including normalization for providers that report cumulative usage
 - `thinkingText` is front-trimmed to about 4096 characters
 - thinking is no longer a purely transient status-only string; the latest retained thinking summary is kept visible while tools/messages stream and can be copied into completed round snapshots
+- assistant narration emitted before a tool phase is archived into persistent per-turn narration blocks, so the live panel can keep showing model-authored text even after the status flips to `tool`
+- when a live panel is in `tool` state, the header status now includes running / done / error tool counts so long research bursts remain visibly active even if no new assistant prose is emitted
 - `plan.updated` and `subagent.*` are projected into live panel state and completed snapshots rather than being dropped on the floor
 - visible assistant text is stripped of internal `debate_meta` / `judge_verdict` JSON blocks before rendering
 - approval requests retain a short detail summary derived from provider payloads so the operator can see what is waiting before approving it
-- pending approvals also retain `options[]` so the UI can surface provider-aware choices such as Claude session allow and Codex native approval decisions
+- pending approvals retain request-scoped approval capabilities from the adapter layer; the TUI derives a displayable option list from `semanticOptions[]` and selected `nativeOptions[]` instead of depending on one flat provider field
+- when every pending approval shares the same session-scoped allow choice, the command area surfaces a bulk shortcut such as `/approve all 2` instead of forcing the operator to repeat the same indexed choice row by row
 
 ## Render Pipeline
 
@@ -115,7 +118,7 @@ Important wiring nuance:
 - `crossfire start` and `crossfire resume` now share the same live command handler, so stop / interrupt / approval / inject / pause / resume / extend behavior stays aligned across fresh and resumed runs
 - `/interrupt` is routed as a control event to the runner, which attempts provider-native `adapter.interrupt(turnId)` only for the currently active turn; unsupported adapters surface a warning instead
 - the TUI command status area reflects projected live pause state and expands pending approvals into a taller fixed region so commands stay visible while operator action is required
-- `/approve` and `/deny` still work as shorthand defaults, but when an approval exposes `options[]`, the handler can target a specific choice via `/approve <approval-index> <option-index>` or `/deny <approval-index> <option-index>`
+- `/approve` and `/deny` still work as shorthand defaults, but when an approval exposes request-scoped approval capabilities, the handler can target a specific choice via `/approve <approval-index> <option-index>` or `/deny <approval-index> <option-index>`
 - `crossfire replay` is non-interactive and only exposes CLI flags such as `--speed` and `--from-round`; it does not surface the command parser
 
 ## Persistence and Replay

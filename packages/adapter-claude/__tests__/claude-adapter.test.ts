@@ -861,11 +861,15 @@ describe("ClaudeAdapter", () => {
 			);
 			expect(req.kind).toBe("approval.request");
 			if (req.kind === "approval.request") {
-				expect(req.options?.map((option) => option.id)).toEqual([
+				expect(
+					req.capabilities?.semanticOptions?.map((option) => option.id),
+				).toEqual([
 					"allow",
 					"allow-session",
 					"deny",
 				]);
+				expect(req.capabilities?.supportedScopes).toEqual(["session"]);
+				expect(req.capabilities?.supportsUpdatedInput).toBe(true);
 				await adapter.approve?.({
 					requestId: req.requestId,
 					decision: "allow-always",
@@ -878,6 +882,91 @@ describe("ClaudeAdapter", () => {
 				behavior: "allow",
 				updatedInput: { command: "rm -rf /tmp/demo" },
 				updatedPermissions: suggestions,
+			});
+		});
+
+		it("synthesizes a session allow option when Claude suggestions are absent", async () => {
+			let permissionResult:
+				| {
+						behavior: string;
+						updatedInput?: Record<string, unknown>;
+						updatedPermissions?: unknown[];
+				  }
+				| undefined;
+			const queryFn: QueryFn = (opts) => {
+				async function* approvalGen(): AsyncGenerator<SdkMessage> {
+					yield {
+						type: "system/init",
+						sessionId: "ps1",
+						model: "haiku",
+						tools: ["WebFetch"],
+					};
+					if (opts.canUseTool) {
+						permissionResult = (await opts.canUseTool(
+							"WebFetch",
+							{
+								url: "https://example.com",
+								prompt: "Summarize this page",
+							},
+							{
+								toolUseID: "tu1",
+							},
+						)) as {
+							behavior: string;
+							updatedInput?: Record<string, unknown>;
+							updatedPermissions?: unknown[];
+						};
+					}
+					yield {
+						type: "result",
+						subtype: "success",
+						usage: { input_tokens: 10, output_tokens: 5 },
+						duration_ms: 100,
+					};
+				}
+				return { messages: approvalGen(), interrupt: vi.fn() };
+			};
+
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "approve me", turnId: "t1" });
+
+			const req = await waitForEvent(
+				events,
+				(e) => e.kind === "approval.request",
+			);
+			expect(req.kind).toBe("approval.request");
+			if (req.kind === "approval.request") {
+				expect(
+					req.capabilities?.semanticOptions?.map((option) => option.id),
+				).toEqual(["allow", "allow-session", "deny"]);
+				expect(req.capabilities?.supportedScopes).toEqual(["session"]);
+				await adapter.approve?.({
+					requestId: req.requestId,
+					decision: "allow-always",
+					optionId: "allow-session",
+				});
+			}
+
+			await waitForTurnCompleted(events, "t1");
+			expect(permissionResult).toEqual({
+				behavior: "allow",
+				updatedInput: {
+					url: "https://example.com",
+					prompt: "Summarize this page",
+				},
+				updatedPermissions: [
+					{
+						type: "addRules",
+						behavior: "allow",
+						destination: "session",
+						rules: [{ toolName: "WebFetch" }],
+					},
+				],
 			});
 		});
 	});
@@ -920,9 +1009,11 @@ describe("ClaudeAdapter", () => {
 	});
 
 	describe("transcript tracking", () => {
-		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
+		it("appends the latest non-empty final to transcript on turn completion when turnId matches p-N pattern", async () => {
 			const msgs: SdkMessage[] = [
 				{ type: "system/init", sessionId: "ps1", model: "haiku", tools: [] },
+				{ type: "assistant", content: "Draft answer" },
+				{ type: "assistant", content: "" },
 				{ type: "assistant", content: "Hello world" },
 				{
 					type: "result",
@@ -941,12 +1032,45 @@ describe("ClaudeAdapter", () => {
 			await adapter.sendTurn(handle, { prompt: "hello", turnId: "p-1" });
 			await waitForTurnCompleted(events, "p-1");
 
+			const finals = events.filter((event) => event.kind === "message.final");
+			expect(finals).toHaveLength(2);
+			expect(finals.every((event) => event.kind !== "message.final" || event.text.trim().length > 0)).toBe(true);
 			expect(handle.transcript).toHaveLength(1);
 			expect(handle.transcript[0]).toEqual({
 				roundNumber: 1,
 				role: "proposer",
 				content: "Hello world",
 			});
+		});
+
+		it("does not append transcript before turn.completed", async () => {
+			let release: (() => void) | undefined;
+			const queryFn: QueryFn = () => ({
+				messages: (async function* (): AsyncGenerator<SdkMessage> {
+					yield {
+						type: "system/init",
+						sessionId: "ps1",
+						model: "haiku",
+						tools: [],
+					};
+					yield { type: "assistant", content: "Partial answer" };
+					await new Promise<void>((resolve) => {
+						release = resolve;
+					});
+				})(),
+				interrupt: vi.fn(),
+			});
+			adapter = new ClaudeAdapter({ queryFn });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, { prompt: "hello", turnId: "p-1" });
+			await new Promise((resolve) => setTimeout(resolve, 25));
+
+			expect(handle.transcript).toEqual([]);
+
+			release?.();
 		});
 
 		it("uses explicit role and roundNumber from TurnInput", async () => {
@@ -1071,6 +1195,58 @@ describe("ClaudeAdapter", () => {
 	});
 
 	describe("session recovery fallback", () => {
+		it("does not trigger recovery when the stream errors after turn completion", async () => {
+			let callCount = 0;
+			const queryFn: QueryFn = () => {
+				callCount++;
+				async function* gen(): AsyncGenerator<SdkMessage> {
+					yield {
+						type: "system/init",
+						sessionId: "ps1",
+						model: "haiku",
+						tools: [],
+					};
+					yield { type: "assistant", content: "Completed answer" };
+					yield {
+						type: "result",
+						subtype: "success",
+						usage: { input_tokens: 10, output_tokens: 5 },
+						duration_ms: 100,
+					};
+					throw new Error("Claude Code process exited with code 1");
+				}
+				return { messages: gen(), interrupt: vi.fn() };
+			};
+			adapter = new ClaudeAdapter({ queryFn });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			handle.recoveryContext = {
+				systemPrompt: "You are the proposer",
+				topic: "Test topic",
+				role: "proposer",
+				maxRounds: 3,
+				schemaType: "debate_meta",
+			};
+
+			await adapter.sendTurn(handle, {
+				prompt: "initial prompt",
+				turnId: "p-1",
+			});
+			await waitForTurnCompleted(events, "p-1");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+
+			expect(callCount).toBe(1);
+			expect(
+				events.filter((event) => event.kind === "turn.completed"),
+			).toHaveLength(1);
+			expect(events.some((event) => event.kind === "run.warning")).toBe(false);
+			expect(events.some((event) => event.kind === "run.error")).toBe(false);
+			expect(handle.transcript).toHaveLength(1);
+		});
+
 		it("recovers by creating a new session when resume fails and recoveryContext is set", async () => {
 			let callCount = 0;
 			const capturedPrompts: string[] = [];

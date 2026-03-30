@@ -107,7 +107,7 @@ export interface ApprovalRequestEvent extends BaseEvent {
 	title: string;
 	payload: unknown;
 	suggestion?: "allow" | "deny";
-	options?: ApprovalOption[];
+	capabilities?: ApprovalCapabilities;
 }
 
 export interface ApprovalResolvedEvent extends BaseEvent {
@@ -123,6 +123,15 @@ export interface ApprovalOption {
 	kind: "allow" | "deny" | "allow-always" | "other";
 	scope?: "once" | "session" | "project" | "user" | "local" | "global";
 	isDefault?: boolean;
+}
+
+export interface ApprovalCapabilities {
+	semanticOptions?: ApprovalOption[];
+	nativeOptions?: ApprovalOption[];
+	supportedScopes?: Array<
+		"once" | "session" | "project" | "user" | "local" | "global"
+	>;
+	supportsUpdatedInput?: boolean;
 }
 
 // -- Subagent --

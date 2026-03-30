@@ -612,12 +612,17 @@ describe("CodexAdapter", () => {
 			);
 			expect(req.kind).toBe("approval.request");
 			if (req.kind === "approval.request") {
-				expect(req.options?.map((option) => option.id)).toEqual([
+				expect(
+					req.capabilities?.semanticOptions?.map((option) => option.id),
+				).toEqual(["allow", "allow-session", "deny"]);
+				expect(
+					req.capabilities?.nativeOptions?.map((option) => option.id),
+				).toEqual([
 					"accept",
 					"acceptForSession",
 					"decline",
 				]);
-				expect(req.options?.[1]).toMatchObject({
+				expect(req.capabilities?.nativeOptions?.[1]).toMatchObject({
 					kind: "allow-always",
 					scope: "session",
 				});

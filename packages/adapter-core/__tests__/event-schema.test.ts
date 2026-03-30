@@ -132,7 +132,7 @@ describe("NormalizedEventSchema", () => {
 		}
 	});
 
-	it("accepts approval.request with approval options", () => {
+	it("accepts approval.request with request-scoped approval capabilities", () => {
 		const event = {
 			kind: "approval.request",
 			timestamp: Date.now(),
@@ -142,20 +142,24 @@ describe("NormalizedEventSchema", () => {
 			approvalType: "tool",
 			title: "Allow Bash?",
 			payload: { command: "ls" },
-			options: [
-				{
-					id: "allow",
-					label: "Allow once",
-					kind: "allow",
-					isDefault: true,
-				},
-				{
-					id: "allow-session",
-					label: "Allow for session",
-					kind: "allow-always",
-					scope: "session",
-				},
-			],
+			capabilities: {
+				semanticOptions: [
+					{
+						id: "allow",
+						label: "Allow once",
+						kind: "allow",
+						isDefault: true,
+					},
+					{
+						id: "allow-session",
+						label: "Allow for session",
+						kind: "allow-always",
+						scope: "session",
+					},
+				],
+				supportedScopes: ["session"],
+				supportsUpdatedInput: true,
+			},
 		};
 		expect(NormalizedEventSchema.safeParse(event).success).toBe(true);
 	});

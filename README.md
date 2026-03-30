@@ -44,7 +44,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 - **Action-plan first** — The primary output is `action-plan.html` / `action-plan.md`, not just a debate transcript
 - **Multi-provider** — Mix and match Claude (Agent SDK), Codex (JSON-RPC), and Gemini (subprocess) in any role
-- **Real-time TUI** — Split-panel terminal UI with live streaming, retained thinking summaries, wrapped tool-call traces, highlighted approval cards, and convergence metrics
+- **Real-time TUI** — Split-panel terminal UI with live streaming, retained thinking summaries, persistent pre-tool narration blocks, wrapped tool-call traces, live tool progress counts, highlighted approval cards, and convergence metrics
 - **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates and replay completed ones from the same source of truth
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
@@ -61,7 +61,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 ## What You Get
 
-- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, retained thinking summaries, wrapped tool details, approval prompts, judge feedback, and convergence tracking
+- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, retained thinking summaries, persistent pre-tool narration, wrapped tool details, live tool progress counts, approval prompts, judge feedback, and convergence tracking
 - **Action plan outputs** — Final report in Markdown and HTML for sharing, editing, or automation
 - **Full transcript** — Human-readable transcript in Markdown and HTML
 - **Replayable audit trail** — Event-sourced JSONL logs plus `index.json` metadata for replay, resume, and status inspection
@@ -244,7 +244,7 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 | `/extend <n>`               | Increase max rounds by N                         | ✅       |
 
 **Approval mode** (auto-activates on approval requests): `/approve`, `/deny`, `/approve <index>`, `/deny <index>`, `/approve <index> <option>`, `/deny <index> <option>`, `/approve all`, `/deny all` ✅  
-The TUI expands pending approvals into a dedicated highlighted block with the provider, approval type, request summary, per-row index shortcuts, provider-aware option rows, and batch approve / reject commands. Claude now exposes a session-level allow option in that block, while Codex approvals can surface native decision variants when the provider sends them.
+The TUI expands pending approvals into a dedicated highlighted block with the provider, approval type, request summary, per-row index shortcuts, provider-aware option rows, and batch approve / reject commands. When every pending approval shares the same session-level allow option, the block now surfaces a direct shortcut such as `/approve all 2`. Claude tool approvals always expose a session-level allow option through Crossfire's normalized approval capabilities, while Codex approvals can surface native decision variants when the provider sends them.
 
 `crossfire resume` now reuses the same live command wiring as `crossfire start`, so `/stop`, `/interrupt`, approval commands, inject commands, `/pause`, `/resume`, and `/extend` remain available while resuming an interrupted debate.
 

@@ -10,6 +10,30 @@ interface CommandStatusLineProps {
 
 const MAX_VISIBLE_APPROVALS = 3;
 
+function findSharedSessionShortcut(state: CommandState): string | undefined {
+	if (state.pendingApprovals.length === 0) return undefined;
+
+	let sharedOptionIndex: number | undefined;
+	for (const approval of state.pendingApprovals) {
+		const optionIndex =
+			approval.options?.findIndex(
+				(option) =>
+					option.id === "allow-session" ||
+					(option.kind === "allow-always" && option.scope === "session"),
+			) ?? -1;
+		if (optionIndex < 0) return undefined;
+		if (sharedOptionIndex === undefined) {
+			sharedOptionIndex = optionIndex;
+			continue;
+		}
+		if (sharedOptionIndex !== optionIndex) return undefined;
+	}
+
+	return sharedOptionIndex !== undefined
+		? `/approve all ${sharedOptionIndex + 1}`
+		: undefined;
+}
+
 function wrapPlainText(text: string, width: number): string[] {
 	if (!text) return [""];
 	const maxWidth = Math.max(12, width);
@@ -64,6 +88,10 @@ function buildApprovalLines(state: CommandState, width: number): string[] {
 		`APPROVAL REQUIRED (${state.pendingApprovals.length} pending)`,
 		"Quick actions: /approve all    /deny all",
 	];
+	const sessionShortcut = findSharedSessionShortcut(state);
+	if (sessionShortcut) {
+		lines.push(`Session shortcut: ${sessionShortcut}`);
+	}
 	const visible = state.pendingApprovals.slice(0, MAX_VISIBLE_APPROVALS);
 
 	for (let i = 0; i < visible.length; i++) {

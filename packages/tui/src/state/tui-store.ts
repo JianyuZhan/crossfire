@@ -1,4 +1,7 @@
-import type { ApprovalOption } from "@crossfire/adapter-core";
+import type {
+	ApprovalCapabilities,
+	ApprovalOption,
+} from "@crossfire/adapter-core";
 import {
 	type AnyEvent,
 	type DebateState,
@@ -36,6 +39,7 @@ function defaultAgentPanel(
 		status: "idle",
 		thinkingText: "",
 		thinkingType: undefined,
+		narrationTexts: [],
 		currentMessageText: "",
 		tools: [],
 		subagents: [],
@@ -134,6 +138,27 @@ function summarizeApprovalDetail(event: {
 	return summarizeValue(payload) ?? truncateSummary(event.title);
 }
 
+function buildDisplayApprovalOptions(
+	capabilities?: ApprovalCapabilities,
+): ApprovalOption[] | undefined {
+	if (!capabilities) return undefined;
+
+	const options: ApprovalOption[] = [...(capabilities.semanticOptions ?? [])];
+	const simpleNativeIds = new Set([
+		"accept",
+		"acceptForSession",
+		"decline",
+		"cancel",
+	]);
+	for (const option of capabilities.nativeOptions ?? []) {
+		if (simpleNativeIds.has(option.id)) continue;
+		if (options.some((existing) => existing.id === option.id)) continue;
+		options.push(option);
+	}
+
+	return options.length > 0 ? options : undefined;
+}
+
 const DEFAULT_CONFIG = {
 	topic: "",
 	maxRounds: 10,
@@ -158,6 +183,9 @@ const DEFAULT_DEBATE_STATE: DebateState = {
 function captureSnapshot(panel: LiveAgentPanelState): AgentTurnSnapshot {
 	return {
 		messageText: stripInternalToolBlocks(panel.currentMessageText),
+		narrationTexts: panel.narrationTexts.map((text) =>
+			stripInternalToolBlocks(text),
+		),
 		thinkingText: panel.thinkingText || undefined,
 		thinkingType: panel.thinkingType,
 		latestPlan: panel.latestPlan?.map((step) => ({ ...step })),
@@ -168,6 +196,16 @@ function captureSnapshot(panel: LiveAgentPanelState): AgentTurnSnapshot {
 		warnings: [...panel.warnings],
 		error: panel.error,
 	};
+}
+
+function archiveNarration(panel: LiveAgentPanelState): void {
+	const narration = stripInternalToolBlocks(panel.currentMessageText).trim();
+	if (!narration) return;
+	const previous = panel.narrationTexts.at(-1)?.trim();
+	if (previous !== narration) {
+		panel.narrationTexts.push(narration);
+	}
+	panel.currentMessageText = "";
 }
 
 export class TuiStore {
@@ -626,6 +664,7 @@ export class TuiStore {
 				const p = this.state[e.speaker];
 				p.thinkingText = "";
 				p.thinkingType = undefined;
+				p.narrationTexts = [];
 				p.currentMessageText = "";
 				p.tools = [];
 				p.latestPlan = undefined;
@@ -671,6 +710,7 @@ export class TuiStore {
 				if (p.status === "idle") {
 					p.thinkingText = "";
 					p.thinkingType = undefined;
+					p.narrationTexts = [];
 					p.currentMessageText = "";
 				}
 				p.status = "thinking";
@@ -687,6 +727,7 @@ export class TuiStore {
 					if (p.status === "idle") {
 						p.thinkingText = "";
 						p.thinkingType = undefined;
+						p.narrationTexts = [];
 						p.currentMessageText = "";
 					}
 					p.status = "speaking";
@@ -707,10 +748,13 @@ export class TuiStore {
 			case "message.final": {
 				const p = this.panel();
 				if (p) {
-					p.currentMessageText = stripInternalToolBlocks(
+					const finalText = stripInternalToolBlocks(
 						(event as { text: string }).text,
 					);
-					p.status = "done";
+					if (finalText.trim().length > 0) {
+						p.currentMessageText = finalText;
+						p.status = "done";
+					}
 				} else if (this.state.judge.judgeStatus === "evaluating") {
 					// Route judge final message to judge panel
 					this.state.judge.judgeMessageText = stripInternalToolBlocks(
@@ -733,8 +777,10 @@ export class TuiStore {
 				if (p.status === "idle") {
 					p.thinkingText = "";
 					p.thinkingType = undefined;
+					p.narrationTexts = [];
 					p.currentMessageText = "";
 				}
+				archiveNarration(p);
 				p.status = "tool";
 				p.tools.push({
 					toolUseId: e.toolUseId,
@@ -790,7 +836,7 @@ export class TuiStore {
 					title: string;
 					payload?: unknown;
 					suggestion?: "allow" | "deny";
-					options?: ApprovalOption[];
+					capabilities?: ApprovalCapabilities;
 				};
 				this.state.command.pendingApprovals.push({
 					requestId: e.requestId,
@@ -800,7 +846,8 @@ export class TuiStore {
 					title: e.title,
 					detail: summarizeApprovalDetail(e),
 					suggestion: e.suggestion,
-					options: e.options,
+					capabilities: e.capabilities,
+					options: buildDisplayApprovalOptions(e.capabilities),
 				});
 				this.state.command.mode = "approval";
 				break;

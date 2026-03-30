@@ -86,6 +86,38 @@ describe("TuiStore", () => {
 		expect(store.getState().proposer.currentMessageText).toBe("Hello world!");
 	});
 
+	it("ignores empty message.final when visible text already exists", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 3,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("message.final", {
+				text: "Visible answer",
+				role: "assistant",
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("message.final", {
+				text: "",
+				role: "assistant",
+				turnId: "p-1",
+			}),
+		);
+		expect(store.getState().proposer.currentMessageText).toBe("Visible answer");
+	});
+
 	it("tracks tool calls and collapses on turn.completed", () => {
 		const store = new TuiStore();
 		store.handleEvent(
@@ -148,6 +180,44 @@ describe("TuiStore", () => {
 		expect(s.proposer.turnDurationMs).toBe(500);
 	});
 
+	it("archives pre-tool narration into a persistent block", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				config: {
+					topic: "T",
+					maxRounds: 3,
+					judgeEveryNRounds: 0,
+					convergenceThreshold: 0.3,
+				},
+			}),
+		);
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("message.final", {
+				text: "Let me research this first.",
+				role: "assistant",
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("tool.call", {
+				toolUseId: "t1",
+				toolName: "WebFetch",
+				input: { url: "https://example.com" },
+				turnId: "p-1",
+			}),
+		);
+		const s = store.getState();
+		expect(s.proposer.status).toBe("tool");
+		expect(s.proposer.narrationTexts).toEqual([
+			"Let me research this first.",
+		]);
+		expect(s.proposer.currentMessageText).toBe("");
+	});
+
 	it("tracks approval requests and switches command mode", () => {
 		const store = new TuiStore();
 		store.handleEvent(
@@ -161,20 +231,24 @@ describe("TuiStore", () => {
 					tool_name: "Bash",
 					tool_input: { command: "ls -la /tmp/somewhere" },
 				},
-				options: [
-					{
-						id: "allow",
-						label: "Allow once",
-						kind: "allow",
-						isDefault: true,
-					},
-					{
-						id: "allow-session",
-						label: "Allow for session",
-						kind: "allow-always",
-						scope: "session",
-					},
-				],
+				capabilities: {
+					semanticOptions: [
+						{
+							id: "allow",
+							label: "Allow once",
+							kind: "allow",
+							isDefault: true,
+						},
+						{
+							id: "allow-session",
+							label: "Allow for session",
+							kind: "allow-always",
+							scope: "session",
+						},
+					],
+					supportedScopes: ["session"],
+					supportsUpdatedInput: true,
+				},
 				turnId: "p-1",
 			}),
 		);
@@ -189,6 +263,9 @@ describe("TuiStore", () => {
 		expect(s.command.pendingApprovals[0].detail).toContain(
 			"ls -la /tmp/somewhere",
 		);
+		expect(s.command.pendingApprovals[0].capabilities?.supportedScopes).toEqual([
+			"session",
+		]);
 		expect(s.command.pendingApprovals[0].options).toHaveLength(2);
 		expect(s.command.pendingApprovals[0].options?.[1]?.scope).toBe("session");
 	});
@@ -260,6 +337,7 @@ describe("TuiStore", () => {
 		);
 		const s = store.getState();
 		expect(s.challenger.thinkingText).toBe("");
+		expect(s.challenger.narrationTexts).toEqual([]);
 		expect(s.challenger.currentMessageText).toBe("");
 		expect(s.challenger.tools).toHaveLength(0);
 	});

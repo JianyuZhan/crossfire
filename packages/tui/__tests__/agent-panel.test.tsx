@@ -14,6 +14,7 @@ function makePanel(
 		role: "proposer",
 		status: "idle",
 		thinkingText: "",
+		narrationTexts: [],
 		currentMessageText: "",
 		tools: [],
 		warnings: [],
@@ -106,6 +107,60 @@ describe("AgentPanel — live mode", () => {
 		expect(lastFrame()).toContain("Read");
 	});
 
+	it("shows tool progress counts in the live status", () => {
+		const { lastFrame } = render(
+			<AgentPanel
+				mode="live"
+				role="proposer"
+				state={makePanel({
+					status: "tool",
+					tools: [
+						{
+							toolUseId: "t1",
+							toolName: "WebFetch",
+							inputSummary: "{}",
+							status: "running",
+							expanded: true,
+						},
+						{
+							toolUseId: "t2",
+							toolName: "WebFetch",
+							inputSummary: "{}",
+							status: "done",
+							expanded: true,
+						},
+					],
+				})}
+			/>,
+		);
+		expect(lastFrame()).toContain("1 running");
+		expect(lastFrame()).toContain("1 done");
+	});
+
+	it("keeps narration visible while tools are running", () => {
+		const { lastFrame } = render(
+			<AgentPanel
+				mode="live"
+				role="proposer"
+				state={makePanel({
+					status: "tool",
+					narrationTexts: ["Let me check the docs before continuing."],
+					tools: [
+						{
+							toolUseId: "t1",
+							toolName: "WebFetch",
+							inputSummary: '{"url":"https://example.com"}',
+							status: "running",
+							expanded: true,
+						},
+					],
+				})}
+			/>,
+		);
+		expect(lastFrame()).toContain("Let me check the docs before continuing.");
+		expect(lastFrame()).toContain("WebFetch");
+	});
+
 	it("shows error banner", () => {
 		const { lastFrame } = render(
 			<AgentPanel
@@ -153,6 +208,7 @@ describe("AgentPanel — snapshot mode", () => {
 	it("renders completed snapshot content", () => {
 		const snapshot: AgentTurnSnapshot = {
 			messageText: "I believe we should...",
+			narrationTexts: ["Let me validate that assumption first."],
 			tools: [],
 			turnDurationMs: 1500,
 			warnings: [],
@@ -161,6 +217,7 @@ describe("AgentPanel — snapshot mode", () => {
 			<AgentPanel mode="snapshot" role="challenger" snapshot={snapshot} />,
 		);
 		expect(lastFrame()).toContain("Challenger");
+		expect(lastFrame()).toContain("Let me validate that assumption first.");
 		expect(lastFrame()).toContain("I believe we should...");
 		expect(lastFrame()).toContain("1.5s");
 	});

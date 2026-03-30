@@ -225,7 +225,10 @@ export function buildPanelLines(
 				const statusColor = block.status === "error" ? "red" : "cyan";
 				result.push(
 					screenLine([
-						{ text: `  ${block.status}${dur}`, style: { color: statusColor } },
+						{
+							text: `  ${(block.statusLabel ?? block.status)}${dur}`,
+							style: { color: statusColor },
+						},
 					]),
 				);
 				break;

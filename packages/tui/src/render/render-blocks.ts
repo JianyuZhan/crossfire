@@ -24,6 +24,18 @@ function toolToBlock(t: LiveToolEntry): RenderBlock {
 	};
 }
 
+function buildLiveStatusLabel(state: LiveAgentPanelState): string | undefined {
+	if (state.status !== "tool") return undefined;
+	const running = state.tools.filter((tool) => tool.status === "running").length;
+	const done = state.tools.filter((tool) => tool.status === "done").length;
+	const error = state.tools.filter((tool) => tool.status === "error").length;
+	const parts: string[] = [];
+	if (running > 0) parts.push(`${running} running`);
+	if (done > 0) parts.push(`${done} done`);
+	if (error > 0) parts.push(`${error} error`);
+	return parts.length > 0 ? `tool (${parts.join(", ")})` : undefined;
+}
+
 export function snapshotToBlocks(
 	snap: AgentTurnSnapshot,
 	role: AgentRole,
@@ -44,6 +56,10 @@ export function snapshotToBlocks(
 			text: snap.thinkingText,
 			thinkingType: snap.thinkingType,
 		});
+	}
+	for (const narration of snap.narrationTexts ?? []) {
+		if (!narration) continue;
+		blocks.push({ kind: "message", text: narration, isFinal: false });
 	}
 	if (snap.latestPlan?.length) {
 		blocks.push({ kind: "plan", steps: snap.latestPlan });
@@ -70,6 +86,7 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 			role: state.role,
 			agentType: state.agentType,
 			status: state.status,
+			statusLabel: buildLiveStatusLabel(state),
 			duration: state.turnDurationMs,
 		},
 	];
@@ -79,6 +96,10 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 			text: state.thinkingText,
 			thinkingType: state.thinkingType,
 		});
+	}
+	for (const narration of state.narrationTexts) {
+		if (!narration) continue;
+		blocks.push({ kind: "message", text: narration, isFinal: false });
 	}
 	if (state.latestPlan?.length) {
 		blocks.push({ kind: "plan", steps: state.latestPlan });

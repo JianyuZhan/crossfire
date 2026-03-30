@@ -70,6 +70,73 @@ describe("CommandStatusLine", () => {
 		expect(output).toContain("/deny 1");
 	});
 
+	it("shows a bulk session-allow hint when all pending approvals support it", () => {
+		const state = makeState({
+			mode: "approval",
+			pendingApprovals: [
+				{
+					requestId: "ar-1",
+					adapterId: "claude",
+					adapterSessionId: "claude-session-1",
+					approvalType: "tool",
+					title: "Approve tool: WebFetch",
+					detail: 'Tool: WebFetch {"url":"https://example.com/a"}',
+					options: [
+						{
+							id: "allow",
+							label: "Allow once",
+							kind: "allow",
+							isDefault: true,
+						},
+						{
+							id: "allow-session",
+							label: "Allow for session",
+							kind: "allow-always",
+							scope: "session",
+						},
+						{
+							id: "deny",
+							label: "Reject",
+							kind: "deny",
+						},
+					],
+				},
+				{
+					requestId: "ar-2",
+					adapterId: "claude",
+					adapterSessionId: "claude-session-1",
+					approvalType: "tool",
+					title: "Approve tool: WebFetch",
+					detail: 'Tool: WebFetch {"url":"https://example.com/b"}',
+					options: [
+						{
+							id: "allow",
+							label: "Allow once",
+							kind: "allow",
+							isDefault: true,
+						},
+						{
+							id: "allow-session",
+							label: "Allow for session",
+							kind: "allow-always",
+							scope: "session",
+						},
+						{
+							id: "deny",
+							label: "Reject",
+							kind: "deny",
+						},
+					],
+				},
+			],
+		});
+
+		const { lastFrame } = render(
+			<CommandStatusLine state={state} width={72} />,
+		);
+		expect(lastFrame()).toContain("Session shortcut: /approve all 2");
+	});
+
 	it("reports taller fixed height when approvals are visible", () => {
 		const normalHeight = commandStatusLineHeight(makeState(), 80);
 		const approvalHeight = commandStatusLineHeight(

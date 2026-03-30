@@ -13,6 +13,7 @@ import {
 } from "../src/errors.js";
 import {
 	type AgentAdapter,
+	type ApprovalCapabilities,
 	type ApprovalDecision,
 	type ApprovalOption,
 	type ApprovalRequestEvent,
@@ -131,8 +132,8 @@ describe("NormalizedEvent types", () => {
 		expect(event.approvalType).toBe("command");
 	});
 
-	it("ApprovalRequestEvent accepts approval options", () => {
-		const options: ApprovalOption[] = [
+	it("ApprovalRequestEvent accepts request-scoped approval capabilities", () => {
+		const semanticOptions: ApprovalOption[] = [
 			{
 				id: "allow",
 				label: "Allow once",
@@ -146,6 +147,11 @@ describe("NormalizedEvent types", () => {
 				scope: "session",
 			},
 		];
+		const capabilities: ApprovalCapabilities = {
+			semanticOptions,
+			supportedScopes: ["session"],
+			supportsUpdatedInput: true,
+		};
 		const event: ApprovalRequestEvent = {
 			kind: "approval.request",
 			timestamp: Date.now(),
@@ -156,10 +162,11 @@ describe("NormalizedEvent types", () => {
 			approvalType: "tool",
 			title: "Allow Bash?",
 			payload: { command: "ls" },
-			options,
+			capabilities,
 		};
-		expect(event.options).toHaveLength(2);
-		expect(event.options?.[1]?.scope).toBe("session");
+		expect(event.capabilities?.semanticOptions).toHaveLength(2);
+		expect(event.capabilities?.semanticOptions?.[1]?.scope).toBe("session");
+		expect(event.capabilities?.supportsUpdatedInput).toBe(true);
 	});
 
 	it("ApprovalDecision accepts provider option selection", () => {

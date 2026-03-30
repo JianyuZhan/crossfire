@@ -53,9 +53,22 @@ function statusText(state: LiveAgentPanelState): string {
 		case "thinking":
 			return "Thinking...";
 		case "tool":
-			return state.tools.length > 0
-				? `Tool: ${state.tools[state.tools.length - 1].toolName}`
-				: "Tool";
+			if (state.tools.length === 0) return "Tool";
+			{
+				const running = state.tools.filter(
+					(tool) => tool.status === "running",
+				).length;
+				const done = state.tools.filter((tool) => tool.status === "done").length;
+				const error = state.tools.filter(
+					(tool) => tool.status === "error",
+				).length;
+				const parts: string[] = [];
+				if (running > 0) parts.push(`${running} running`);
+				if (done > 0) parts.push(`${done} done`);
+				if (error > 0) parts.push(`${error} error`);
+				const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+				return `Tool: ${state.tools[state.tools.length - 1].toolName}${suffix}`;
+			}
 		case "speaking":
 			return "Responding...";
 		case "done":
@@ -181,6 +194,11 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 						</Text>
 					</Box>
 				)}
+				{snapshot.narrationTexts?.map((text, i) => (
+					<Box key={`${text}-${i}`} marginTop={1}>
+						<Text>{text}</Text>
+					</Box>
+				))}
 				{snapshot.latestPlan && snapshot.latestPlan.length > 0 && (
 					<Box marginTop={1} flexDirection="column">
 						<PlanList steps={snapshot.latestPlan} />
@@ -242,6 +260,11 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 					</Text>
 				</Box>
 			)}
+			{state.narrationTexts.map((text, i) => (
+				<Box key={`${text}-${i}`} marginTop={1}>
+					<Text>{text}</Text>
+				</Box>
+			))}
 			{state.latestPlan && state.latestPlan.length > 0 && (
 				<Box marginTop={1} flexDirection="column">
 					<PlanList steps={state.latestPlan} />

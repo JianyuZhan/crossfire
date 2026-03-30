@@ -1,6 +1,7 @@
 import type {
 	AdapterCapabilities,
 	AgentAdapter,
+	ApprovalCapabilities,
 	ApprovalDecision,
 	ApprovalOption,
 	LocalTurnMetrics,
@@ -37,6 +38,8 @@ interface QueryContext {
 	query: QueryResult;
 	currentTurnId: string;
 	pendingLocalMetrics?: LocalTurnMetrics;
+	latestNonEmptyFinalText?: string;
+	turnCompleted?: boolean;
 }
 
 /** Pending approval request state */
@@ -44,6 +47,7 @@ interface PendingApproval {
 	requestId: string;
 	adapterSessionId: string;
 	turnId: string;
+	toolName: string;
 	toolInput: Record<string, unknown>;
 	suggestions?: ClaudePermissionUpdate[];
 	resolve: (value: ClaudePermissionResult) => void;
@@ -52,7 +56,6 @@ interface PendingApproval {
 let sessionCounter = 0;
 
 function buildApprovalOptions(
-	suggestions?: ClaudePermissionUpdate[],
 ): ApprovalOption[] {
 	const options: ApprovalOption[] = [
 		{
@@ -62,22 +65,66 @@ function buildApprovalOptions(
 			scope: "once",
 			isDefault: true,
 		},
-	];
-	if (suggestions && suggestions.length > 0) {
-		options.push({
+		{
 			id: "allow-session",
 			label: "Allow for session",
 			kind: "allow-always",
 			scope: "session",
-		});
-	}
-	options.push({
-		id: "deny",
-		label: "Reject",
-		kind: "deny",
-		isDefault: true,
-	});
+		},
+		{
+			id: "deny",
+			label: "Reject",
+			kind: "deny",
+			isDefault: true,
+		},
+	];
 	return options;
+}
+
+function buildApprovalCapabilities(
+	suggestions?: ClaudePermissionUpdate[],
+): ApprovalCapabilities {
+	const supportedScopes = Array.from(
+		new Set(
+			(suggestions ?? [])
+				.map((suggestion) => suggestion.destination)
+				.map((destination) => {
+					switch (destination) {
+						case "session":
+							return "session" as const;
+						case "projectSettings":
+							return "project" as const;
+						case "userSettings":
+							return "user" as const;
+						case "localSettings":
+							return "local" as const;
+						case "cliArg":
+							return "global" as const;
+					}
+				})
+				.filter((scope) => scope !== undefined),
+		),
+	);
+	if (!supportedScopes.includes("session")) {
+		supportedScopes.unshift("session");
+	}
+
+	return {
+		semanticOptions: buildApprovalOptions(),
+		supportedScopes,
+		supportsUpdatedInput: true,
+	};
+}
+
+function buildSessionPermissionUpdates(toolName: string): ClaudePermissionUpdate[] {
+	return [
+		{
+			type: "addRules",
+			behavior: "allow",
+			destination: "session",
+			rules: [{ toolName }],
+		},
+	];
 }
 
 /**
@@ -140,7 +187,9 @@ export class ClaudeAdapter implements AgentAdapter {
 		): Promise<ClaudePermissionResult> => {
 			const toolUseId = options.toolUseID ?? String(Date.now());
 			const requestId = `ar-${input.turnId}-${toolUseId}`;
-			const approvalOptions = buildApprovalOptions(options.suggestions);
+			const approvalCapabilities = buildApprovalCapabilities(
+				options.suggestions,
+			);
 
 			this.emit({
 				...ctx,
@@ -158,7 +207,7 @@ export class ClaudeAdapter implements AgentAdapter {
 					agent_id: options.agentID,
 				},
 				suggestion: "allow",
-				options: approvalOptions,
+				capabilities: approvalCapabilities,
 			});
 
 			return new Promise((resolve) => {
@@ -166,6 +215,7 @@ export class ClaudeAdapter implements AgentAdapter {
 					requestId,
 					adapterSessionId: handle.adapterSessionId,
 					turnId: input.turnId,
+					toolName,
 					toolInput,
 					suggestions: options.suggestions,
 					resolve,
@@ -185,6 +235,8 @@ export class ClaudeAdapter implements AgentAdapter {
 			query,
 			currentTurnId: input.turnId,
 			pendingLocalMetrics: localMetrics,
+			latestNonEmptyFinalText: undefined,
+			turnCompleted: false,
 		});
 
 		// Process the async generator in the background
@@ -233,10 +285,13 @@ export class ClaudeAdapter implements AgentAdapter {
 				updatedInput:
 					(req.updatedInput as Record<string, unknown> | undefined) ??
 					pending.toolInput,
-				...(shouldPersist &&
-				pending.suggestions &&
-				pending.suggestions.length > 0
-					? { updatedPermissions: pending.suggestions }
+				...(shouldPersist
+					? {
+							updatedPermissions:
+								pending.suggestions && pending.suggestions.length > 0
+									? pending.suggestions
+									: buildSessionPermissionUpdates(pending.toolName),
+						}
 					: {}),
 			});
 		}
@@ -281,25 +336,44 @@ export class ClaudeAdapter implements AgentAdapter {
 		for await (const msg of messages) {
 			const events = mapSdkMessage(msg, ctx);
 			for (const event of events) {
+				const queryCtx = this.queries.get(ctx.adapterSessionId);
 				if (event.kind === "session.started") {
 					handle.providerSessionId = event.providerSessionId;
 				}
 				if (event.kind === "usage.updated") {
-					const queryCtx = this.queries.get(ctx.adapterSessionId);
 					if (queryCtx?.pendingLocalMetrics) {
 						event.localMetrics = queryCtx.pendingLocalMetrics;
 					}
 				}
 				if (event.kind === "message.final") {
+					if (event.text.trim().length === 0) {
+						continue;
+					}
+					if (queryCtx) {
+						queryCtx.latestNonEmptyFinalText = event.text;
+					}
+				}
+				if (event.kind === "turn.completed") {
+					if (queryCtx) {
+						queryCtx.turnCompleted = true;
+					}
 					const role = turnInput.role ?? parseTurnId(turnInput.turnId).role;
 					const roundNumber =
 						turnInput.roundNumber ?? parseTurnId(turnInput.turnId).roundNumber;
-					if (role && roundNumber !== undefined) {
+					if (
+						event.status === "completed" &&
+						role &&
+						roundNumber !== undefined &&
+						queryCtx?.latestNonEmptyFinalText
+					) {
 						handle.transcript.push({
 							roundNumber,
 							role,
-							content: event.text,
+							content: queryCtx.latestNonEmptyFinalText,
 						});
+					}
+					if (queryCtx) {
+						queryCtx.latestNonEmptyFinalText = undefined;
 					}
 				}
 				this.emit(event);
@@ -316,6 +390,10 @@ export class ClaudeAdapter implements AgentAdapter {
 		try {
 			await this.consumeStream(messages, ctx, handle, turnInput);
 		} catch (err) {
+			const queryCtx = this.queries.get(ctx.adapterSessionId);
+			if (queryCtx?.currentTurnId === turnInput.turnId && queryCtx.turnCompleted) {
+				return;
+			}
 			const message = err instanceof Error ? err.message : String(err);
 
 			// Attempt recovery if recoveryContext is available and we had a provider session

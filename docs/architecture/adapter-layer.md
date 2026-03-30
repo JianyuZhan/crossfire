@@ -53,6 +53,23 @@ interface ApprovalOption {
   isDefault?: boolean;
 }
 
+interface ApprovalCapabilities {
+  semanticOptions?: ApprovalOption[];
+  nativeOptions?: ApprovalOption[];
+  supportedScopes?: Array<"once" | "session" | "project" | "user" | "local" | "global">;
+  supportsUpdatedInput?: boolean;
+}
+
+interface ApprovalRequestEvent {
+  kind: "approval.request";
+  requestId: string;
+  approvalType: "tool" | "command" | "file-change" | "user-input";
+  title: string;
+  payload: unknown;
+  suggestion?: "allow" | "deny";
+  capabilities?: ApprovalCapabilities;
+}
+
 interface ApprovalDecision {
   requestId: string;
   decision: "allow" | "deny" | "allow-always";
@@ -132,7 +149,10 @@ Why these events and fields matter:
 - `usage.updated` is the main usage-accounting contract used by the TUI and metrics views; consumers should not rely on `turn.completed.usage` always being present
 - `semantics` is required because providers do not report usage the same way; for example, Codex reports cumulative thread totals, so consumers must delta those values locally
 - `cacheReadTokens` and `localMetrics` are not decorative metadata; current consumers use them to show cache behavior and local prompt-size overhead
-- `approval.request` may include normalized or provider-native `options[]`; consumers may use those to render richer approval UIs without losing a stable fallback path
+- `AdapterCapabilities` remains a static adapter-level contract; request-level approval affordances now live under `approval.request.capabilities`
+- `approval.request.capabilities.semanticOptions[]` describes Crossfire's normalized approval semantics for that specific request
+- `approval.request.capabilities.nativeOptions[]` preserves provider-native approval choices when they exist
+- `approval.request.capabilities.supportedScopes[]` and `supportsUpdatedInput` are request-scoped, not adapter-scoped, because they can vary by provider and approval type
 - `approval.resolved.optionId` captures the specific provider option selected when approval is not just a plain allow/deny
 - the event vocabulary is therefore a shared runtime contract between adapters and consumers, not an arbitrary naming layer
 
@@ -223,8 +243,10 @@ interface StartSessionInput {
 - tool and subagent lifecycle visibility comes from SDK hooks: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, and `SubagentStop`
 - approval support is bridged through `canUseTool(toolName, input, options)`, which emits `approval.request` and blocks until `approve()` resolves it
 - `approval.request.payload` now retains Claude `suggestions`, `blockedPath`, and `decisionReason` metadata for display/debugging
-- Claude does not expose a provider-native button array; Crossfire derives normalized options such as `Allow once`, `Allow for session`, and `Reject`
+- Claude does not expose a provider-native button array; Crossfire fills `approval.request.capabilities.semanticOptions[]` itself and augments them with SDK permission context when available
+- Claude tool approvals always advertise a normalized session-scoped allow option; when the SDK does not provide reusable `suggestions`, Crossfire synthesizes a session `addRules` permission update for the requested tool instead
 - `approve()` may pass both `updatedInput` and session-scoped `updatedPermissions`, so Claude's "allow for session" flow is now preserved instead of being flattened to plain allow
+- once Claude has emitted `turn.completed` for a turn, trailing process-exit errors are ignored instead of triggering a spurious recovery attempt for an already-finished turn
 - local prompt metrics are attached to the first `usage.updated` event observed for the turn
 - on stream failure, if `recoveryContext` and a prior `providerSessionId` exist, the adapter emits `run.warning`, clears resume state, and retries once with a transcript recovery prompt
 - if transcript recovery also fails, the adapter emits a terminal `run.error`
@@ -237,7 +259,8 @@ interface StartSessionInput {
 - `sendTurn()` uses `turn/start`
 - the current adapter effectively assumes one live active session per adapter instance because event routing uses one shared JSON-RPC client plus a wildcard notification handler
 - approval requests are normalized as `command`, `file-change`, or `user-input`
-- when Codex includes `availableDecisions`, Crossfire preserves them as `approval.request.options[]` instead of flattening them immediately to allow/deny
+- when Codex includes `availableDecisions`, Crossfire preserves them as `approval.request.capabilities.nativeOptions[]`
+- Crossfire also derives `approval.request.capabilities.semanticOptions[]` for simple UI fallbacks without losing the original native decisions
 - `approve()` now forwards a selected native `optionId` back to Codex as `{ decision: optionId }`; it only falls back to `{ approved: boolean }` when no richer native option exists
 - `debate_meta` and `judge_verdict` are invoked through shell commands; successful command output is parsed back into synthetic `tool.call` events so downstream projection can read structured metadata
 - Codex emits `thinking.delta` as reasoning summaries, not raw thinking

@@ -1,6 +1,7 @@
 import {
 	type AdapterCapabilities,
 	type AgentAdapter,
+	type ApprovalCapabilities,
 	type ApprovalDecision,
 	type ApprovalOption,
 	CODEX_CAPABILITIES,
@@ -173,6 +174,72 @@ function extractApprovalOptions(
 	}
 
 	return options.length > 0 ? options : undefined;
+}
+
+function buildSemanticOptions(
+	nativeOptions?: ApprovalOption[],
+): ApprovalOption[] | undefined {
+	if (!nativeOptions || nativeOptions.length === 0) return undefined;
+
+	const semanticOptions: ApprovalOption[] = [];
+	const allowOption = nativeOptions.find((option) => option.kind === "allow");
+	if (allowOption) {
+		semanticOptions.push({
+			id: "allow",
+			label: "Allow once",
+			kind: "allow",
+			scope: "once",
+			isDefault: allowOption.isDefault,
+		});
+	}
+	const allowAlwaysOption = nativeOptions.find(
+		(option) => option.kind === "allow-always",
+	);
+	if (allowAlwaysOption) {
+		semanticOptions.push({
+			id:
+				allowAlwaysOption.scope === "session"
+					? "allow-session"
+					: "allow-persistent",
+			label:
+				allowAlwaysOption.scope === "session"
+					? "Allow for session"
+					: "Allow persistently",
+			kind: "allow-always",
+			scope: allowAlwaysOption.scope,
+			isDefault: allowAlwaysOption.isDefault,
+		});
+	}
+	const denyOption = nativeOptions.find((option) => option.kind === "deny");
+	if (denyOption) {
+		semanticOptions.push({
+			id: "deny",
+			label: "Reject",
+			kind: "deny",
+			scope: "once",
+			isDefault: denyOption.isDefault,
+		});
+	}
+
+	return semanticOptions.length > 0 ? semanticOptions : undefined;
+}
+
+function buildApprovalCapabilities(
+	nativeOptions?: ApprovalOption[],
+): ApprovalCapabilities | undefined {
+	if (!nativeOptions || nativeOptions.length === 0) return undefined;
+	return {
+		semanticOptions: buildSemanticOptions(nativeOptions),
+		nativeOptions,
+		supportedScopes: Array.from(
+			new Set(
+				nativeOptions
+					.map((option) => option.scope)
+					.filter((scope) => scope !== undefined),
+			),
+		),
+		supportsUpdatedInput: false,
+	};
 }
 
 function findSelectedOption(
@@ -554,6 +621,7 @@ export class CodexAdapter implements AgentAdapter {
 				const paramsObj = (params ?? {}) as Record<string, unknown>;
 				const requestId = `ar-${pendingTurnId}-${paramsObj.id ?? Date.now()}`;
 				const options = extractApprovalOptions(paramsObj);
+				const approvalCapabilities = buildApprovalCapabilities(options);
 
 				// Emit approval.request
 				this.emit({
@@ -568,7 +636,7 @@ export class CodexAdapter implements AgentAdapter {
 						paramsObj.command ?? paramsObj.path ?? paramsObj.prompt ?? method,
 					),
 					payload: paramsObj,
-					options,
+					capabilities: approvalCapabilities,
 				});
 
 				// Return a promise that blocks the JSON-RPC response until approve() is called

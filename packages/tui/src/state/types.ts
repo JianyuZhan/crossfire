@@ -1,4 +1,7 @@
-import type { ApprovalOption } from "@crossfire/adapter-core";
+import type {
+	ApprovalCapabilities,
+	ApprovalOption,
+} from "@crossfire/adapter-core";
 import type { DebateState, JudgeVerdict } from "@crossfire/orchestrator-core";
 
 export interface LiveToolEntry {
@@ -26,6 +29,7 @@ export interface SubagentEntry {
 /** Snapshot of a single agent's completed turn within a round */
 export interface AgentTurnSnapshot {
 	messageText: string;
+	narrationTexts?: string[];
 	thinkingText?: string;
 	thinkingType?: "raw-thinking" | "reasoning-summary";
 	latestPlan?: PlanStep[];
@@ -69,6 +73,7 @@ export interface LiveAgentPanelState {
 	status: "idle" | "thinking" | "tool" | "speaking" | "done" | "error";
 	thinkingText: string;
 	thinkingType?: "raw-thinking" | "reasoning-summary";
+	narrationTexts: string[];
 	currentMessageText: string;
 	tools: LiveToolEntry[];
 	latestPlan?: PlanStep[];
@@ -133,6 +138,7 @@ export interface PendingApproval {
 	title: string;
 	detail?: string;
 	suggestion?: "allow" | "deny";
+	capabilities?: ApprovalCapabilities;
 	options?: ApprovalOption[];
 }
 
@@ -200,6 +206,7 @@ export type RenderBlock =
 			role: "proposer" | "challenger";
 			agentType?: string;
 			status: string;
+			statusLabel?: string;
 			duration?: number;
 	  }
 	| {

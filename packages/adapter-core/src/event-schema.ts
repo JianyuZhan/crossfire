@@ -109,6 +109,15 @@ const ApprovalOptionSchema = z.object({
 	isDefault: z.boolean().optional(),
 });
 
+const ApprovalCapabilitiesSchema = z.object({
+	semanticOptions: z.array(ApprovalOptionSchema).optional(),
+	nativeOptions: z.array(ApprovalOptionSchema).optional(),
+	supportedScopes: z
+		.array(z.enum(["once", "session", "project", "user", "local", "global"]))
+		.optional(),
+	supportsUpdatedInput: z.boolean().optional(),
+});
+
 const ApprovalRequestSchema = z.object({
 	...BaseEventFields,
 	kind: z.literal("approval.request"),
@@ -117,7 +126,7 @@ const ApprovalRequestSchema = z.object({
 	title: z.string(),
 	payload: z.unknown(),
 	suggestion: z.enum(["allow", "deny"]).optional(),
-	options: z.array(ApprovalOptionSchema).optional(),
+	capabilities: ApprovalCapabilitiesSchema.optional(),
 });
 
 const ApprovalResolvedSchema = z.object({
