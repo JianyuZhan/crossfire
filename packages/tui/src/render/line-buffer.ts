@@ -287,8 +287,8 @@ export function buildPanelLines(
 				const prefix = TOOL_PREFIXES[block.status] ?? "!!";
 				const summary = block.summary ? ` (${block.summary})` : "";
 				const elapsed =
-					block.status === "running" && block.elapsedMs
-						? ` ${block.elapsedMs}ms`
+					block.elapsedMs !== undefined
+						? ` ${formatDuration(block.elapsedMs)}`
 						: "";
 				const text = `${prefix} ${block.toolName}${summary}${elapsed}`;
 				result.push(

@@ -2,6 +2,7 @@ export interface BuildArgsInput {
 	prompt: string;
 	sessionId?: string;
 	model?: string;
+	approvalMode?: "default" | "plan" | "yolo" | "auto_edit";
 	forceStateless?: boolean;
 }
 
@@ -18,6 +19,9 @@ export class ResumeManager {
 		}
 		if (input.model) {
 			args.push("--model", input.model);
+		}
+		if (input.approvalMode && input.approvalMode !== "default") {
+			args.push("--approval-mode", input.approvalMode);
 		}
 		args.push("-p", input.prompt, "--output-format", "stream-json");
 		return args;

@@ -4,6 +4,10 @@ export type AdapterId = "claude" | "codex" | "gemini";
 
 export type DebateRole = "proposer" | "challenger" | "judge";
 
+export type RoleExecutionMode = "research" | "guarded" | "dangerous";
+
+export type TurnExecutionMode = RoleExecutionMode | "plan";
+
 export type NormalizedEvent =
 	| SessionStartedEvent
 	| MessageDeltaEvent
@@ -13,6 +17,7 @@ export type NormalizedEvent =
 	| ToolCallEvent
 	| ToolProgressEvent
 	| ToolResultEvent
+	| ToolDeniedEvent
 	| ApprovalRequestEvent
 	| ApprovalResolvedEvent
 	| SubagentStartedEvent
@@ -96,6 +101,13 @@ export interface ToolResultEvent extends BaseEvent {
 	success: boolean;
 	output?: unknown;
 	error?: string;
+}
+
+export interface ToolDeniedEvent extends BaseEvent {
+	kind: "tool.denied";
+	toolUseId: string;
+	toolName: string;
+	input: unknown;
 }
 
 // -- Approval --
@@ -236,6 +248,7 @@ export interface StartSessionInput {
 	model?: string;
 	mcpServers?: Record<string, unknown>;
 	permissionMode?: "auto" | "approve-all" | "deny-all";
+	executionMode?: RoleExecutionMode;
 	providerOptions?: Record<string, unknown>;
 }
 
@@ -263,6 +276,7 @@ export interface TurnInput {
 	prompt: string;
 	turnId: string;
 	timeout?: number;
+	executionMode?: TurnExecutionMode;
 	/** Role hint for transcript tracking -- if omitted, parsed from turnId pattern {p|c|j}-{round} */
 	role?: DebateRole;
 	/** Round number hint for transcript tracking -- if omitted, parsed from turnId pattern */

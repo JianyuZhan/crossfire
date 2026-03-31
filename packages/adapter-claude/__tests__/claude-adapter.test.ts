@@ -147,6 +147,105 @@ describe("ClaudeAdapter", () => {
 			expect(turnHandle.status).toBe("running");
 		});
 
+		it("maps research mode to dontAsk with a read-only allowlist", async () => {
+			const queryFn = vi.fn<QueryFn>(() => ({
+				messages: messagesFrom([]),
+				interrupt: vi.fn(),
+			}));
+			adapter = new ClaudeAdapter({ queryFn });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, {
+				prompt: "research",
+				turnId: "t1",
+				executionMode: "research",
+			});
+
+			expect(queryFn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					permissionMode: "dontAsk",
+					allowedTools: expect.arrayContaining(["Read", "WebFetch", "Task"]),
+					maxTurns: 12,
+				}),
+			);
+		});
+
+		it("does not apply the research max-turn budget to guarded mode", async () => {
+			const queryFn = vi.fn<QueryFn>(() => ({
+				messages: messagesFrom([]),
+				interrupt: vi.fn(),
+			}));
+			adapter = new ClaudeAdapter({ queryFn });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, {
+				prompt: "guarded",
+				turnId: "t1",
+				executionMode: "guarded",
+			});
+
+			expect(queryFn).toHaveBeenCalledWith(
+				expect.not.objectContaining({
+					maxTurns: expect.any(Number),
+				}),
+			);
+		});
+
+		it("maps dangerous mode to bypassPermissions", async () => {
+			const queryFn = vi.fn<QueryFn>(() => ({
+				messages: messagesFrom([]),
+				interrupt: vi.fn(),
+			}));
+			adapter = new ClaudeAdapter({ queryFn });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, {
+				prompt: "dangerous",
+				turnId: "t1",
+				executionMode: "dangerous",
+			});
+
+			expect(queryFn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					permissionMode: "bypassPermissions",
+					allowDangerouslySkipPermissions: true,
+				}),
+			);
+		});
+
+		it("maps plan mode to plan", async () => {
+			const queryFn = vi.fn<QueryFn>(() => ({
+				messages: messagesFrom([]),
+				interrupt: vi.fn(),
+			}));
+			adapter = new ClaudeAdapter({ queryFn });
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+
+			await adapter.sendTurn(handle, {
+				prompt: "plan",
+				turnId: "t1",
+				executionMode: "plan",
+			});
+
+			expect(queryFn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					permissionMode: "plan",
+				}),
+			);
+		});
+
 		it("emits session.started from system/init", async () => {
 			const msgs: SdkMessage[] = [
 				{

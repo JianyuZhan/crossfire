@@ -6,6 +6,13 @@ import {
 	formatDuration,
 	roleLabel,
 } from "../constants.js";
+import {
+	buildToolActivityLabel,
+	selectVisibleLiveTools,
+	summarizeDeniedTools,
+	summarizeRecentFailures,
+	summarizeUnknownOutcomes,
+} from "../render/tool-status.js";
 import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type {
 	AgentTurnSnapshot,
@@ -47,43 +54,33 @@ function agentSuffix(agentType?: string): string {
 }
 
 function statusText(state: LiveAgentPanelState): string {
+	const modeSuffix = state.executionMode ? ` [${state.executionMode}]` : "";
 	switch (state.status) {
 		case "idle":
-			return "Idle";
+			return `Idle${modeSuffix}`;
 		case "thinking":
-			return "Thinking...";
+			return `Thinking...${modeSuffix}`;
 		case "tool":
-			if (state.tools.length === 0) return "Tool";
-			{
-				const running = state.tools.filter(
-					(tool) => tool.status === "running",
-				).length;
-				const done = state.tools.filter((tool) => tool.status === "done").length;
-				const error = state.tools.filter(
-					(tool) => tool.status === "error",
-				).length;
-				const parts: string[] = [];
-				if (running > 0) parts.push(`${running} running`);
-				if (done > 0) parts.push(`${done} done`);
-				if (error > 0) parts.push(`${error} error`);
-				const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-				return `Tool: ${state.tools[state.tools.length - 1].toolName}${suffix}`;
-			}
+			if (state.tools.length === 0) return `Tool${modeSuffix}`;
+			return `Tool: ${state.tools[state.tools.length - 1].toolName} ${buildToolActivityLabel(state.tools).replace(/^tool /, "")}${modeSuffix}`;
 		case "speaking":
-			return "Responding...";
+			return `Responding...${modeSuffix}`;
 		case "done":
 			return state.turnDurationMs !== undefined
-				? `Done (${formatDuration(state.turnDurationMs)})`
-				: "Done";
+				? `Done (${formatDuration(state.turnDurationMs)})${modeSuffix}`
+				: `Done${modeSuffix}`;
 		case "error":
-			return "Error";
+			return `Error${modeSuffix}`;
 	}
 }
 
 const TOOL_STATUS_ICONS: Record<string, string> = {
+	requested: "…",
 	running: "▶",
-	done: "✓",
-	error: "✗",
+	succeeded: "✓",
+	failed: "✗",
+	denied: "⊘",
+	unknown: "?",
 };
 
 function ToolList({ tools }: { tools: LiveToolEntry[] }): React.ReactElement {
@@ -94,8 +91,11 @@ function ToolList({ tools }: { tools: LiveToolEntry[] }): React.ReactElement {
 					<Text dimColor>
 						{TOOL_STATUS_ICONS[tool.status] ?? "✗"} {tool.toolName}
 						{tool.expanded ? ` (${tool.inputSummary})` : ""}
-						{tool.elapsedMs !== undefined ? ` ${tool.elapsedMs}ms` : ""}
-						{tool.status === "error" && tool.resultSummary
+						{tool.elapsedMs !== undefined
+							? ` ${formatDuration(tool.elapsedMs)}`
+							: ""}
+						{["failed", "denied", "unknown"].includes(tool.status) &&
+						tool.resultSummary
 							? ` — ${tool.resultSummary}`
 							: ""}
 					</Text>
@@ -170,6 +170,9 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 		const duration = snapshot.turnDurationMs
 			? ` (${formatDuration(snapshot.turnDurationMs)})`
 			: "";
+		const modeLabel = snapshot.executionMode
+			? ` [${snapshot.executionMode}]`
+			: "";
 		return (
 			<Box flexDirection="column" paddingX={1}>
 				<Box>
@@ -177,7 +180,10 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 						{label}
 						<Text dimColor>{agent}</Text>
 					</Text>
-					<Text dimColor>{duration}</Text>
+					<Text dimColor>
+						{duration}
+						{modeLabel}
+					</Text>
 				</Box>
 				{snapshot.tools.length > 0 && <ToolList tools={snapshot.tools} />}
 				{snapshot.error && (
@@ -275,7 +281,34 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 					<SubagentList subagents={state.subagents} />
 				</Box>
 			)}
-			<ToolList tools={state.tools} />
+			{(() => {
+				const failureSummary = summarizeRecentFailures(state.tools);
+				return failureSummary ? (
+					<Box marginTop={1}>
+						<Text color="yellow">
+							⚠ {(state.tools.find((tool) => tool.status === "failed")?.toolName ?? "Tool")} failures:{" "}
+							{failureSummary.replace(/^recent failures: /, "")}
+						</Text>
+					</Box>
+				) : null;
+			})()}
+			{(() => {
+				const deniedSummary = summarizeDeniedTools(state.tools);
+				return deniedSummary ? (
+					<Box marginTop={1}>
+						<Text color="yellow">⚠ {deniedSummary}</Text>
+					</Box>
+				) : null;
+			})()}
+			{(() => {
+				const unknownSummary = summarizeUnknownOutcomes(state.tools);
+				return unknownSummary ? (
+					<Box marginTop={1}>
+						<Text color="yellow">⚠ {unknownSummary}</Text>
+					</Box>
+				) : null;
+			})()}
+			<ToolList tools={selectVisibleLiveTools(state.tools)} />
 			{(state.status === "speaking" || state.status === "done") &&
 				displayText && (
 					<Box marginTop={1}>

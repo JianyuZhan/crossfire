@@ -24,6 +24,7 @@ import {
 	type NormalizedEvent,
 	type ProviderUsageMetrics,
 	type ProviderUsageSemantics,
+	type RoleExecutionMode,
 	type RunErrorEvent,
 	type RunWarningEvent,
 	type SessionHandle,
@@ -31,9 +32,11 @@ import {
 	type StartSessionInput,
 	type ThinkingDeltaEvent,
 	type ToolCallEvent,
+	type ToolDeniedEvent,
 	type ToolResultEvent,
 	type TurnCompletedEvent,
 	type TurnHandle,
+	type TurnExecutionMode,
 	type TurnInput,
 	type TurnRecord,
 	type UsageUpdatedEvent,
@@ -101,6 +104,21 @@ describe("NormalizedEvent types", () => {
 			durationMs: 1500,
 		};
 		expect(event.durationMs).toBe(1500);
+	});
+
+	it("ToolDeniedEvent carries the denied tool identity", () => {
+		const event: ToolDeniedEvent = {
+			kind: "tool.denied",
+			timestamp: Date.now(),
+			adapterId: "claude",
+			adapterSessionId: "s1",
+			turnId: "t1",
+			toolUseId: "tu1",
+			toolName: "Read",
+			input: { file_path: "README.md" },
+		};
+		expect(event.toolUseId).toBe("tu1");
+		expect(event.toolName).toBe("Read");
 	});
 
 	it("TurnCompletedEvent accepts optional usage", () => {
@@ -176,6 +194,30 @@ describe("NormalizedEvent types", () => {
 			optionId: "allow-session",
 		};
 		expect(decision.optionId).toBe("allow-session");
+	});
+
+	it("StartSessionInput accepts a role baseline execution mode", () => {
+		const input: StartSessionInput = {
+			profile: "test",
+			workingDirectory: "/tmp",
+			executionMode: "research",
+		};
+		expectTypeOf(input.executionMode).toEqualTypeOf<
+			RoleExecutionMode | undefined
+		>();
+		expect(input.executionMode).toBe("research");
+	});
+
+	it("TurnInput accepts a per-turn execution mode override", () => {
+		const input: TurnInput = {
+			prompt: "hello",
+			turnId: "p-1",
+			executionMode: "plan",
+		};
+		expectTypeOf(input.executionMode).toEqualTypeOf<
+			TurnExecutionMode | undefined
+		>();
+		expect(input.executionMode).toBe("plan");
 	});
 
 	it("ThinkingDeltaEvent distinguishes raw-thinking from reasoning-summary", () => {

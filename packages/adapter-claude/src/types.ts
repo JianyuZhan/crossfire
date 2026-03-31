@@ -1,3 +1,11 @@
+export type ClaudePermissionMode =
+	| "default"
+	| "acceptEdits"
+	| "bypassPermissions"
+	| "plan"
+	| "delegate"
+	| "dontAsk";
+
 export interface ClaudePermissionRule {
 	toolName: string;
 	ruleContent?: string;
@@ -17,13 +25,7 @@ export type ClaudePermissionUpdate =
 	  }
 	| {
 			type: "setMode";
-			mode:
-				| "default"
-				| "acceptEdits"
-				| "bypassPermissions"
-				| "plan"
-				| "delegate"
-				| "dontAsk";
+			mode: ClaudePermissionMode;
 			destination:
 				| "userSettings"
 				| "projectSettings"
@@ -81,6 +83,13 @@ export type QueryFn = (options: {
 	prompt: string;
 	resume?: string;
 	model?: string;
+	permissionMode?: ClaudePermissionMode;
+	allowDangerouslySkipPermissions?: boolean;
+	maxThinkingTokens?: number;
+	maxTurns?: number;
+	maxBudgetUsd?: number;
+	allowedTools?: string[];
+	disallowedTools?: string[];
 	canUseTool?: (
 		toolName: string,
 		toolInput: Record<string, unknown>,

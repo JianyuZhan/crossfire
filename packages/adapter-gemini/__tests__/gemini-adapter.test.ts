@@ -224,6 +224,30 @@ describe("GeminiAdapter", () => {
 			expect(spawnArgs[0]).toContain("stream-json");
 		});
 
+		it("maps dangerous mode to --approval-mode yolo", async () => {
+			const { pm, spawnArgs } = createMockProcessManager([
+				{
+					lines: [initLine("s1"), resultLine()],
+					exitCode: 0,
+				},
+			]);
+			const adapter = new GeminiAdapter({ processManager: pm });
+			const { events } = collectEvents(adapter);
+			const handle = await adapter.startSession({
+				profile: "test",
+				workingDirectory: "/tmp",
+			});
+			await adapter.sendTurn(handle, {
+				prompt: "ship it",
+				turnId: "t1",
+				executionMode: "dangerous",
+			});
+			await waitForTurnCompleted(events, "t1");
+
+			expect(spawnArgs[0]).toContain("--approval-mode");
+			expect(spawnArgs[0]).toContain("yolo");
+		});
+
 		it("returns TurnHandle immediately with status 'running'", async () => {
 			const { pm } = createMockProcessManager([
 				{ lines: [initLine("s1"), resultLine()], exitCode: 0 },

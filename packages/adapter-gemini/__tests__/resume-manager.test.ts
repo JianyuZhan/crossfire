@@ -40,6 +40,25 @@ describe("ResumeManager", () => {
 		expect(args2).toContain("stream-json");
 	});
 
+	it("buildArgs includes --approval-mode when provided", () => {
+		const rm = new ResumeManager();
+		const args = rm.buildArgs({
+			prompt: "plan it",
+			approvalMode: "plan",
+		});
+		expect(args).toContain("--approval-mode");
+		expect(args).toContain("plan");
+	});
+
+	it("buildArgs omits --approval-mode for default mode", () => {
+		const rm = new ResumeManager();
+		const args = rm.buildArgs({
+			prompt: "guarded",
+			approvalMode: "default",
+		});
+		expect(args).not.toContain("--approval-mode");
+	});
+
 	it("validateInit: valid with matching sessionId", () => {
 		const rm = new ResumeManager();
 		const result = rm.validateInit({ session_id: "sid-123" }, "sid-123");

@@ -7,6 +7,7 @@ Back to the overview: [overview.md](./overview.md)
 See also:
 
 - [Adapter Layer](./adapter-layer.md)
+- [Execution Modes](./execution-modes.md)
 - [Action Plan Synthesis](./synthesis.md)
 - [TUI and CLI](./tui-cli.md)
 
@@ -23,11 +24,11 @@ Packages:
 
 ### DebateConfig
 
-`DebateConfig` defines debate topic, round limits, judge cadence, convergence threshold, and optional per-role model/system-prompt overrides.
+`DebateConfig` defines debate topic, round limits, judge cadence, convergence threshold, optional execution-mode policy, optional prompt-template selections, and optional per-role model/system-prompt overrides.
 
 ### OrchestratorEvent
 
-`OrchestratorEvent` currently has 18 kinds:
+`OrchestratorEvent` currently has 19 kinds:
 
 - `debate.started`
 - `debate.resumed`
@@ -36,6 +37,7 @@ Packages:
 - `debate.extended`
 - `turn.interrupt.requested`
 - `round.started`
+- `turn.mode.changed`
 - `round.completed`
 - `judge.started`
 - `judge.completed`
@@ -179,6 +181,9 @@ High-level flow:
 Important notes:
 
 - it waits for `turn.completed` on the bus
+- it resolves effective turn mode before each proposer / challenger turn using `debate default < role baseline < turn override`
+- it resolves each role's system prompt before execution by combining provider profile metadata, optional embedded profile prompt bodies, and the selected `general` / `code` prompt-template family
+- it emits `turn.mode.changed` before sending the turn to the adapter
 - it blocks on projected pause state between turns and before judge invocations
 - it can now route `/interrupt` requests to the active provider turn and terminates the debate with `debate.completed(reason="interrupted")` when the adapter reports `turn.completed(status="interrupted")`
 - it tracks schema refresh cadence for incremental prompts
@@ -205,9 +210,10 @@ Prompt builder families:
 
 Current built-in role guidance also matters:
 
-- proposer and challenger prompts emphasize constructive adversarial review rather than rhetorical "winning"
-- challenger prompts explicitly require tool-backed verification before major rebuttals when evidence is available
-- judge prompts prioritize evidence responsibility and only ask for minimal fact-checking when both sides cite code but disagree
+- built-in provider profiles are symmetric runtime shells for Claude, Codex, and Gemini rather than separate prompt contracts
+- `general` templates emphasize constructive adversarial review for product, research, and business topics
+- `code` templates emphasize repository evidence, tool-backed validation, and file/path citations for implementation topics
+- when a custom profile embeds its own body, that prompt overrides template-family selection unless the CLI explicitly requests a per-role template override
 
 ## Judge Turn
 

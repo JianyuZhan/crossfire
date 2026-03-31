@@ -4,9 +4,11 @@ import {
 	GEMINI_CAPABILITIES,
 	type LocalTurnMetrics,
 	type NormalizedEvent,
+	type RoleExecutionMode,
 	type SessionHandle,
 	type StartSessionInput,
 	type TurnHandle,
+	type TurnExecutionMode,
 	type TurnInput,
 	measureLocalMetrics,
 	parseTurnId,
@@ -34,6 +36,7 @@ interface TurnRuntimeState {
 interface GeminiSessionContext {
 	providerSessionId: string | undefined;
 	model: string | undefined;
+	executionMode: RoleExecutionMode;
 	sessionStarted: boolean; // global flag: has session.started been emitted?
 	currentProcess: ProcessHandle | null;
 	history: HistoryEntry[];
@@ -43,6 +46,21 @@ interface GeminiSessionContext {
 }
 
 let sessionCounter = 0;
+
+function mapExecutionModeToGeminiApprovalMode(
+	mode: TurnExecutionMode | RoleExecutionMode | undefined,
+): "default" | "plan" | "yolo" | "auto_edit" {
+	switch (mode) {
+		case "dangerous":
+			return "yolo";
+		case "research":
+		case "plan":
+			return "plan";
+		case "guarded":
+		case undefined:
+			return "default";
+	}
+}
 
 /**
  * Adapter for the Gemini CLI. Spawns a subprocess per turn, reads JSONL from
@@ -74,6 +92,7 @@ export class GeminiAdapter implements AgentAdapter {
 		const ctx: GeminiSessionContext = {
 			providerSessionId: undefined,
 			model: input.model,
+			executionMode: input.executionMode ?? "guarded",
 			sessionStarted: false,
 			currentProcess: null,
 			history: [],
@@ -165,6 +184,9 @@ export class GeminiAdapter implements AgentAdapter {
 			prompt: input.prompt,
 			sessionId: session.providerSessionId,
 			model: session.model,
+			approvalMode: mapExecutionModeToGeminiApprovalMode(
+				input.executionMode ?? session.executionMode,
+			),
 		});
 
 		const result = await this.runProcess(
@@ -214,6 +236,9 @@ export class GeminiAdapter implements AgentAdapter {
 				prompt: fallbackPrompt,
 				sessionId: session.providerSessionId,
 				model: session.model,
+				approvalMode: mapExecutionModeToGeminiApprovalMode(
+					input.executionMode ?? session.executionMode,
+				),
 				forceStateless: true,
 			});
 

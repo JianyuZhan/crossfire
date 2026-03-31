@@ -187,6 +187,32 @@ describe("CodexAdapter", () => {
 			expect(h1.adapterSessionId).not.toBe(h2.adapterSessionId);
 		});
 
+		it("maps research baseline to readOnly sandbox and on-request approval", async () => {
+			const sessionPromise = adapter.startSession({
+				profile: "test-profile",
+				workingDirectory: "/tmp/work",
+				model: "o4-mini",
+				executionMode: "research",
+			});
+
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, { ok: true });
+			await mock.readNextMessage();
+			msg = await mock.readNextMessage();
+			expect(msg.method).toBe("thread/start");
+			expect(msg.params).toEqual({
+				model: "o4-mini",
+				cwd: "/tmp/work",
+				approvalPolicy: "on-request",
+				sandboxPolicy: { type: "readOnly" },
+			});
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-research" },
+			});
+
+			await sessionPromise;
+		});
+
 		it("does not pass profile as instructions to thread/start", async () => {
 			const sessionPromise = adapter.startSession({
 				profile: "You are a helpful assistant",
@@ -237,6 +263,7 @@ describe("CodexAdapter", () => {
 			const turnMsg = await mock.readNextMessage();
 			expect(turnMsg.method).toBe("turn/start");
 			expect(turnMsg.params.threadId).toBe("thread-1");
+			expect(turnMsg.params.approvalPolicy).toBe("on-failure");
 			expect(turnMsg.params.input).toHaveLength(1);
 			expect(turnMsg.params.input[0].type).toBe("text");
 			expect(turnMsg.params.input[0].text).toContain("Hello world");
@@ -248,6 +275,27 @@ describe("CodexAdapter", () => {
 			const turnHandle = await turnPromise;
 			expect(turnHandle.turnId).toBe("t1");
 			expect(turnHandle.status).toBe("running");
+		});
+
+		it("maps per-turn dangerous override to never plus danger-full-access", async () => {
+			const handle = await setupSession();
+
+			const turnPromise = adapter.sendTurn(handle, {
+				prompt: "Ship it",
+				turnId: "t1",
+				executionMode: "dangerous",
+			});
+
+			const turnMsg = await mock.readNextMessage();
+			expect(turnMsg.params.approvalPolicy).toBe("never");
+			expect(turnMsg.params.sandboxPolicy).toEqual({
+				type: "danger-full-access",
+			});
+			mock.sendResponse(turnMsg.id as number, {
+				turn: { id: "native-turn-1", status: "running" },
+			});
+
+			await turnPromise;
 		});
 
 		it("includes META_TOOL_INSTRUCTIONS on first turn only", async () => {

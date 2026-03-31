@@ -1,4 +1,7 @@
+import type { DebateExecutionConfig } from "./execution-modes.js";
+
 export type DebateRole = "proposer" | "challenger";
+export type PromptTemplateFamily = "general" | "code";
 
 export type TerminationReason =
 	| "max-rounds"
@@ -21,6 +24,13 @@ export interface DebateConfig {
 	maxRounds: number;
 	judgeEveryNRounds: number;
 	convergenceThreshold: number;
+	executionModes?: DebateExecutionConfig;
+	promptTemplates?: {
+		defaultSelection?: "auto" | PromptTemplateFamily;
+		proposer?: PromptTemplateFamily;
+		challenger?: PromptTemplateFamily;
+		judge?: PromptTemplateFamily;
+	};
 	proposerModel?: string;
 	challengerModel?: string;
 	judgeModel?: string;

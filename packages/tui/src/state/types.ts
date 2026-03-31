@@ -1,6 +1,7 @@
 import type {
 	ApprovalCapabilities,
 	ApprovalOption,
+	ProviderUsageSemantics,
 } from "@crossfire/adapter-core";
 import type { DebateState, JudgeVerdict } from "@crossfire/orchestrator-core";
 
@@ -8,7 +9,14 @@ export interface LiveToolEntry {
 	toolUseId: string;
 	toolName: string;
 	inputSummary: string;
-	status: "running" | "done" | "error";
+	status:
+		| "requested"
+		| "running"
+		| "succeeded"
+		| "failed"
+		| "denied"
+		| "unknown";
+	startedAtMs?: number;
 	elapsedMs?: number;
 	resultSummary?: string;
 	expanded: boolean;
@@ -30,6 +38,7 @@ export interface SubagentEntry {
 export interface AgentTurnSnapshot {
 	messageText: string;
 	narrationTexts?: string[];
+	executionMode?: string;
 	thinkingText?: string;
 	thinkingType?: "raw-thinking" | "reasoning-summary";
 	latestPlan?: PlanStep[];
@@ -70,6 +79,7 @@ export interface LiveAgentPanelState {
 	role: "proposer" | "challenger";
 	agentType?: string;
 	model?: string;
+	executionMode?: string;
 	status: "idle" | "thinking" | "tool" | "speaking" | "done" | "error";
 	thinkingText: string;
 	thinkingType?: "raw-thinking" | "reasoning-summary";
@@ -100,6 +110,7 @@ export interface JudgeStripState {
 export interface AgentUsage {
 	tokens: number;
 	costUsd: number;
+	semantics?: ProviderUsageSemantics;
 	// Local metrics (from adapter layer)
 	localTotalChars?: number;
 	localTotalUtf8Bytes?: number;

@@ -27,6 +27,7 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 - [适用场景](#适用场景)
 - [你将得到什么](#你将得到什么)
 - [快速开始](#快速开始)
+- [执行模式](#执行模式)
 - [终端 UI](#终端-ui)
 - [CLI 参考](#cli-参考)
 - [运行时命令](#运行时命令)
@@ -44,13 +45,14 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 
 - **行动计划优先** — 主产物是 `action-plan.html` / `action-plan.md`，而不只是辩论记录
 - **多模型混战** — 自由组合 Claude（Agent SDK）、Codex（JSON-RPC）、Gemini（子进程）担任任意角色
-- **实时终端 UI** — 分屏面板，实时展示消息流、保留思考摘要、持久保留的工具前说明文本、自动换行的工具调用、实时工具进度计数、高亮审批卡片和收敛指标
+- **实时终端 UI** — 分屏面板，实时展示消息流、保留思考摘要、持久保留的工具前说明文本、自动换行的工具调用、带本地回退的工具运行计时、高亮审批卡片和收敛指标
 - **事件溯源** — 所有事件持久化为 JSONL。支持中断恢复，并可从同一事实来源回放已完成辩论
 - **结构化提取** — 智能体通过 tool call 上报立场、置信度、关键论点和让步（Zod 校验）
 - **裁判仲裁** — 可选的裁判智能体评分论证、检测停滞、可提前终止辩论，并优先评估证据责任而不是奖励无依据断言
 - **自适应最终综合** — 辩论结束后在独立综合会话中生成最终行动计划，模型综合失败时仍有本地回退
 - **增量提示词** — 第 1 轮发送完整上下文，第 2 轮起仅发送对手/裁判的新消息，利用提供商会话记忆实现每轮 ~O(1) token 开销
-- **配置文件系统** — YAML frontmatter + Markdown 系统提示词，内置 proposer/challenger/judge 配置包含按角色定制的 research 与证据处理约束
+- **配置文件 + 提示词模板** — 内置 provider profile 负责适配器/模型/运行时配置，可复用的 `general` / `code` 模板负责 proposer/challenger/judge 的角色契约
+- **执行模式** — 支持 debate 默认模式、按角色 baseline，以及 `research`、`guarded`、`dangerous`、`plan` 这类按 turn 覆盖
 
 ## 适用场景
 
@@ -61,7 +63,7 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 
 ## 你将得到什么
 
-- **实时辩论界面** — 全屏终端 UI，按轮次展示推理过程、保留思考摘要、持久保留的工具前说明文本、自动换行的工具细节、实时工具进度计数、审批提示、裁判反馈和收敛进度
+- **实时辩论界面** — 全屏终端 UI，按轮次展示推理过程、保留思考摘要、持久保留的工具前说明文本、自动换行的工具细节、带本地回退的工具运行计时、审批提示、裁判反馈和收敛进度
 - **行动计划输出** — Markdown 和 HTML 两种格式的最终报告，便于分享、编辑和自动化处理
 - **完整 transcript** — Markdown 和 HTML 两种格式的人类可读辩论记录
 - **可回放审计轨迹** — 事件溯源 JSONL 日志与 `index.json` 元数据，支持回放、恢复和状态查看
@@ -133,14 +135,109 @@ crossfire start \
 
 上面的示例之所以输出到 `run_output/microservices/`，是因为显式传入了 `--output run_output/microservices`。如果省略 `--output`，Crossfire 会写入默认目录 `run_output/debate-<ts>/`。随后优先查看其中的 `action-plan.html` 或 `action-plan.md`，也可以用 `crossfire status <output-dir>` 查看摘要，或用 `crossfire replay <output-dir>` 回放事件日志。
 
+## 执行模式
+
+执行模式是 Crossfire 用来缓解审批疲劳的上层抽象。重点不是把三家 provider 硬压成同一排审批按钮，而是让编排层先决定“这一 turn 应该有多强的执行自由度”，再交给各 adapter 去做真实映射。
+
+可以这样理解：
+
+- Crossfire 负责定义 turn 的交互强度
+- 各 adapter 负责把它映射到底层 provider 真正支持的官方原语
+- event log 和 TUI 会记录每个 turn 实际生效的是哪一档模式
+
+当前有三档 baseline 模式，以及一个特殊的 per-turn override：
+
+- `research`
+  低打扰研究模式。优先走安全或只读倾向的行为，尽量减少审批噪音。
+  对 Claude 来说，这一档还会带一个保守的单 turn query 上限，避免同一轮 research 无限扩散。
+- `guarded`
+  受控执行模式。最接近过去“正常审批”的默认心智。
+- `dangerous`
+  高信任执行模式。尽量减少中断，但风险最高。
+- `plan`
+  只作为按 turn 覆盖使用。适合先看 agent 打算怎么做，再决定是否放开执行权限。
+
+为什么 `plan` 不作为长期 baseline：
+
+- debate 的质量通常依赖真实的读取、搜索和验证
+- 如果把 `plan` 当常驻模式，很多 turn 会退化成纯 LLM 推理，证据质量明显下降
+- 实际上它更适合做“一轮预演”，而不是整场 debate 的常态
+
+优先级规则是：
+
+```text
+debate default < role baseline < turn override
+```
+
+也就是说：
+
+- `--mode` 设置整场 debate 的默认模式
+- `--proposer-mode` / `--challenger-mode` 覆盖某个角色的 baseline
+- `--turn-mode p-1=plan` 或 `--turn-mode c-2=dangerous` 只覆盖指定 turn
+
+示例：
+
+```bash
+# 整场 debate 的默认模式
+crossfire start \
+  --topic "Should we migrate to Rust?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --mode guarded
+```
+
+```bash
+# 两个角色用不同 baseline
+crossfire start \
+  --topic "Should we rebuild the auth service?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --proposer-mode research \
+  --challenger-mode guarded
+```
+
+```bash
+# 在 proposer 第 1 轮前强制先出计划
+crossfire start \
+  --topic "Should we move to event sourcing?" \
+  --proposer claude/proposer \
+  --challenger claude/challenger \
+  --proposer-mode research \
+  --turn-mode p-1=plan
+```
+
+三家 provider 的当前映射是故意不对称的：
+
+- **Claude**
+  `research -> dontAsk + allowlist + bounded maxTurns`，`guarded -> default`，`dangerous -> bypassPermissions`，`plan -> plan`
+- **Codex**
+  主要映射到 approval policy 和 sandbox policy 的组合，而不是单一 mode 字段
+- **Gemini**
+  当前 headless 接法只做启动/每 turn 的 approval-profile 映射，不应假设和 Claude/Codex 有同等 runtime parity
+
+实用建议：
+
+- proposer 如果经常做大量 research，优先试 `--proposer-mode research`
+- 对 Claude 而言，`research` 是有意做了收束的；如果你就是想放长一轮自由探索，再考虑升到 `guarded` 或 `dangerous`
+- challenger 如果你仍希望保留明确控制，先用 `--challenger-mode guarded`
+- 想先看 agent 打算怎么做，再决定要不要放开权限时，用 `--turn-mode p-1=plan`
+- `dangerous` 只适合边界明确、可信度高、你愿意接受更少人工制动机会的任务
+
 ## 终端 UI
 
 终端 UI 是基于 Ink（CLI 的 React）的全屏应用，由四个垂直区域组成：
 
 - **顶部栏** — 居中品牌标识、辩论 ID、轮次/阶段、提议者与挑战者的智能体信息、辩论主题
 - **可滚动内容区** — 按轮次展示智能体消息、思考过程、持久保留的工具前说明文本和自动换行的工具调用，长命令和长参数不会再被硬截断。支持方向键、`Ctrl+U`/`Ctrl+D`、`Home`/`End` 滚动
-- **指标栏** — 各智能体 token 用量与费用、收敛进度条与百分比、裁判判定、滚动状态（LIVE / SCROLLED）。用量统计会按 provider 语义做归一化，因此部分 provider 的累计值会先转换为增量再显示
+- **工具活跃度** — 即使 provider 只发 `tool.call` / `tool.result`，中间没有 `tool.progress`，运行中的工具行和 live header 也会显示本地维护的耗时，避免页面看起来像卡住
+- **指标栏** — 各智能体 token 用量与费用、收敛进度条与百分比、裁判判定、滚动状态（LIVE / SCROLLED）。用量统计会标明 provider 口径，例如 `session delta`、`per turn`、`thread cumulative`，避免把不同 provider 的数字误当成可直接横向比较
+- **固定 live 状态** — metrics bar 的第一行会单独显示当前活跃角色的紧凑 `Active: ...` 摘要，因此即使工具流很长、顶部 round header 被刷出视口，也还能看到现在是谁在跑、跑了多久
+- **压缩工具失败摘要** — live 工具区会把重复失败折叠成 `recent failures: 404×5, 403×2` 这类短摘要；如果要看最完整的原始细节，去 `run_output/<debate-id>/events.jsonl`
+- **live 工具区只保留当前工作** — 成功完成的工具会立即从 live 列表消失，失败则压缩成摘要；如果要看完整已完成明细，可以去 round snapshot 或 `events.jsonl`
+- **Claude 六态工具模型** — Claude 的工具请求现在会被投影为 `requested`、`running`、`succeeded`、`failed`、`denied`、`unknown`，而不是假设每条 `tool.call` 都已经真正开始执行。provider 发出 `tool.progress` 后才升级为 `running`，权限拒绝会收束成 `denied`，只有观察到终态 hook 才会被判成 `succeeded` / `failed`
+- **未闭合工具自动收束** — 如果某个 turn 结束时 provider 侧工具请求始终没有给出终态 hook，Crossfire 会把这些 live 行收束为 `unknown outcome`，不再让它们永远停留在 `running`
 - **命令/审批区** — 实时辩论中根据上下文切换提示符（`>`、`approval>`），并在有待审批请求时展开高亮卡片，显示待调用的工具/命令、批量操作，以及带 provider 语义的短命令，如 `/approve 2`、`/approve 2 2` 或 `/approve all`
+- **模式可见性** — proposer / challenger 的 live header 会显示当前 turn 实际生效的模式，方便快速判断是 `research`、`guarded`、`dangerous` 还是 `plan`
 
 使用 `--headless` 可跳过 UI。事件和综合输出仍会落盘，之后可以回放或审阅。
 
@@ -164,11 +261,25 @@ crossfire start \
 | `--proposer-model <model>`    | 提议者模型覆盖                      | —                        |
 | `--challenger-model <model>`  | 挑战者模型覆盖                      | —                        |
 | `--judge-model <model>`       | 裁判模型覆盖                        | —                        |
+| `--mode <mode>`               | debate 默认执行模式（`research`、`guarded`、`dangerous`） | —          |
+| `--proposer-mode <mode>`      | proposer baseline 执行模式          | —                        |
+| `--challenger-mode <mode>`    | challenger baseline 执行模式        | —                        |
+| `--turn-mode <turnId=mode>`   | 可重复的按 turn 覆盖，支持 `plan`   | —                        |
+| `--template <family>`         | 所有角色的提示词模板族（`auto`、`general`、`code`） | `auto` |
+| `--proposer-template <family>` | proposer 提示词模板覆盖            | 继承 `--template` |
+| `--challenger-template <family>` | challenger 提示词模板覆盖       | 继承 `--template` |
+| `--judge-template <family>`   | judge 提示词模板覆盖                | 继承 `--template` |
 | `--output <dir>`              | 输出目录                            | `run_output/debate-<ts>` |
 | `--headless`                  | 禁用 TUI（完成信息仍输出到 stdout） | `false`                  |
 | `-v, --verbose`               | 详细日志                            | `false`                  |
 
 > **参数校验规则：** `--judge-every-n-rounds` 必须小于 `--max-rounds`。`--convergence-threshold` 必须在 0 到 1 之间。
+
+执行模式优先级：
+
+```text
+debate default < role baseline < turn override
+```
 
 **模型优先级：** `--proposer-model` > `--model` > 配置文件 `model` 字段 > 提供商默认值。
 
@@ -266,7 +377,7 @@ Inject 语义说明：
 
 ## 配置文件
 
-配置文件使用 YAML frontmatter + Markdown 系统提示词：
+配置文件是带 YAML frontmatter 的 Markdown 文件。自定义 profile 还可以附带 Markdown 系统提示词正文：
 
 ```yaml
 ---
@@ -299,19 +410,69 @@ mcp_servers:
 
 **裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（例如 `claude/proposer` 默认使用 `claude/judge`）。
 
-内置角色契约是有区分的：
+内置提示词现在分成两层：
 
-- proposer 和 challenger 配置都包含 research requirements，要求重要主张尽量基于代码或其他可用证据
-- challenger 配置被要求在关键反驳前做验证，并尽量提出具体替代方案，而不只是反对
-- judge 配置优先评估证据责任；如果一方缺少依据，应在评分和 reasoning 中体现，而不是由裁判替其做大范围调查
+- provider profile 负责选择 adapter、默认模型和运行时接线
+- prompt template 负责定义 `proposer`、`challenger`、`judge` 的角色契约
+- `general` 模板族用于商业、产品、研究类主题
+- `code` 模板族用于仓库、实现、调试类主题
+- `--template auto` 会根据 topic 文本自动推断模板族，`--proposer-template`、`--challenger-template`、`--judge-template` 可分别手工覆盖
+- 自定义 profile 仍然可以内嵌完整系统提示词；如果 profile 有正文，就优先使用该正文，除非你在 CLI 上显式传了对应角色的 template override
+
+这套拆分现在对 Claude、Codex、Gemini 是对称的。Crossfire 不再只给 Codex 特判“代码型 challenger 提示词”；三家内置 provider 都共享 `general` 和 `code` 两个角色模板族，而 provider 差异只留在 profile/runtime 层。
 
 内置配置文件：
 
 ```text
 profiles/
-├── claude/    # proposer.md, challenger.md, judge.md
-├── codex/     # proposer.md, challenger.md, judge.md
-└── gemini/    # proposer.md, challenger.md, judge.md
+├── claude/       # 仅 provider/runtime 配置
+├── codex/        # 仅 provider/runtime 配置
+├── gemini/       # 仅 provider/runtime 配置
+└── templates/
+    ├── general/  # proposer.md, challenger.md, judge.md
+    └── code/     # proposer.md, challenger.md, judge.md
+```
+
+典型用法：
+
+```bash
+# 让 Crossfire 根据 topic 自动推断模板族
+crossfire start \
+  --topic "Should we launch an API resale product?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --template auto
+```
+
+```bash
+# 强制所有角色都使用 code 模板
+crossfire start \
+  --topic "Should we rewrite the data layer?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --template code
+```
+
+```bash
+# 按角色使用不同模板族
+crossfire start \
+  --topic "Should we rewrite the data layer?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --proposer-template general \
+  --challenger-template code
+```
+
+```bash
+# 组合 baseline、turn override 和模板选择
+crossfire start \
+  --topic "Should we rewrite the data layer?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --proposer-mode research \
+  --challenger-mode guarded \
+  --turn-mode p-1=plan \
+  --template code
 ```
 
 ## 输出文件
@@ -337,14 +498,15 @@ profiles/
 ## 工作原理
 
 1. **加载配置** — CLI 读取 YAML 配置文件，用 Zod 校验，并把 `agent` 字段映射到适配器类型。
-2. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，把提供商特定协议统一为共享事件流。
-3. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 都订阅这个总线。
-4. **回合循环** — 编排器从投影状态构建提示词，发送给当前智能体，等待 `turn.completed`，再轮到另一方。每次决策前都会从事件重新投影状态。
-5. **结构化提取** — 智能体调用 `debate_meta` 上报立场、置信度、关键论点和让步。裁判调用 `judge_verdict` 给出评分和继续/停止建议，同时其提示词会优先惩罚缺乏依据的主张。
-6. **增量提示词** — 第 1 轮发送完整系统提示词、主题和输出格式；后续轮次仅发送对手最新回复和可选裁判反馈。
-7. **收敛检测** — Crossfire 跟踪立场差值、让步情况以及双方是否希望结束。达到阈值时可提前终止辩论。
-8. **持久化** — 事件每 100ms 批量写入 JSONL，并在回合或辩论完成时同步刷新。完整日志支持确定性回放和恢复。
-9. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，记录综合诊断元数据供审计使用；如果模型综合失败，则回退到经 debate summary 补强的本地报告。
+2. **解析提示词模板** — 如果 profile 自带正文，Crossfire 直接用该系统提示词；否则会根据 topic 或 `--template` / `--*-template` 选择 `general` 或 `code` 模板族。这套机制现在对所有内置 provider 对称生效。
+3. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，把提供商特定协议统一为共享事件流。
+4. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 都订阅这个总线。
+5. **回合循环** — 编排器从投影状态构建提示词，发送给当前智能体，等待 `turn.completed`，再轮到另一方。每次决策前都会从事件重新投影状态。
+6. **结构化提取** — 智能体调用 `debate_meta` 上报立场、置信度、关键论点和让步。裁判调用 `judge_verdict` 给出评分和继续/停止建议，同时其提示词会优先惩罚缺乏依据的主张。
+7. **增量提示词** — 第 1 轮发送完整系统提示词、主题和输出格式；后续轮次仅发送对手最新回复和可选裁判反馈。
+8. **收敛检测** — Crossfire 跟踪立场差值、让步情况以及双方是否希望结束。达到阈值时可提前终止辩论。
+9. **持久化** — 事件每 100ms 批量写入 JSONL，并在回合或辩论完成时同步刷新。完整日志支持确定性回放和恢复。
+10. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，记录综合诊断元数据供审计使用；如果模型综合失败，则回退到经 debate summary 补强的本地报告。
 
 完整架构文档请从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 进入。
 

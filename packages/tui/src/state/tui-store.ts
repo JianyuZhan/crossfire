@@ -37,6 +37,7 @@ function defaultAgentPanel(
 	return {
 		role,
 		status: "idle",
+		executionMode: undefined,
 		thinkingText: "",
 		thinkingType: undefined,
 		narrationTexts: [],
@@ -186,6 +187,7 @@ function captureSnapshot(panel: LiveAgentPanelState): AgentTurnSnapshot {
 		narrationTexts: panel.narrationTexts.map((text) =>
 			stripInternalToolBlocks(text),
 		),
+		executionMode: panel.executionMode,
 		thinkingText: panel.thinkingText || undefined,
 		thinkingType: panel.thinkingType,
 		latestPlan: panel.latestPlan?.map((step) => ({ ...step })),
@@ -206,6 +208,19 @@ function archiveNarration(panel: LiveAgentPanelState): void {
 		panel.narrationTexts.push(narration);
 	}
 	panel.currentMessageText = "";
+}
+
+function isActiveToolStatus(status: string): boolean {
+	return status === "requested" || status === "running";
+}
+
+function parseClaudeToolUseIdFromApproval(
+	requestId: string,
+	turnId?: string,
+): string | undefined {
+	if (!turnId) return undefined;
+	const prefix = `ar-${turnId}-`;
+	return requestId.startsWith(prefix) ? requestId.slice(prefix.length) : undefined;
 }
 
 export class TuiStore {
@@ -230,7 +245,9 @@ export class TuiStore {
 	private chunks: ContentChunk[] = [];
 	private dirty = false;
 	private pendingFlush: ReturnType<typeof setTimeout> | null = null;
+	private toolHeartbeat: ReturnType<typeof setInterval> | null = null;
 	private readonly flushIntervalMs = 16;
+	private readonly toolHeartbeatMs = 500;
 	private static readonly NEAR_BOTTOM_THRESHOLD = 2;
 
 	// Only re-project full state on structural events (not high-frequency deltas)
@@ -267,6 +284,7 @@ export class TuiStore {
 	handleEvent(event: AnyEvent): void {
 		this.allEvents.push(event);
 		this.applyEvent(event);
+		this.syncToolHeartbeat();
 
 		if (TuiStore.STRUCTURAL_KINDS.has(event.kind)) {
 			this.state.debateState = projectState(this.allEvents);
@@ -419,6 +437,59 @@ export class TuiStore {
 		if (this.pendingFlush) {
 			clearTimeout(this.pendingFlush);
 			this.pendingFlush = null;
+		}
+		if (this.toolHeartbeat) {
+			clearInterval(this.toolHeartbeat);
+			this.toolHeartbeat = null;
+		}
+	}
+
+	private hasRunningTools(): boolean {
+		return [this.state.proposer, this.state.challenger].some((panel) =>
+			panel.tools.some((tool) => isActiveToolStatus(tool.status)),
+		);
+	}
+
+	private refreshRunningToolElapsed(nowMs = Date.now()): boolean {
+		let changed = false;
+		for (const panel of [this.state.proposer, this.state.challenger]) {
+			for (const tool of panel.tools) {
+				if (!isActiveToolStatus(tool.status) || tool.startedAtMs === undefined) {
+					continue;
+				}
+				const localElapsedMs = Math.max(0, nowMs - tool.startedAtMs);
+				const nextElapsedMs = Math.max(tool.elapsedMs ?? 0, localElapsedMs);
+				if (tool.elapsedMs !== nextElapsedMs) {
+					tool.elapsedMs = nextElapsedMs;
+					changed = true;
+				}
+			}
+		}
+		return changed;
+	}
+
+	private syncToolHeartbeat(): void {
+		if (this.hasRunningTools()) {
+			if (this.toolHeartbeat !== null) return;
+			this.refreshRunningToolElapsed();
+			this.toolHeartbeat = setInterval(() => {
+				if (!this.hasRunningTools()) {
+					if (this.toolHeartbeat) {
+						clearInterval(this.toolHeartbeat);
+						this.toolHeartbeat = null;
+					}
+					return;
+				}
+				if (this.refreshRunningToolElapsed()) {
+					this.dirty = true;
+					this.scheduleFlush();
+				}
+			}, this.toolHeartbeatMs);
+			return;
+		}
+		if (this.toolHeartbeat) {
+			clearInterval(this.toolHeartbeat);
+			this.toolHeartbeat = null;
 		}
 	}
 
@@ -674,6 +745,7 @@ export class TuiStore {
 				p.status = "thinking";
 				p.turnDurationMs = undefined;
 				p.turnStatus = undefined;
+				p.executionMode = undefined;
 				// Clear completed judge panel when new round begins
 				if (this.state.judge.visible) {
 					this.state.judge.visible = false;
@@ -698,6 +770,14 @@ export class TuiStore {
 				const round = this.getOrCreateRound(e.roundNumber);
 				round[e.speaker] = captureSnapshot(this.state[e.speaker]);
 				this.activeSpeaker = undefined;
+				break;
+			}
+			case "turn.mode.changed": {
+				const e = event as {
+					speaker: "proposer" | "challenger";
+					executionMode: string;
+				};
+				this.state[e.speaker].executionMode = e.executionMode;
 				break;
 			}
 			case "thinking.delta": {
@@ -769,6 +849,7 @@ export class TuiStore {
 				const p = this.panel();
 				if (!p) break;
 				const e = event as {
+					timestamp?: number;
 					toolUseId: string;
 					toolName: string;
 					input: unknown;
@@ -786,7 +867,8 @@ export class TuiStore {
 					toolUseId: e.toolUseId,
 					toolName: e.toolName,
 					inputSummary: JSON.stringify(e.input).slice(0, 100),
-					status: "running",
+					status: "requested",
+					startedAtMs: e.timestamp ?? Date.now(),
 					expanded: true,
 				});
 				break;
@@ -794,24 +876,43 @@ export class TuiStore {
 			case "tool.progress": {
 				const p = this.panel();
 				if (!p) break;
-				const e = event as { toolUseId: string; elapsedMs?: number };
+				const e = event as { toolUseId: string; elapsedSeconds?: number };
 				const tool = p.tools.find((t) => t.toolUseId === e.toolUseId);
-				if (tool && e.elapsedMs !== undefined) tool.elapsedMs = e.elapsedMs;
+				if (!tool || e.elapsedSeconds === undefined) break;
+				tool.status = "running";
+				tool.elapsedMs = e.elapsedSeconds * 1000;
 				break;
 			}
 			case "tool.result": {
 				const p = this.panel();
 				if (!p) break;
 				const e = event as {
+					timestamp?: number;
 					toolUseId: string;
 					toolName: string;
 					success: boolean;
+					error?: string;
 				};
 				const tool = p.tools.find((t) => t.toolUseId === e.toolUseId);
 				if (tool) {
-					tool.status = e.success ? "done" : "error";
-					tool.resultSummary = e.success ? "success" : "error";
+					const finishedAtMs = e.timestamp ?? Date.now();
+					if (tool.startedAtMs !== undefined) {
+						const localElapsedMs = Math.max(0, finishedAtMs - tool.startedAtMs);
+						tool.elapsedMs = Math.max(tool.elapsedMs ?? 0, localElapsedMs);
+					}
+					tool.status = e.success ? "succeeded" : "failed";
+					tool.resultSummary = e.success ? "success" : e.error ?? "error";
 				}
+				break;
+			}
+			case "tool.denied": {
+				const p = this.panel();
+				if (!p) break;
+				const e = event as { toolUseId: string };
+				const tool = p.tools.find((t) => t.toolUseId === e.toolUseId);
+				if (!tool) break;
+				tool.status = "denied";
+				tool.resultSummary = "denied";
 				break;
 			}
 			case "turn.completed": {
@@ -824,7 +925,13 @@ export class TuiStore {
 				p.status = "done";
 				p.turnDurationMs = e.durationMs;
 				p.turnStatus = e.status;
-				for (const tool of p.tools) tool.expanded = false;
+				for (const tool of p.tools) {
+					if (isActiveToolStatus(tool.status)) {
+						tool.status = "unknown";
+						tool.resultSummary = "unknown outcome";
+					}
+					tool.expanded = false;
+				}
 				break;
 			}
 			case "approval.request": {
@@ -853,11 +960,29 @@ export class TuiStore {
 				break;
 			}
 			case "approval.resolved": {
-				const e = event as { requestId: string };
+				const e = event as {
+					requestId: string;
+					decision?: "allow" | "deny" | "allow-always";
+					turnId?: string;
+				};
 				this.state.command.pendingApprovals =
 					this.state.command.pendingApprovals.filter(
 						(a) => a.requestId !== e.requestId,
 					);
+				if (e.decision === "deny") {
+					const toolUseId = parseClaudeToolUseIdFromApproval(
+						e.requestId,
+						e.turnId,
+					);
+					const p = this.panel();
+					const tool = toolUseId
+						? p?.tools.find((entry) => entry.toolUseId === toolUseId)
+						: undefined;
+					if (tool) {
+						tool.status = "denied";
+						tool.resultSummary = "denied";
+					}
+				}
 				if (this.state.command.pendingApprovals.length === 0)
 					this.state.command.mode = "normal";
 				break;
@@ -904,6 +1029,7 @@ export class TuiStore {
 							: this.state.metrics.challengerUsage;
 					usage.tokens += tokens;
 					usage.costUsd += cost;
+					usage.semantics = e.semantics as AgentUsage["semantics"];
 
 					if (e.localMetrics) {
 						usage.localTotalChars =

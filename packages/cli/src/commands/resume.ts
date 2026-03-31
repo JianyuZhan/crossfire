@@ -63,10 +63,15 @@ export const resumeCommand = new Command("resume")
 				proposer: {
 					profile: proposerProfile,
 					cliModel: undefined,
+					systemPrompt: config.proposerSystemPrompt ?? proposerProfile.systemPrompt,
+					promptTemplateFamily: config.promptTemplates?.proposer,
 				},
 				challenger: {
 					profile: challengerProfile,
 					cliModel: undefined,
+					systemPrompt:
+						config.challengerSystemPrompt ?? challengerProfile.systemPrompt,
+					promptTemplateFamily: config.promptTemplates?.challenger,
 				},
 				judge:
 					judgeProfile === "none"
@@ -74,6 +79,9 @@ export const resumeCommand = new Command("resume")
 						: {
 								profile: judgeProfile,
 								cliModel: undefined,
+								systemPrompt:
+									config.judgeSystemPrompt ?? judgeProfile.systemPrompt,
+								promptTemplateFamily: config.promptTemplates?.judge,
 							},
 			});
 

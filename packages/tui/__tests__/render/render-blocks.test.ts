@@ -32,7 +32,7 @@ describe("snapshotToBlocks", () => {
 				{
 					toolUseId: "1",
 					toolName: "meta",
-					status: "done",
+					status: "succeeded",
 					inputSummary: "x",
 					expanded: false,
 				},
@@ -138,7 +138,7 @@ describe("liveStateToBlocks", () => {
 		}
 	});
 
-	it("adds tool progress counts to the live header label", () => {
+	it("shows running count and recent failure summary in the live header label", () => {
 		const state: LiveAgentPanelState = {
 			role: "proposer",
 			status: "tool",
@@ -151,20 +151,22 @@ describe("liveStateToBlocks", () => {
 					toolName: "WebFetch",
 					inputSummary: "{}",
 					status: "running",
+					elapsedMs: 2500,
 					expanded: true,
 				},
 				{
 					toolUseId: "t2",
 					toolName: "WebFetch",
 					inputSummary: "{}",
-					status: "done",
+					status: "succeeded",
 					expanded: true,
 				},
 				{
 					toolUseId: "t3",
 					toolName: "WebFetch",
 					inputSummary: "{}",
-					status: "error",
+					status: "failed",
+					resultSummary: "Request failed with status code 404",
 					expanded: true,
 				},
 			],
@@ -174,8 +176,164 @@ describe("liveStateToBlocks", () => {
 		expect(header.kind).toBe("agent-header");
 		if (header.kind === "agent-header") {
 			expect(header.statusLabel).toContain("1 running");
-			expect(header.statusLabel).toContain("1 done");
-			expect(header.statusLabel).toContain("1 error");
+			expect(header.statusLabel).toContain("active 2.5s");
+			expect(header.statusLabel).toContain("recent failures: 404×1");
+		}
+	});
+
+	it("includes active elapsed time in the live header when a tool is still running", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			status: "tool",
+			thinkingText: "",
+			narrationTexts: [],
+			currentMessageText: "",
+			tools: [
+				{
+					toolUseId: "t1",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "running",
+					elapsedMs: 2500,
+					expanded: true,
+				},
+			],
+			warnings: [],
+		};
+		const header = liveStateToBlocks(state)[0];
+		expect(header.kind).toBe("agent-header");
+		if (header.kind === "agent-header") {
+			expect(header.statusLabel).toContain("active 2.5s");
+		}
+	});
+
+	it("compresses repeated failed tools into a warning summary", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			status: "tool",
+			thinkingText: "",
+			narrationTexts: [],
+			currentMessageText: "",
+			tools: [
+				{
+					toolUseId: "t1",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "running",
+					elapsedMs: 1500,
+					expanded: true,
+				},
+				{
+					toolUseId: "t2",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "failed",
+					resultSummary: "Request failed with status code 404",
+					expanded: true,
+				},
+				{
+					toolUseId: "t3",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "failed",
+					resultSummary: "Request failed with status code 404",
+					expanded: true,
+				},
+			],
+			warnings: [],
+		};
+		const blocks = liveStateToBlocks(state);
+		const warning = blocks.find((block) => block.kind === "warning");
+		expect(warning).toBeDefined();
+		if (warning?.kind === "warning") {
+			expect(warning.text).toContain("WebFetch failures");
+			expect(warning.text).toContain("404×2");
+		}
+		expect(
+			blocks.filter(
+				(block) => block.kind === "tool-call" && block.status === "error",
+			),
+		).toHaveLength(0);
+	});
+
+	it("does not keep completed tools in the live tool list", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			status: "tool",
+			thinkingText: "",
+			narrationTexts: [],
+			currentMessageText: "",
+			tools: [
+				{
+					toolUseId: "t1",
+					toolName: "WebFetch",
+					inputSummary: "{}",
+					status: "running",
+					elapsedMs: 1500,
+					expanded: true,
+				},
+				{
+					toolUseId: "t2",
+					toolName: "Read",
+					inputSummary: "{}",
+					status: "succeeded",
+					expanded: true,
+				},
+			],
+			warnings: [],
+		};
+		const blocks = liveStateToBlocks(state);
+		const toolCalls = blocks.filter((block) => block.kind === "tool-call");
+		expect(toolCalls).toHaveLength(1);
+		if (toolCalls[0]?.kind === "tool-call") {
+			expect(toolCalls[0].toolName).toBe("WebFetch");
+		}
+	});
+
+	it("does not keep unknown-outcome tools in the live tool list", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			status: "tool",
+			thinkingText: "",
+			narrationTexts: [],
+			currentMessageText: "",
+			tools: [
+				{
+					toolUseId: "t1",
+					toolName: "Read",
+					inputSummary: "{}",
+					status: "unknown",
+					resultSummary: "unknown outcome",
+					expanded: true,
+				},
+			],
+			warnings: [],
+		};
+		const blocks = liveStateToBlocks(state);
+		expect(blocks.filter((block) => block.kind === "tool-call")).toHaveLength(0);
+		const warning = blocks.find((block) => block.kind === "warning");
+		expect(warning).toBeDefined();
+		if (warning?.kind === "warning") {
+			expect(warning.text).toContain("unknown outcomes");
+			expect(warning.text).toContain("Read×1");
+		}
+	});
+
+	it("includes the current execution mode in the live header label", () => {
+		const state: LiveAgentPanelState = {
+			role: "proposer",
+			status: "thinking",
+			executionMode: "research",
+			thinkingText: "Planning",
+			narrationTexts: [],
+			currentMessageText: "",
+			tools: [],
+			warnings: [],
+		};
+		const header = liveStateToBlocks(state)[0];
+		expect(header.kind).toBe("agent-header");
+		if (header.kind === "agent-header") {
+			expect(header.statusLabel).toContain("research");
 		}
 	});
 });

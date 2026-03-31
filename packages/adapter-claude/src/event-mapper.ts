@@ -186,8 +186,32 @@ export function mapSdkMessage(
 		}
 
 		case "result": {
-			const rawUsage = msg.usage as Record<string, unknown> | undefined;
 			const events: NormalizedEvent[] = [];
+			const permissionDenials = Array.isArray(msg.permission_denials)
+				? (msg.permission_denials as Array<Record<string, unknown>>)
+				: [];
+
+			for (const denial of permissionDenials) {
+				const toolUseId =
+					(denial.tool_use_id as string | undefined) ??
+					(denial.toolUseId as string | undefined);
+				const toolName =
+					(denial.tool_name as string | undefined) ??
+					(denial.toolName as string | undefined);
+				if (!toolUseId || !toolName) continue;
+				events.push({
+					...base,
+					kind: "tool.denied",
+					toolUseId,
+					toolName,
+					input:
+						denial.tool_input ??
+						denial.toolInput ??
+						(denial.input as unknown),
+				});
+			}
+
+			const rawUsage = msg.usage as Record<string, unknown> | undefined;
 
 			if (rawUsage) {
 				const inputTokens =

@@ -1,5 +1,6 @@
 import type { AgentAdapter, SessionHandle } from "@crossfire/adapter-core";
 import type { AdapterMap } from "@crossfire/orchestrator";
+import type { DebateExecutionConfig } from "@crossfire/orchestrator-core";
 import type {
 	AdapterType,
 	ResolvedRole,
@@ -24,17 +25,25 @@ export interface AdapterBundle {
 export async function createAdapters(
 	roles: ResolvedRoles,
 	factories: AdapterFactoryMap,
+	executionModes?: DebateExecutionConfig,
 ): Promise<AdapterBundle> {
 	const started: Array<{ adapter: AgentAdapter; session: SessionHandle }> = [];
 
-	async function startRole(role: ResolvedRole) {
+	async function startRole(
+		roleName: "proposer" | "challenger" | "judge",
+		role: ResolvedRole,
+	) {
 		const adapter = factories[role.adapterType]();
 		const session = await adapter.startSession({
 			profile: role.profile.name,
 			workingDirectory: process.cwd(),
 			model: role.model,
 			mcpServers: role.profile.mcp_servers,
-			providerOptions: { systemPrompt: role.profile.systemPrompt },
+			executionMode:
+				roleName === "judge"
+					? undefined
+					: executionModes?.roleModes?.[roleName] ?? executionModes?.defaultMode,
+			providerOptions: { systemPrompt: role.systemPrompt },
 		});
 		started.push({ adapter, session });
 		return { adapter, session };
@@ -42,9 +51,9 @@ export async function createAdapters(
 
 	try {
 		const [proposer, challenger, judge] = await Promise.all([
-			startRole(roles.proposer),
-			startRole(roles.challenger),
-			roles.judge ? startRole(roles.judge) : undefined,
+			startRole("proposer", roles.proposer),
+			startRole("challenger", roles.challenger),
+			roles.judge ? startRole("judge", roles.judge) : undefined,
 		]);
 
 		const adapters: AdapterMap = {

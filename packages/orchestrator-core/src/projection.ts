@@ -80,6 +80,9 @@ export function projectState(events: AnyEvent[]): DebateState {
 				currentSpeaker = undefined;
 				break;
 
+			case "turn.mode.changed":
+				break;
+
 			case "judge.started":
 				judging = true;
 				phase = "judging";

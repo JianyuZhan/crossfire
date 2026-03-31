@@ -6,6 +6,7 @@ import type {
 	ApprovalOption,
 	LocalTurnMetrics,
 	NormalizedEvent,
+	TurnExecutionMode,
 	SessionHandle,
 	StartSessionInput,
 	TurnHandle,
@@ -21,6 +22,7 @@ import { mapSdkMessage } from "./event-mapper.js";
 import { buildHooks } from "./hooks.js";
 import type {
 	ClaudeCanUseToolOptions,
+	ClaudePermissionMode,
 	ClaudePermissionResult,
 	ClaudePermissionUpdate,
 	QueryFn,
@@ -54,6 +56,44 @@ interface PendingApproval {
 }
 
 let sessionCounter = 0;
+
+const CLAUDE_RESEARCH_ALLOWED_TOOLS = [
+	"Read",
+	"Grep",
+	"Glob",
+	"LS",
+	"WebFetch",
+	"Task",
+];
+const CLAUDE_RESEARCH_MAX_TURNS = 12;
+
+function mapExecutionModeToClaudeQueryOptions(
+	mode: TurnExecutionMode | undefined,
+): {
+	permissionMode?: ClaudePermissionMode;
+	allowDangerouslySkipPermissions?: boolean;
+	maxTurns?: number;
+	allowedTools?: string[];
+} {
+	switch (mode) {
+		case "research":
+			return {
+				permissionMode: "dontAsk",
+				maxTurns: CLAUDE_RESEARCH_MAX_TURNS,
+				allowedTools: CLAUDE_RESEARCH_ALLOWED_TOOLS,
+			};
+		case "dangerous":
+			return {
+				permissionMode: "bypassPermissions",
+				allowDangerouslySkipPermissions: true,
+			};
+		case "plan":
+			return { permissionMode: "plan" };
+		case "guarded":
+		case undefined:
+			return { permissionMode: "default" };
+	}
+}
 
 function buildApprovalOptions(
 ): ApprovalOption[] {
@@ -227,6 +267,7 @@ export class ClaudeAdapter implements AgentAdapter {
 			prompt: input.prompt,
 			resume: handle.providerSessionId ?? undefined,
 			model: this.sessionModels.get(handle.adapterSessionId),
+			...mapExecutionModeToClaudeQueryOptions(input.executionMode),
 			canUseTool,
 			hooks,
 		});

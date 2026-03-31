@@ -26,6 +26,7 @@ import {
 function createScriptedAdapter(
 	id: "claude" | "codex" | "gemini",
 	scripts: Record<string, NormalizedEvent[]>,
+	recordedTurns?: TurnInput[],
 ): AgentAdapter {
 	const listeners: Set<(e: NormalizedEvent) => void> = new Set();
 	const sessionId = `${id}-s1`;
@@ -41,6 +42,7 @@ function createScriptedAdapter(
 			};
 		},
 		async sendTurn(_handle: SessionHandle, input: TurnInput) {
+			recordedTurns?.push(input);
 			const eventsForTurn = scripts[input.turnId] ?? [
 				// Unknown turnIds still complete immediately (prevents hangs in summary generation etc.)
 				{
@@ -302,6 +304,135 @@ describe("runDebate", () => {
 		expect(result.phase).toBe("completed");
 		expect(collected.some((e) => e.kind === "debate.started")).toBe(true);
 		expect(collected.some((e) => e.kind === "debate.completed")).toBe(true);
+	});
+
+	it("passes role baseline execution modes into sendTurn", async () => {
+		const proposerTurns: TurnInput[] = [];
+		const challengerTurns: TurnInput[] = [];
+		const proposer = createScriptedAdapter(
+			"claude",
+			{
+				"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["A"],
+					wants_to_conclude: true,
+				}),
+			},
+			proposerTurns,
+		);
+		const challenger = createScriptedAdapter(
+			"codex",
+			{
+				"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["B"],
+					wants_to_conclude: true,
+				}),
+			},
+			challengerTurns,
+		);
+
+		await runDebate(
+			{
+				...config,
+				maxRounds: 1,
+				executionModes: {
+					roleModes: {
+						proposer: "research",
+						challenger: "dangerous",
+					},
+				},
+			},
+			{
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			},
+		);
+
+		expect(proposerTurns[0]?.executionMode).toBe("research");
+		expect(challengerTurns[0]?.executionMode).toBe("dangerous");
+	});
+
+	it("lets per-turn overrides win over role baselines and emits turn.mode.changed", async () => {
+		const bus = new DebateEventBus();
+		const collected: AnyEvent[] = [];
+		bus.subscribe((event) => collected.push(event));
+
+		const proposerTurns: TurnInput[] = [];
+		const proposer = createScriptedAdapter(
+			"claude",
+			{
+				"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", {
+					stance: "agree",
+					confidence: 0.7,
+					key_points: ["A"],
+					wants_to_conclude: true,
+				}),
+			},
+			proposerTurns,
+		);
+		const challenger = createScriptedAdapter("codex", {
+			"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+				stance: "agree",
+				confidence: 0.7,
+				key_points: ["B"],
+				wants_to_conclude: true,
+			}),
+		});
+
+		await runDebate(
+			{
+				...config,
+				maxRounds: 1,
+				executionModes: {
+					roleModes: { proposer: "research" },
+					turnOverrides: { "p-1": "plan" },
+				},
+			},
+			{
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			},
+			{ bus },
+		);
+
+		expect(proposerTurns[0]?.executionMode).toBe("plan");
+		expect(
+			collected.find((event) => event.kind === "turn.mode.changed"),
+		).toMatchObject({
+			kind: "turn.mode.changed",
+			turnId: "p-1",
+			speaker: "proposer",
+			executionMode: "plan",
+			baselineMode: "research",
+			source: "turn-override",
+		});
 	});
 
 	it("completes debate without judge when judge is undefined", async () => {

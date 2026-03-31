@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { NormalizedEventSchema } from "../src/event-schema.js";
+import {
+	AdapterContractSchema,
+	NormalizedEventSchema,
+} from "../src/event-schema.js";
 
 describe("NormalizedEventSchema", () => {
 	it("accepts valid session.started", () => {
@@ -107,6 +110,20 @@ describe("NormalizedEventSchema", () => {
 			toolName: "bash",
 			success: true,
 			output: "file.txt",
+		};
+		expect(NormalizedEventSchema.safeParse(event).success).toBe(true);
+	});
+
+	it("accepts valid tool.denied", () => {
+		const event = {
+			kind: "tool.denied",
+			timestamp: Date.now(),
+			adapterId: "claude",
+			adapterSessionId: "s1",
+			turnId: "t1",
+			toolUseId: "tu1",
+			toolName: "Read",
+			input: { file_path: "README.md" },
 		};
 		expect(NormalizedEventSchema.safeParse(event).success).toBe(true);
 	});
@@ -222,6 +239,26 @@ describe("NormalizedEventSchema", () => {
 		};
 		expect(NormalizedEventSchema.safeParse(error).success).toBe(true);
 		expect(NormalizedEventSchema.safeParse(warning).success).toBe(true);
+	});
+
+	it("accepts StartSessionInput with an execution mode baseline", () => {
+		expect(
+			AdapterContractSchema.shape.startSessionInput.safeParse({
+				profile: "test",
+				workingDirectory: "/tmp/project",
+				executionMode: "guarded",
+			}).success,
+		).toBe(true);
+	});
+
+	it("accepts TurnInput with a per-turn execution mode override", () => {
+		expect(
+			AdapterContractSchema.shape.turnInput.safeParse({
+				prompt: "hello",
+				turnId: "p-1",
+				executionMode: "plan",
+			}).success,
+		).toBe(true);
 	});
 
 	it("rejects invalid adapterId", () => {

@@ -106,6 +106,32 @@ describe("mapSdkMessage", () => {
 		const events = mapSdkMessage(msg, CTX);
 		expect(events).toHaveLength(1);
 		expect(events[0].kind).toBe("tool.progress");
+		if (events[0]?.kind === "tool.progress") {
+			expect(events[0].elapsedSeconds).toBe(5);
+		}
+	});
+
+	it("maps result permission_denials to tool.denied events", () => {
+		const msg = {
+			type: "result",
+			subtype: "success",
+			usage: { input_tokens: 10, output_tokens: 5 },
+			duration_ms: 100,
+			permission_denials: [
+				{
+					tool_use_id: "tu1",
+					tool_name: "Read",
+					tool_input: { file_path: "README.md" },
+				},
+			],
+		};
+		const events = mapSdkMessage(msg, CTX);
+		const denied = events.find((event) => event.kind === "tool.denied");
+		expect(denied).toBeDefined();
+		if (denied?.kind === "tool.denied") {
+			expect(denied.toolUseId).toBe("tu1");
+			expect(denied.toolName).toBe("Read");
+		}
 	});
 
 	it("returns empty array for unknown message types", () => {

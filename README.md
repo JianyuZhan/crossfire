@@ -27,6 +27,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 - [Best For](#best-for)
 - [What You Get](#what-you-get)
 - [Quick Start](#quick-start)
+- [Execution Modes](#execution-modes)
 - [TUI](#tui)
 - [CLI Reference](#cli-reference)
 - [Runtime Commands](#runtime-commands)
@@ -44,13 +45,14 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 - **Action-plan first** — The primary output is `action-plan.html` / `action-plan.md`, not just a debate transcript
 - **Multi-provider** — Mix and match Claude (Agent SDK), Codex (JSON-RPC), and Gemini (subprocess) in any role
-- **Real-time TUI** — Split-panel terminal UI with live streaming, retained thinking summaries, persistent pre-tool narration blocks, wrapped tool-call traces, live tool progress counts, highlighted approval cards, and convergence metrics
+- **Real-time TUI** — Split-panel terminal UI with live streaming, retained thinking summaries, persistent pre-tool narration blocks, wrapped tool-call traces, locally tracked live tool elapsed timers, highlighted approval cards, and convergence metrics
 - **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates and replay completed ones from the same source of truth
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
 - **Adaptive final synthesis** — After the debate, Crossfire generates a final action plan in a fresh synthesis session with local fallback if model-backed synthesis fails
 - **Incremental prompts** — Turn 1 sends full context; Turn 2+ sends only new opponent/judge messages, leveraging provider session memory for ~O(1) per-turn cost
-- **Profiles** — YAML frontmatter + Markdown system prompts. Built-in proposer/challenger/judge profiles include role-specific research and evidence-handling guidance
+- **Profiles + prompt templates** — Built-in provider profiles now hold agent/model/runtime config, while reusable `general` and `code` prompt templates define the role contract
+- **Execution modes** — Set debate defaults, per-role baselines, and per-turn overrides such as `research`, `guarded`, `dangerous`, and `plan`
 
 ## Best For
 
@@ -61,7 +63,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 
 ## What You Get
 
-- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, retained thinking summaries, persistent pre-tool narration, wrapped tool details, live tool progress counts, approval prompts, judge feedback, and convergence tracking
+- **Live debate view** — Full-screen terminal UI for round-by-round reasoning, retained thinking summaries, persistent pre-tool narration, wrapped tool details, locally tracked live tool elapsed timers, approval prompts, judge feedback, and convergence tracking
 - **Action plan outputs** — Final report in Markdown and HTML for sharing, editing, or automation
 - **Full transcript** — Human-readable transcript in Markdown and HTML
 - **Replayable audit trail** — Event-sourced JSONL logs plus `index.json` metadata for replay, resume, and status inspection
@@ -133,14 +135,109 @@ crossfire start \
 
 In the example above, output lands in `run_output/microservices/` because `--output run_output/microservices` is set explicitly. If you omit `--output`, Crossfire writes to the default `run_output/debate-<ts>/` directory. Inspect `action-plan.html` or `action-plan.md` there, use `crossfire status <output-dir>` for a summary, and `crossfire replay <output-dir>` to replay the event log.
 
+## Execution Modes
+
+Execution modes are Crossfire's way to reduce approval fatigue without flattening every provider into the same approval protocol.
+
+Think of them as an orchestration-level policy layer:
+
+- Crossfire decides how interactive a turn should be
+- each adapter maps that decision to the strongest official primitive the provider actually exposes
+- the event log and TUI record which mode was really used for each turn
+
+There are three baseline modes and one special override:
+
+- `research`
+  Low-interaction research. Prefer safe or read-oriented behavior and reduce approval noise.
+  For Claude, this also applies a conservative per-turn query cap so one research turn does not keep expanding forever.
+- `guarded`
+  Normal controlled execution. This is the closest thing to the old default behavior.
+- `dangerous`
+  High-trust execution. Minimize approval interruptions and accept higher risk.
+- `plan`
+  Per-turn special mode. Use it when you want an agent to outline what it intends to do before giving it a more permissive execution mode.
+
+Why `plan` is not a normal baseline:
+
+- debate quality usually depends on real reads, searches, and verification
+- a permanent `plan` baseline would turn many turns into pure LLM reasoning with weaker evidence
+- in practice, `plan` is most useful as a one-turn preview, not as a steady-state runtime mode
+
+Mode precedence is:
+
+```text
+debate default < role baseline < turn override
+```
+
+That means:
+
+- `--mode` sets the debate-wide default
+- `--proposer-mode` and `--challenger-mode` override the default for one role
+- `--turn-mode p-1=plan` or `--turn-mode c-2=dangerous` wins for that one turn only
+
+Examples:
+
+```bash
+# Debate-wide default
+crossfire start \
+  --topic "Should we migrate to Rust?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --mode guarded
+```
+
+```bash
+# Different baselines by role
+crossfire start \
+  --topic "Should we rebuild the auth service?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --proposer-mode research \
+  --challenger-mode guarded
+```
+
+```bash
+# Force a one-turn planning preview before proposer round 1
+crossfire start \
+  --topic "Should we move to event sourcing?" \
+  --proposer claude/proposer \
+  --challenger claude/challenger \
+  --proposer-mode research \
+  --turn-mode p-1=plan
+```
+
+Current provider mapping is intentionally asymmetric:
+
+- **Claude**
+  `research -> dontAsk + allowlist + bounded maxTurns`, `guarded -> default`, `dangerous -> bypassPermissions`, `plan -> plan`
+- **Codex**
+  maps to approval and sandbox policy combinations rather than a single mode field
+- **Gemini**
+  currently only gets startup / per-turn approval-profile mapping in headless mode; do not assume parity with Claude or Codex
+
+Practical guidance:
+
+- start with `proposer-mode research` when the proposer tends to do broad evidence gathering
+- for Claude, `research` is intentionally bounded; if you need a longer free-form exploration turn, step up to `guarded` or `dangerous`
+- keep `challenger-mode guarded` when you still want explicit control over stronger validation actions
+- use `--turn-mode p-1=plan` when you want to inspect the agent's intended workflow before letting it execute
+- use `dangerous` only for trusted, well-bounded tasks where interruption cost matters more than reviewability
+
 ## TUI
 
 The terminal UI is a full-screen Ink (React for CLI) application with four stacked regions:
 
 - **Header bar** — Centered branding, debate ID, round/phase, proposer & challenger agent info, and topic
 - **Scrollable content** — Round-by-round display of agent messages, thinking traces, and wrapped tool calls so long commands and inputs stay readable. Scroll with arrow keys, `Ctrl+U`/`Ctrl+D`, or `Home`/`End`
-- **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED). Usage accounting is provider-aware, so some providers are normalized from cumulative usage before display
+- **Tool liveness** — Running tool rows and live headers show a locally maintained elapsed timer even when the provider only emits `tool.call` / `tool.result` without intermediate `tool.progress` events
+- **Metrics bar** — Per-agent token counts and costs, convergence progress bar with percentage, judge verdict, and scroll status (LIVE / SCROLLED). Usage accounting is provider-aware, and token rows now label whether a provider reports `session delta`, `per turn`, or `thread cumulative` usage
+- **Fixed live status** — The metrics bar reserves its first line for a compact `Active: ...` summary of the currently running role, so long tool bursts stay visible even after the round header scrolls out of the live viewport
+- **Compressed tool failures** — Live tool views collapse repeated fetch failures into a short summary such as `recent failures: 404×5, 403×2`; use `run_output/<debate-id>/events.jsonl` for the full raw trace
+- **Live tool focus** — The live panel only keeps currently running tools on screen. Successful tools disappear from the live list as soon as they finish, while failures collapse into a short summary; completed details remain available in round snapshots and `events.jsonl`
+- **Six-state Claude tool model** — Claude tool requests are projected as `requested`, `running`, `succeeded`, `failed`, `denied`, or `unknown` rather than assuming every `tool.call` is already executing. A provider `tool.progress` upgrades a request into `running`, permission denials collapse into `denied`, and only observed terminal hooks become `succeeded` / `failed`
+- **Unresolved tool closure** — If a turn ends while some provider tool requests never produce a terminal hook, Crossfire closes those live rows as `unknown outcome` instead of letting them sit in `running` forever
 - **Command/approval area** — Context-aware live prompt (`>`, `approval>`) plus expanded approval cards that show the pending tool/command, batch actions, and provider-aware shortcuts such as `/approve 2`, `/approve 2 2`, or `/approve all`
+- **Mode visibility** — Proposer and challenger headers show the effective turn mode, so you can tell at a glance whether a role is in `research`, `guarded`, `dangerous`, or `plan`
 
 Use `--headless` to skip the TUI. Events and synthesis outputs are still persisted for later inspection.
 
@@ -164,11 +261,25 @@ Start a new debate.
 | `--proposer-model <model>`    | Model override for proposer                              | —                        |
 | `--challenger-model <model>`  | Model override for challenger                            | —                        |
 | `--judge-model <model>`       | Model override for judge                                 | —                        |
+| `--mode <mode>`               | Debate default execution mode (`research`, `guarded`, `dangerous`) | —            |
+| `--proposer-mode <mode>`      | Proposer baseline execution mode                         | —                        |
+| `--challenger-mode <mode>`    | Challenger baseline execution mode                       | —                        |
+| `--turn-mode <turnId=mode>`   | Repeatable per-turn override; supports `plan`           | —                        |
+| `--template <family>`         | Prompt template family for all roles (`auto`, `general`, `code`) | `auto` |
+| `--proposer-template <family>` | Proposer prompt template override                      | inherited from `--template` |
+| `--challenger-template <family>` | Challenger prompt template override                 | inherited from `--template` |
+| `--judge-template <family>`   | Judge prompt template override                           | inherited from `--template` |
 | `--output <dir>`              | Output directory                                         | `run_output/debate-<ts>` |
 | `--headless`                  | Disable TUI (completion info still printed to stdout)    | `false`                  |
 | `-v, --verbose`               | Verbose logging                                          | `false`                  |
 
 > **Validation rules:** `--judge-every-n-rounds` must be less than `--max-rounds`. `--convergence-threshold` must be between 0 and 1.
+
+Execution mode precedence is:
+
+```text
+debate default < role baseline < turn override
+```
 
 **Model resolution:** `--proposer-model` > `--model` > profile `model` field > provider default.
 
@@ -266,7 +377,7 @@ Any agent can play any role (proposer, challenger, or judge). Mix and match free
 
 ## Profiles
 
-Profiles define agent behavior using YAML frontmatter + a Markdown system prompt:
+Profiles are Markdown files with YAML frontmatter. Custom profiles may also include a Markdown system-prompt body:
 
 ```yaml
 ---
@@ -299,19 +410,69 @@ Use the debate_meta tool to report your stance after each response.
 
 **Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (for example, `claude/proposer` defaults to `claude/judge`).
 
-Built-in role contracts are intentionally asymmetric:
+Built-in prompting is now split into two layers:
 
-- proposer and challenger profiles include research requirements so important claims are grounded in code or other available evidence
-- challenger profiles are expected to verify key rebuttals and offer concrete alternatives, not just object
-- judge profiles prioritize evidence responsibility and should score unsupported claims down instead of doing broad replacement analysis
+- provider profiles choose the adapter, default model, and runtime wiring
+- prompt templates define the `proposer`, `challenger`, and `judge` role contract
+- template family `general` is for business, product, and research topics
+- template family `code` is for repository, implementation, and debugging topics
+- `--template auto` infers the family from the topic text, while `--proposer-template`, `--challenger-template`, and `--judge-template` can override it manually
+- custom profiles can still embed a full system prompt body; if they do, that embedded prompt wins unless a role-specific template override is passed on the CLI
+
+This split is now symmetric across Claude, Codex, and Gemini. Built-in provider profiles no longer hard-code provider-specific role prompts. Instead, all built-in providers share the same reusable `general` and `code` role-template families, while adapter/runtime differences stay in the provider profile layer.
 
 Built-in profiles:
 
 ```text
 profiles/
-├── claude/    # proposer.md, challenger.md, judge.md
-├── codex/     # proposer.md, challenger.md, judge.md
-└── gemini/    # proposer.md, challenger.md, judge.md
+├── claude/       # provider/runtime config only
+├── codex/        # provider/runtime config only
+├── gemini/       # provider/runtime config only
+└── templates/
+    ├── general/  # proposer.md, challenger.md, judge.md
+    └── code/     # proposer.md, challenger.md, judge.md
+```
+
+Typical usage:
+
+```bash
+# Let Crossfire infer the template family from the topic
+crossfire start \
+  --topic "Should we launch an API resale product?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --template auto
+```
+
+```bash
+# Force code-oriented prompting for every role
+crossfire start \
+  --topic "Should we rewrite the data layer?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --template code
+```
+
+```bash
+# Use different template families by role
+crossfire start \
+  --topic "Should we rewrite the data layer?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --proposer-template general \
+  --challenger-template code
+```
+
+```bash
+# Combine role baselines, per-turn execution override, and template selection
+crossfire start \
+  --topic "Should we rewrite the data layer?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --proposer-mode research \
+  --challenger-mode guarded \
+  --turn-mode p-1=plan \
+  --template code
 ```
 
 ## Output Files
@@ -337,14 +498,15 @@ If model-backed synthesis fails, Crossfire still writes a fallback action plan s
 ## How It Works
 
 1. **Profile loading** — CLI reads YAML profiles, validates with Zod, and maps `agent` to adapter type.
-2. **Adapter creation** — Each role gets an `AgentAdapter` that normalizes provider-specific protocols into a shared event stream.
-3. **Event bus** — All events flow through `DebateEventBus`. The TUI, EventStore (JSONL persistence), and TranscriptWriter all subscribe here.
-4. **Turn loop** — The orchestrator builds prompts from projected state, sends them to the active agent, waits for `turn.completed`, then continues with the other side. State is re-projected from events before every decision.
-5. **Structured extraction** — Agents call `debate_meta` to report stance, confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendations, with prompt guidance that penalizes unsupported claims rather than quietly accepting them.
-6. **Incremental prompts** — Turn 1 sends the full system prompt, topic, and output schema; subsequent turns send only the opponent's latest response plus optional judge feedback.
-7. **Convergence** — Crossfire tracks stance delta, concessions, and whether both sides want to conclude. Debates can terminate early when convergence is high enough.
-8. **Persistence** — Events batch-flush to JSONL every 100ms, with sync flush on turn/debate completion. The full log enables deterministic replay and resume.
-9. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session, records synthesis diagnostics for auditing, and falls back to an enriched local report if model-backed synthesis fails.
+2. **Prompt template resolution** — If a profile embeds its own prompt body, Crossfire uses it directly; otherwise it selects the `general` or `code` template family automatically from the topic or from `--template` / `--*-template` overrides.
+3. **Adapter creation** — Each role gets an `AgentAdapter` that normalizes provider-specific protocols into a shared event stream.
+4. **Event bus** — All events flow through `DebateEventBus`. The TUI, EventStore (JSONL persistence), and TranscriptWriter all subscribe here.
+5. **Turn loop** — The orchestrator builds prompts from projected state, sends them to the active agent, waits for `turn.completed`, then continues with the other side. State is re-projected from events before every decision.
+6. **Structured extraction** — Agents call `debate_meta` to report stance, confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendations, with prompt guidance that penalizes unsupported claims rather than quietly accepting them.
+7. **Incremental prompts** — Turn 1 sends the full system prompt, topic, and output schema; subsequent turns send only the opponent's latest response plus optional judge feedback.
+8. **Convergence** — Crossfire tracks stance delta, concessions, and whether both sides want to conclude. Debates can terminate early when convergence is high enough.
+9. **Persistence** — Events batch-flush to JSONL every 100ms, with sync flush on turn/debate completion. The full log enables deterministic replay and resume.
+10. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session, records synthesis diagnostics for auditing, and falls back to an enriched local report if model-backed synthesis fails.
 
 For the architecture reference set, start at **[docs/architecture/overview.md](docs/architecture/overview.md)**.
 

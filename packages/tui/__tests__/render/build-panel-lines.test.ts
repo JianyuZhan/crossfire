@@ -49,6 +49,23 @@ describe("buildPanelLines", () => {
 		expect(text).toContain('ly/long/path","prompt":"Explain');
 	});
 
+	it("renders tool-call elapsed time using human-readable seconds", () => {
+		const blocks: RenderBlock[] = [
+			{ kind: "agent-header", role: "challenger", status: "tool" },
+			{
+				kind: "tool-call",
+				toolName: "WebFetch",
+				status: "running",
+				summary: '{"url":"https://example.com"}',
+				elapsedMs: 2500,
+			},
+		];
+		const text = buildPanelLines(blocks, 60)
+			.flatMap((line) => line.segments.map((segment) => segment.text))
+			.join("");
+		expect(text).toContain("2.5s");
+	});
+
 	it("limits error to max 3 lines", () => {
 		const longError = "A".repeat(200);
 		const blocks: RenderBlock[] = [

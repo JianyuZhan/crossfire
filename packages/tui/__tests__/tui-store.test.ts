@@ -180,6 +180,151 @@ describe("TuiStore", () => {
 		expect(s.proposer.turnDurationMs).toBe(500);
 	});
 
+	it("records tool.call as requested and upgrades to running on tool.progress", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("tool.call", {
+				toolUseId: "t1",
+				toolName: "Read",
+				input: { file_path: "README.md" },
+				turnId: "p-1",
+			}),
+		);
+		expect(store.getState().proposer.tools[0]?.status).toBe("requested");
+		store.handleEvent(
+			ev("tool.progress", {
+				toolUseId: "t1",
+				toolName: "Read",
+				elapsedSeconds: 5,
+				turnId: "p-1",
+			}),
+		);
+		expect(store.getState().proposer.tools[0]?.status).toBe("running");
+		expect(store.getState().proposer.tools[0]?.elapsedMs).toBe(5000);
+	});
+
+	it("marks a denied Claude approval as denied before turn completion", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("tool.call", {
+				toolUseId: "toolu_123",
+				toolName: "Read",
+				input: { file_path: "README.md" },
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("approval.resolved", {
+				requestId: "ar-p-1-toolu_123",
+				decision: "deny",
+				turnId: "p-1",
+			}),
+		);
+		const tool = store.getState().proposer.tools[0];
+		expect(tool?.status).toBe("denied");
+		expect(tool?.resultSummary).toBe("denied");
+	});
+
+	it("marks tool.denied as denied", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("tool.call", {
+				toolUseId: "t1",
+				toolName: "Read",
+				input: { file_path: "README.md" },
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("tool.denied", {
+				toolUseId: "t1",
+				toolName: "Read",
+				input: { file_path: "README.md" },
+				turnId: "p-1",
+			}),
+		);
+		const tool = store.getState().proposer.tools[0];
+		expect(tool?.status).toBe("denied");
+		expect(tool?.resultSummary).toBe("denied");
+	});
+
+	it("closes unresolved tools as unknown when the turn completes", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("tool.call", {
+				toolUseId: "t1",
+				toolName: "Read",
+				input: { file_path: "README.md" },
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("turn.completed", {
+				status: "completed",
+				durationMs: 500,
+				turnId: "p-1",
+			}),
+		);
+		const tool = store.getState().proposer.tools[0];
+		expect(tool?.status).toBe("unknown");
+		expect(tool?.resultSummary).toBe("unknown outcome");
+	});
+
+	it("retains tool error details for failure summaries", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("tool.call", {
+				toolUseId: "t1",
+				toolName: "WebFetch",
+				input: { url: "https://example.com/missing" },
+				turnId: "p-1",
+			}),
+		);
+		store.handleEvent(
+			ev("tool.result", {
+				toolUseId: "t1",
+				toolName: "WebFetch",
+				success: false,
+				error: "Request failed with status code 404",
+				turnId: "p-1",
+			}),
+		);
+		expect(store.getState().proposer.tools[0]?.resultSummary).toContain("404");
+	});
+
+	it("tracks the effective execution mode for the active role", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("turn.mode.changed", {
+				roundNumber: 1,
+				speaker: "proposer",
+				turnId: "p-1",
+				executionMode: "plan",
+				baselineMode: "research",
+				source: "turn-override",
+			}),
+		);
+		expect(store.getState().proposer.executionMode).toBe("plan");
+	});
+
 	it("archives pre-tool narration into a persistent block", () => {
 		const store = new TuiStore();
 		store.handleEvent(
@@ -216,6 +361,28 @@ describe("TuiStore", () => {
 			"Let me research this first.",
 		]);
 		expect(s.proposer.currentMessageText).toBe("");
+	});
+
+	it("synthesizes elapsed time for running tools when the provider omits tool.progress", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-03-30T00:00:00.000Z"));
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+		store.handleEvent(
+			ev("tool.call", {
+				timestamp: Date.now(),
+				toolUseId: "t1",
+				toolName: "WebFetch",
+				input: { url: "https://example.com" },
+				turnId: "p-1",
+			}),
+		);
+		vi.advanceTimersByTime(2500);
+		expect(store.getState().proposer.tools[0]?.elapsedMs).toBe(2500);
+		store.dispose();
+		vi.useRealTimers();
 	});
 
 	it("tracks approval requests and switches command mode", () => {

@@ -1,4 +1,5 @@
 import type { DirectorAction, DirectorSignal } from "./director/types.js";
+import type { ResolvedExecutionMode } from "./execution-modes.js";
 import type {
 	DebateConfig,
 	DebateRole,
@@ -27,6 +28,17 @@ export interface RoundStartedEvent {
 	kind: "round.started";
 	roundNumber: number;
 	speaker: DebateRole;
+	timestamp: number;
+}
+
+export interface TurnModeChangedEvent {
+	kind: "turn.mode.changed";
+	roundNumber: number;
+	speaker: DebateRole;
+	turnId: string;
+	executionMode: ResolvedExecutionMode["effectiveMode"];
+	baselineMode: ResolvedExecutionMode["baselineMode"];
+	source: ResolvedExecutionMode["source"];
 	timestamp: number;
 }
 
@@ -157,6 +169,7 @@ export interface SynthesisErrorEvent {
 export type OrchestratorEvent =
 	| DebateStartedEvent
 	| RoundStartedEvent
+	| TurnModeChangedEvent
 	| RoundCompletedEvent
 	| JudgeStartedEvent
 	| JudgeCompletedEvent

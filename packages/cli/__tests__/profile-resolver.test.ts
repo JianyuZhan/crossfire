@@ -62,18 +62,44 @@ describe("resolveRoles", () => {
 	});
 	it("resolves all three roles", () => {
 		const result = resolveRoles({
-			proposer: { profile: makeProfile(), cliModel: "override" },
+			proposer: {
+				profile: makeProfile(),
+				cliModel: "override",
+				systemPrompt: "resolved proposer prompt",
+				promptTemplateFamily: "general",
+			},
 			challenger: {
 				profile: makeProfile({ agent: "codex" }),
 				cliModel: undefined,
+				systemPrompt: "resolved challenger prompt",
+				promptTemplateFamily: "code",
 			},
 			judge: {
 				profile: makeProfile({ agent: "gemini_cli" }),
 				cliModel: undefined,
+				systemPrompt: "resolved judge prompt",
+				promptTemplateFamily: "general",
 			},
 		});
 		expect(result.proposer.model).toBe("override");
+		expect(result.proposer.systemPrompt).toBe("resolved proposer prompt");
+		expect(result.proposer.promptTemplateFamily).toBe("general");
 		expect(result.challenger).toBeDefined();
+		expect(result.challenger.systemPrompt).toBe("resolved challenger prompt");
+		expect(result.challenger.promptTemplateFamily).toBe("code");
 		expect(result.judge).toBeDefined();
+	});
+
+	it("defaults prompt resolution to the embedded profile prompt", () => {
+		const result = resolveRoles({
+			proposer: { profile: makeProfile(), cliModel: undefined },
+			challenger: {
+				profile: makeProfile({ agent: "codex" }),
+				cliModel: undefined,
+			},
+			judge: "none",
+		});
+		expect(result.proposer.systemPrompt).toBe("test prompt");
+		expect(result.proposer.promptTemplateFamily).toBeUndefined();
 	});
 });

@@ -15,6 +15,7 @@ import {
 	type JudgeVerdict,
 	type MarkdownReportMeta,
 	type ReportMeta,
+	resolveExecutionMode,
 	type SynthesisAuditSummary,
 	type SynthesisDebugMetadata,
 	type TerminationReason,
@@ -448,6 +449,21 @@ export async function runDebate(
 			);
 			lastJudgeText = undefined;
 			const proposerTurnId = `p-${round}`;
+			const proposerMode = resolveExecutionMode(
+				config.executionModes,
+				"proposer",
+				proposerTurnId,
+			);
+			bus.push({
+				kind: "turn.mode.changed",
+				roundNumber: round,
+				speaker: "proposer",
+				turnId: proposerTurnId,
+				executionMode: proposerMode.effectiveMode,
+				baselineMode: proposerMode.baselineMode,
+				source: proposerMode.source,
+				timestamp: Date.now(),
+			});
 			activeTurn = {
 				role: "proposer",
 				turnId: proposerTurnId,
@@ -458,6 +474,7 @@ export async function runDebate(
 			await adapters.proposer.adapter.sendTurn(adapters.proposer.session, {
 				turnId: proposerTurnId,
 				prompt: proposerPrompt,
+				executionMode: proposerMode.effectiveMode,
 			});
 			const proposerResult = await waitForTurnCompleted(bus, proposerTurnId);
 			activeTurn = undefined;
@@ -528,6 +545,21 @@ export async function runDebate(
 			);
 			lastJudgeText = undefined;
 			const challengerTurnId = `c-${round}`;
+			const challengerMode = resolveExecutionMode(
+				config.executionModes,
+				"challenger",
+				challengerTurnId,
+			);
+			bus.push({
+				kind: "turn.mode.changed",
+				roundNumber: round,
+				speaker: "challenger",
+				turnId: challengerTurnId,
+				executionMode: challengerMode.effectiveMode,
+				baselineMode: challengerMode.baselineMode,
+				source: challengerMode.source,
+				timestamp: Date.now(),
+			});
 			activeTurn = {
 				role: "challenger",
 				turnId: challengerTurnId,
@@ -538,6 +570,7 @@ export async function runDebate(
 			await adapters.challenger.adapter.sendTurn(adapters.challenger.session, {
 				turnId: challengerTurnId,
 				prompt: challengerPrompt,
+				executionMode: challengerMode.effectiveMode,
 			});
 			const challengerResult = await waitForTurnCompleted(
 				bus,

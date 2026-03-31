@@ -7,9 +7,11 @@ import {
 	CODEX_CAPABILITIES,
 	type LocalTurnMetrics,
 	type NormalizedEvent,
+	type RoleExecutionMode,
 	type SessionHandle,
 	type StartSessionInput,
 	type TurnHandle,
+	type TurnExecutionMode,
 	type TurnInput,
 	measureLocalMetrics,
 	parseTurnId,
@@ -44,6 +46,7 @@ interface SessionState {
 	handle: SessionHandle;
 	profile: string;
 	model: string;
+	executionMode: RoleExecutionMode;
 	currentTurnId?: string;
 	currentNativeTurnId?: string;
 	turnStartTime?: number;
@@ -80,6 +83,32 @@ judge_verdict '{"leading":"proposer","score":{"proposer":7,"challenger":5},"reas
 Pass the complete JSON as a single quoted argument. Do NOT omit any required fields.`;
 
 let sessionCounter = 0;
+
+function mapExecutionModeToCodexPolicies(
+	mode: TurnExecutionMode | RoleExecutionMode | undefined,
+): {
+	approvalPolicy: string;
+	sandboxPolicy?: Record<string, unknown>;
+} {
+	switch (mode) {
+		case "research":
+		case "plan":
+			return {
+				approvalPolicy: "on-request",
+				sandboxPolicy: { type: "readOnly" },
+			};
+		case "dangerous":
+			return {
+				approvalPolicy: "never",
+				sandboxPolicy: { type: "danger-full-access" },
+			};
+		case "guarded":
+		case undefined:
+			return {
+				approvalPolicy: "on-failure",
+			};
+	}
+}
 
 function humanizeDecision(decisionId: string): string {
 	return decisionId
@@ -296,6 +325,8 @@ export class CodexAdapter implements AgentAdapter {
 		sessionCounter++;
 		const adapterSessionId = `codex-session-${sessionCounter}-${Date.now()}`;
 		const model = input.model ?? "gpt-5.1-codex-mini";
+		const executionMode = input.executionMode ?? "guarded";
+		const policies = mapExecutionModeToCodexPolicies(executionMode);
 
 		// 1. Send `initialize` request
 		await this.client.request("initialize", {
@@ -314,7 +345,10 @@ export class CodexAdapter implements AgentAdapter {
 		const result = (await this.client.request("thread/start", {
 			model,
 			cwd: input.workingDirectory,
-			approvalPolicy: "on-failure",
+			approvalPolicy: policies.approvalPolicy,
+			...(policies.sandboxPolicy
+				? { sandboxPolicy: policies.sandboxPolicy }
+				: {}),
 		})) as { thread: { id: string } };
 
 		const providerSessionId = result.thread.id;
@@ -331,6 +365,7 @@ export class CodexAdapter implements AgentAdapter {
 			handle,
 			profile: input.profile,
 			model,
+			executionMode,
 			turnCount: 0,
 		};
 		this.sessions.set(adapterSessionId, sessionState);
@@ -374,6 +409,9 @@ export class CodexAdapter implements AgentAdapter {
 		if (session) {
 			session.pendingLocalMetrics = localMetrics;
 		}
+		const policies = mapExecutionModeToCodexPolicies(
+			input.executionMode ?? session?.executionMode,
+		);
 
 		try {
 			await this.startTurnOnThread(
@@ -381,6 +419,7 @@ export class CodexAdapter implements AgentAdapter {
 				prompt,
 				session,
 				input.turnId,
+				policies,
 			);
 			return { turnId: input.turnId, status: "running" };
 		} catch (err) {
@@ -397,10 +436,18 @@ export class CodexAdapter implements AgentAdapter {
 		prompt: string,
 		session: SessionState | undefined,
 		turnId: string,
+		policies?: {
+			approvalPolicy: string;
+			sandboxPolicy?: Record<string, unknown>;
+		},
 	): Promise<void> {
 		const result = (await this.client.request("turn/start", {
 			threadId,
 			input: [{ type: "text", text: prompt }],
+			approvalPolicy: policies?.approvalPolicy,
+			...(policies?.sandboxPolicy
+				? { sandboxPolicy: policies.sandboxPolicy }
+				: {}),
 		})) as { turn: { id: string; status: string } };
 
 		if (session) {
@@ -435,10 +482,16 @@ export class CodexAdapter implements AgentAdapter {
 		});
 
 		// Create a new thread
+		const recoveryPolicies = mapExecutionModeToCodexPolicies(
+			input.executionMode ?? session?.executionMode,
+		);
 		const threadResult = (await this.client.request("thread/start", {
 			model: session?.model ?? "gpt-5.1-codex-mini",
 			cwd: "/tmp",
-			approvalPolicy: "on-failure",
+			approvalPolicy: recoveryPolicies.approvalPolicy,
+			...(recoveryPolicies.sandboxPolicy
+				? { sandboxPolicy: recoveryPolicies.sandboxPolicy }
+				: {}),
 		})) as { thread: { id: string } };
 
 		const newThreadId = threadResult.thread.id;
@@ -460,6 +513,7 @@ export class CodexAdapter implements AgentAdapter {
 			recoveryPrompt,
 			session,
 			input.turnId,
+			recoveryPolicies,
 		);
 		return { turnId: input.turnId, status: "running" };
 	}

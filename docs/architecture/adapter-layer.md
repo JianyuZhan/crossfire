@@ -6,6 +6,7 @@ Back to the overview: [overview.md](./overview.md)
 
 See also:
 
+- [Execution Modes](./execution-modes.md)
 - [Orchestrator](./orchestrator.md)
 - [TUI and CLI](./tui-cli.md)
 
@@ -81,7 +82,9 @@ interface ApprovalDecision {
 Behavioral notes:
 
 - `startSession()` allocates an adapter session and returns a `SessionHandle`. `providerSessionId` may still be `undefined` at this point for Claude and Gemini.
+- `StartSessionInput.executionMode` carries the role baseline known when the adapter session is created.
 - `sendTurn()` means “adapter accepted and began processing the turn”, not “turn finished”.
+- `TurnInput.executionMode` carries the effective mode resolved by the orchestrator for that specific turn.
 - `session.started` should appear at most once per adapter session.
 - `turn.completed` is the only authoritative end-of-turn signal.
 - `turn.completed` must be the last event for its `turnId`.
@@ -91,7 +94,7 @@ Behavioral notes:
 
 ## NormalizedEvent
 
-TypeScript models `NormalizedEvent` as a 16-kind discriminated union rooted on `kind`. At runtime, `event-schema.ts` validates those 16 known kinds and also accepts forward-compatible unknown kinds that satisfy the shared base event fields.
+TypeScript models `NormalizedEvent` as a 17-kind discriminated union rooted on `kind`. At runtime, `event-schema.ts` validates those 17 known kinds and also accepts forward-compatible unknown kinds that satisfy the shared base event fields.
 
 Shared base fields:
 
@@ -111,7 +114,7 @@ Categories:
 - Text: `message.delta`, `message.final`
 - Thinking: `thinking.delta`
 - Plan: `plan.updated`
-- Tools: `tool.call`, `tool.progress`, `tool.result`
+- Tools: `tool.call`, `tool.progress`, `tool.result`, `tool.denied`
 - Approvals: `approval.request`, `approval.resolved`
 - Subagents: `subagent.started`, `subagent.completed`
 - Metrics: `usage.updated`
@@ -154,6 +157,8 @@ Why these events and fields matter:
 - `approval.request.capabilities.nativeOptions[]` preserves provider-native approval choices when they exist
 - `approval.request.capabilities.supportedScopes[]` and `supportsUpdatedInput` are request-scoped, not adapter-scoped, because they can vary by provider and approval type
 - `approval.resolved.optionId` captures the specific provider option selected when approval is not just a plain allow/deny
+- `tool.call` is intentionally only a provider-observed tool request, not a guaranteed start-of-execution signal
+- `tool.denied` exists because some providers can surface permission denials without ever emitting a terminal `tool.result`
 - the event vocabulary is therefore a shared runtime contract between adapters and consumers, not an arbitrary naming layer
 
 ## Capability Model
@@ -215,6 +220,7 @@ interface TurnInput {
   prompt: string;
   turnId: string;
   timeout?: number;
+  executionMode?: "research" | "guarded" | "dangerous" | "plan";
   role?: "proposer" | "challenger" | "judge";
   roundNumber?: number;
 }
@@ -229,6 +235,7 @@ interface StartSessionInput {
   model?: string;
   mcpServers?: Record<string, unknown>;
   permissionMode?: "auto" | "approve-all" | "deny-all";
+  executionMode?: "research" | "guarded" | "dangerous";
   providerOptions?: Record<string, unknown>;
 }
 ```
@@ -240,6 +247,8 @@ interface StartSessionInput {
 - in-process SDK `query()` stream
 - `startSession()` creates only the adapter handle; `providerSessionId` becomes known when the first `system/init` event arrives
 - session state is tracked in a local query-context map keyed by `adapterSessionId`
+- Crossfire execution modes map directly onto Claude permission modes per turn: `research` → `dontAsk` + allowlist + bounded `maxTurns`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
+- the Claude query bridge now forwards SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; Crossfire currently uses this to cap research-mode Claude turns before they sprawl indefinitely
 - tool and subagent lifecycle visibility comes from SDK hooks: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, and `SubagentStop`
 - approval support is bridged through `canUseTool(toolName, input, options)`, which emits `approval.request` and blocks until `approve()` resolves it
 - `approval.request.payload` now retains Claude `suggestions`, `blockedPath`, and `decisionReason` metadata for display/debugging
@@ -256,6 +265,7 @@ interface StartSessionInput {
 - subprocess + bidirectional JSON-RPC over stdio
 - `startSession()` performs `initialize`, sends `initialized`, then calls `thread/start`
 - `session.started` is emitted directly from `startSession()`, so Codex knows its `providerSessionId` before the first turn
+- Crossfire execution modes map onto Codex approval and sandbox policy combinations instead of a single provider mode field
 - `sendTurn()` uses `turn/start`
 - the current adapter effectively assumes one live active session per adapter instance because event routing uses one shared JSON-RPC client plus a wildcard notification handler
 - approval requests are normalized as `command`, `file-change`, or `user-input`
@@ -276,6 +286,7 @@ interface StartSessionInput {
 
 - new subprocess per turn
 - `startSession()` creates adapter-side bookkeeping only; `providerSessionId` remains `undefined` until the first successful `init` event
+- Crossfire execution modes currently map only to CLI approval-mode arguments: `dangerous` → `yolo`, `plan` → `plan`, `research` currently reuses `plan`, and `guarded` leaves the CLI default in place
 - resume is attempted through CLI arguments managed by `ResumeManager`
 - `session.started` is emitted from the first successful `init` event and is not re-emitted on later turns or fallback retries
 - current CLI normalization reads assistant text from `message.content`, tool metadata from `tool_id` / `tool_name` / `parameters`, tool results from `tool_id` plus `status`, and usage from `result.stats`

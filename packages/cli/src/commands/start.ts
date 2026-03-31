@@ -6,7 +6,15 @@ import { App } from "@crossfire/tui";
 import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
+import {
+	buildExecutionModeConfig,
+	collectOptionValues,
+} from "./execution-mode-options.js";
 import { loadProfile } from "../profile/loader.js";
+import {
+	parsePromptTemplateSelection,
+	resolveRolePrompt,
+} from "../profile/prompt-template.js";
 import { resolveAdapterType, resolveRoles } from "../profile/resolver.js";
 import { createAdapters } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
@@ -74,6 +82,40 @@ export const startCommand = new Command("start")
 	.option("--proposer-model <model>", "Model override for proposer")
 	.option("--challenger-model <model>", "Model override for challenger")
 	.option("--judge-model <model>", "Model override for judge")
+	.option(
+		"--mode <mode>",
+		"Debate default execution mode: research, guarded, or dangerous",
+	)
+	.option(
+		"--proposer-mode <mode>",
+		"Proposer baseline execution mode: research, guarded, or dangerous",
+	)
+	.option(
+		"--challenger-mode <mode>",
+		"Challenger baseline execution mode: research, guarded, or dangerous",
+	)
+	.option(
+		"--turn-mode <turnId=mode>",
+		"Per-turn execution mode override, repeatable (for example: p-1=plan)",
+		collectOptionValues,
+		[],
+	)
+	.option(
+		"--template <family>",
+		'Prompt template family: auto, general, or code',
+	)
+	.option(
+		"--proposer-template <family>",
+		"Proposer prompt template family: auto, general, or code",
+	)
+	.option(
+		"--challenger-template <family>",
+		"Challenger prompt template family: auto, general, or code",
+	)
+	.option(
+		"--judge-template <family>",
+		"Judge prompt template family: auto, general, or code",
+	)
 	.option("--headless", "Run without TUI", false)
 	.option("-v, --verbose", "Verbose output", false)
 	.action(async (options) => {
@@ -109,6 +151,22 @@ export const startCommand = new Command("start")
 			// Load topic
 			const topic =
 				options.topic ?? readFileSync(options.topicFile, "utf-8").trim();
+			const templateSelection = parsePromptTemplateSelection(
+				options.template,
+				"--template",
+			);
+			const proposerTemplateSelection = parsePromptTemplateSelection(
+				options.proposerTemplate,
+				"--proposer-template",
+			);
+			const challengerTemplateSelection = parsePromptTemplateSelection(
+				options.challengerTemplate,
+				"--challenger-template",
+			);
+			const judgeTemplateSelection = parsePromptTemplateSelection(
+				options.judgeTemplate,
+				"--judge-template",
+			);
 
 			// Load profiles
 			const proposerProfile = loadProfile(options.proposer);
@@ -134,34 +192,75 @@ export const startCommand = new Command("start")
 			}
 			const judgeProfile = loadProfile(judgeName);
 
+			const proposerPrompt = resolveRolePrompt({
+				role: "proposer",
+				topic,
+				profile: proposerProfile,
+				explicitSelection: proposerTemplateSelection,
+				inheritedSelection: templateSelection,
+			});
+			const challengerPrompt = resolveRolePrompt({
+				role: "challenger",
+				topic,
+				profile: challengerProfile,
+				explicitSelection: challengerTemplateSelection,
+				inheritedSelection: templateSelection,
+			});
+			const judgePrompt = resolveRolePrompt({
+				role: "judge",
+				topic,
+				profile: judgeProfile,
+				explicitSelection: judgeTemplateSelection,
+				inheritedSelection: templateSelection,
+			});
+
 			// Resolve roles
 			const roles = resolveRoles({
 				proposer: {
 					profile: proposerProfile,
 					cliModel: options.proposerModel ?? options.model,
+					systemPrompt: proposerPrompt.systemPrompt,
+					promptTemplateFamily: proposerPrompt.promptTemplateFamily,
 				},
 				challenger: {
 					profile: challengerProfile,
 					cliModel: options.challengerModel ?? options.model,
+					systemPrompt: challengerPrompt.systemPrompt,
+					promptTemplateFamily: challengerPrompt.promptTemplateFamily,
 				},
 				judge: {
 					profile: judgeProfile,
 					cliModel: options.judgeModel ?? options.model,
+					systemPrompt: judgePrompt.systemPrompt,
+					promptTemplateFamily: judgePrompt.promptTemplateFamily,
 				},
 			});
 
 			// Build debate config
+			const executionModes = buildExecutionModeConfig({
+				mode: options.mode,
+				proposerMode: options.proposerMode,
+				challengerMode: options.challengerMode,
+				turnMode: options.turnMode,
+			});
 			const config: DebateConfig = {
 				topic,
 				maxRounds,
 				judgeEveryNRounds,
 				convergenceThreshold,
+				executionModes,
+				promptTemplates: {
+					defaultSelection: templateSelection,
+					proposer: proposerPrompt.promptTemplateFamily,
+					challenger: challengerPrompt.promptTemplateFamily,
+					judge: judgePrompt.promptTemplateFamily,
+				},
 				proposerModel: roles.proposer.model,
 				challengerModel: roles.challenger.model,
 				judgeModel: roles.judge?.model,
-				proposerSystemPrompt: roles.proposer.profile.systemPrompt,
-				challengerSystemPrompt: roles.challenger.profile.systemPrompt,
-				judgeSystemPrompt: roles.judge?.profile.systemPrompt,
+				proposerSystemPrompt: roles.proposer.systemPrompt,
+				challengerSystemPrompt: roles.challenger.systemPrompt,
+				judgeSystemPrompt: roles.judge?.systemPrompt,
 			};
 
 			// Generate debate ID and output directory
@@ -178,11 +277,13 @@ export const startCommand = new Command("start")
 						name: proposerProfile.name,
 						agent: proposerProfile.agent,
 						model: roles.proposer.model,
+						promptTemplateFamily: roles.proposer.promptTemplateFamily,
 					},
 					challenger: {
 						name: challengerProfile.name,
 						agent: challengerProfile.agent,
 						model: roles.challenger.model,
+						promptTemplateFamily: roles.challenger.promptTemplateFamily,
 					},
 					...(roles.judge
 						? {
@@ -190,6 +291,7 @@ export const startCommand = new Command("start")
 									name: judgeProfile.name,
 									agent: judgeProfile.agent,
 									model: roles.judge.model,
+									promptTemplateFamily: roles.judge.promptTemplateFamily,
 								},
 							}
 						: {}),
@@ -210,13 +312,28 @@ export const startCommand = new Command("start")
 				console.log(
 					`  Proposer: ${proposerProfile.name} (${roles.proposer.adapterType})`,
 				);
+				if (roles.proposer.promptTemplateFamily) {
+					console.log(
+						`    Prompt template: ${roles.proposer.promptTemplateFamily}`,
+					);
+				}
 				console.log(
 					`  Challenger: ${challengerProfile.name} (${roles.challenger.adapterType})`,
 				);
+				if (roles.challenger.promptTemplateFamily) {
+					console.log(
+						`    Prompt template: ${roles.challenger.promptTemplateFamily}`,
+					);
+				}
 				if (roles.judge) {
 					console.log(
 						`  Judge: ${judgeProfile.name} (${roles.judge.adapterType})`,
 					);
+					if (roles.judge.promptTemplateFamily) {
+						console.log(
+							`    Prompt template: ${roles.judge.promptTemplateFamily}`,
+						);
+					}
 				}
 				console.log(`  Output: ${outputDir}`);
 			}
@@ -224,6 +341,7 @@ export const startCommand = new Command("start")
 			const adapterBundle = await createAdapters(
 				roles,
 				createDefaultFactories(),
+				executionModes,
 			);
 			const busBundle = createBus({ outputDir });
 			const tuiBundle = createTui(busBundle.bus, options.headless);

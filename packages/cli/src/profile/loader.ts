@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import matter from "gray-matter";
 import { type ProfileConfig, ProfileSchema } from "./schema.js";
 
-const DEFAULT_SEARCH_PATHS = [
+export const DEFAULT_PROFILE_SEARCH_PATHS = [
 	resolve("profiles"),
 	join(
 		process.env.HOME ?? process.env.USERPROFILE ?? "~",
@@ -15,7 +15,7 @@ const DEFAULT_SEARCH_PATHS = [
 
 export function loadProfile(
 	name: string,
-	searchPaths: string[] = DEFAULT_SEARCH_PATHS,
+	searchPaths: string[] = DEFAULT_PROFILE_SEARCH_PATHS,
 ): ProfileConfig {
 	const filename = name.endsWith(".md") ? name : `${name}.md`;
 	for (const dir of searchPaths) {
@@ -57,6 +57,7 @@ function collectProfiles(base: string, prefix: string, out: string[]): void {
 	})) {
 		const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
 		if (entry.isDirectory()) {
+			if (entry.name === "templates") continue;
 			collectProfiles(base, rel, out);
 		} else if (entry.name.endsWith(".md")) {
 			out.push(rel.replace(/\.md$/, ""));

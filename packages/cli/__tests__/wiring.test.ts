@@ -88,6 +88,46 @@ describe("createAdapters", () => {
 		await bundle.closeAll();
 	});
 
+	it("passes per-role baseline execution modes into startSession", async () => {
+		const proposerAdapter = mockAdapter("claude");
+		const challengerAdapter = mockAdapter("codex");
+		const roles: ResolvedRoles = {
+			proposer: {
+				profile: makeProfile("claude_code"),
+				model: undefined,
+				adapterType: "claude",
+			},
+			challenger: {
+				profile: makeProfile("codex"),
+				model: undefined,
+				adapterType: "codex",
+			},
+			judge: undefined,
+		};
+		const bundle = await createAdapters(
+			roles,
+			{
+				claude: () => proposerAdapter,
+				codex: () => challengerAdapter,
+				gemini: () => mockAdapter("gemini"),
+			},
+			{
+				roleModes: {
+					proposer: "research",
+					challenger: "dangerous",
+				},
+			},
+		);
+
+		expect(proposerAdapter.startSession).toHaveBeenCalledWith(
+			expect.objectContaining({ executionMode: "research" }),
+		);
+		expect(challengerAdapter.startSession).toHaveBeenCalledWith(
+			expect.objectContaining({ executionMode: "dangerous" }),
+		);
+		await bundle.closeAll();
+	});
+
 	it("closeAll swallows individual errors", async () => {
 		const failing = mockAdapter("claude");
 		(failing.close as any).mockRejectedValue(new Error("close failed"));

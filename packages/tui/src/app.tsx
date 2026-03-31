@@ -143,7 +143,14 @@ export function App({
 				challengerInfo={challengerInfo}
 			/>
 			<ScrollableContent lines={visibleLines} viewport={viewport} />
-			<MetricsBar state={state.metrics} viewport={viewport} />
+			<MetricsBar
+				state={state.metrics}
+				viewport={viewport}
+				livePanels={{
+					proposer: state.proposer,
+					challenger: state.challenger,
+				}}
+			/>
 			<CommandStatusLine state={state.command} width={viewport.contentWidth} />
 			<CommandInput state={state.command} onCommand={handleCommand} />
 		</Box>

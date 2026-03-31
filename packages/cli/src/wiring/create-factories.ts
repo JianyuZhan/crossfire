@@ -22,6 +22,14 @@ export function createDefaultFactories(): AdapterFactoryMap {
 						options: {
 							resume: opts.resume,
 							model: opts.model,
+							permissionMode: opts.permissionMode,
+							allowDangerouslySkipPermissions:
+								opts.allowDangerouslySkipPermissions,
+							maxThinkingTokens: opts.maxThinkingTokens,
+							maxTurns: opts.maxTurns,
+							maxBudgetUsd: opts.maxBudgetUsd,
+							allowedTools: opts.allowedTools,
+							disallowedTools: opts.disallowedTools,
 							canUseTool: opts.canUseTool as never,
 							hooks: opts.hooks as never,
 							includePartialMessages: true,

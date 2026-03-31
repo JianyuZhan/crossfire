@@ -35,10 +35,15 @@ describe("AgentPanel — live mode", () => {
 			<AgentPanel
 				mode="live"
 				role="proposer"
-				state={makePanel({ status: "thinking", thinkingText: "Analyzing..." })}
+				state={makePanel({
+					status: "thinking",
+					executionMode: "research",
+					thinkingText: "Analyzing...",
+				})}
 			/>,
 		);
 		expect(lastFrame()).toContain("Thinking");
+		expect(lastFrame()).toContain("research");
 		expect(lastFrame()).toContain("Analyzing...");
 	});
 
@@ -107,7 +112,7 @@ describe("AgentPanel — live mode", () => {
 		expect(lastFrame()).toContain("Read");
 	});
 
-	it("shows tool progress counts in the live status", () => {
+	it("shows running count and recent failure summary in the live status", () => {
 		const { lastFrame } = render(
 			<AgentPanel
 				mode="live"
@@ -120,13 +125,22 @@ describe("AgentPanel — live mode", () => {
 							toolName: "WebFetch",
 							inputSummary: "{}",
 							status: "running",
+							elapsedMs: 2500,
 							expanded: true,
 						},
 						{
 							toolUseId: "t2",
 							toolName: "WebFetch",
 							inputSummary: "{}",
-							status: "done",
+							status: "succeeded",
+							expanded: true,
+						},
+						{
+							toolUseId: "t3",
+							toolName: "WebFetch",
+							inputSummary: "{}",
+							status: "failed",
+							resultSummary: "Request failed with status code 404",
 							expanded: true,
 						},
 					],
@@ -134,7 +148,32 @@ describe("AgentPanel — live mode", () => {
 			/>,
 		);
 		expect(lastFrame()).toContain("1 running");
-		expect(lastFrame()).toContain("1 done");
+		expect(lastFrame()).toContain("active 2.5s");
+		expect(lastFrame()).toContain("recent failures: 404×1");
+	});
+
+	it("shows locally tracked elapsed time for a running tool", () => {
+		const { lastFrame } = render(
+			<AgentPanel
+				mode="live"
+				role="proposer"
+				state={makePanel({
+					status: "tool",
+					tools: [
+						{
+							toolUseId: "t1",
+							toolName: "WebFetch",
+							inputSummary: "{}",
+							status: "running",
+							elapsedMs: 2500,
+							expanded: true,
+						},
+					],
+				})}
+			/>,
+		);
+		expect(lastFrame()).toContain("active 2.5s");
+		expect(lastFrame()).toContain("2.5s");
 	});
 
 	it("keeps narration visible while tools are running", () => {
@@ -159,6 +198,93 @@ describe("AgentPanel — live mode", () => {
 		);
 		expect(lastFrame()).toContain("Let me check the docs before continuing.");
 		expect(lastFrame()).toContain("WebFetch");
+	});
+
+	it("compresses repeated tool failures into a single summary line", () => {
+		const { lastFrame } = render(
+			<AgentPanel
+				mode="live"
+				role="proposer"
+				state={makePanel({
+					status: "tool",
+					tools: [
+						{
+							toolUseId: "t1",
+							toolName: "WebFetch",
+							inputSummary: "{}",
+							status: "failed",
+							resultSummary: "Request failed with status code 404",
+							expanded: true,
+						},
+						{
+							toolUseId: "t2",
+							toolName: "WebFetch",
+							inputSummary: "{}",
+							status: "failed",
+							resultSummary: "Request failed with status code 404",
+							expanded: true,
+						},
+					],
+				})}
+			/>,
+		);
+		expect(lastFrame()).toContain("WebFetch failures");
+		expect(lastFrame()).toContain("404×2");
+	});
+
+	it("shows unknown outcome tools as a summary instead of live running entries", () => {
+		const { lastFrame } = render(
+			<AgentPanel
+				mode="live"
+				role="proposer"
+				state={makePanel({
+					status: "tool",
+					tools: [
+						{
+							toolUseId: "t1",
+							toolName: "Read",
+							inputSummary: "{}",
+							status: "unknown",
+							resultSummary: "unknown outcome",
+							expanded: true,
+						},
+					],
+				})}
+			/>,
+		);
+		expect(lastFrame()).toContain("unknown outcomes: Read×1");
+		expect(lastFrame()).not.toContain("▶ Read");
+	});
+
+	it("removes completed tools from the live panel list", () => {
+		const { lastFrame } = render(
+			<AgentPanel
+				mode="live"
+				role="proposer"
+				state={makePanel({
+					status: "tool",
+					tools: [
+						{
+							toolUseId: "t1",
+							toolName: "WebFetch",
+							inputSummary: "{}",
+							status: "running",
+							elapsedMs: 1200,
+							expanded: true,
+						},
+						{
+							toolUseId: "t2",
+							toolName: "Read",
+							inputSummary: "{}",
+							status: "succeeded",
+							expanded: true,
+						},
+					],
+				})}
+			/>,
+		);
+		expect(lastFrame()).toContain("WebFetch");
+		expect(lastFrame()).not.toContain("Read ({})");
 	});
 
 	it("shows error banner", () => {

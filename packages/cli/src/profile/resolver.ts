@@ -1,4 +1,5 @@
 import type { ProfileConfig } from "./schema.js";
+import type { PromptTemplateFamily } from "./prompt-template.js";
 
 export type AdapterType = "claude" | "codex" | "gemini";
 
@@ -23,12 +24,16 @@ export function resolveModel(
 export interface RoleInput {
 	profile: ProfileConfig;
 	cliModel: string | undefined;
+	systemPrompt?: string;
+	promptTemplateFamily?: PromptTemplateFamily;
 }
 
 export interface ResolvedRole {
 	profile: ProfileConfig;
 	model: string | undefined;
 	adapterType: AdapterType;
+	systemPrompt: string;
+	promptTemplateFamily?: PromptTemplateFamily;
 }
 
 export interface ResolvedRoles {
@@ -47,6 +52,8 @@ export function resolveRoles(input: {
 			profile: role.profile,
 			model: resolveModel(role.cliModel, role.profile),
 			adapterType: resolveAdapterType(role.profile.agent),
+			systemPrompt: role.systemPrompt ?? role.profile.systemPrompt,
+			promptTemplateFamily: role.promptTemplateFamily,
 		};
 	}
 

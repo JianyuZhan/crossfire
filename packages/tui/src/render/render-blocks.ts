@@ -5,13 +5,23 @@ import type {
 	LiveToolEntry,
 	RenderBlock,
 } from "../state/types.js";
+import {
+	buildToolActivityLabel,
+	selectVisibleLiveTools,
+	summarizeDeniedTools,
+	summarizeRecentFailures,
+	summarizeUnknownOutcomes,
+} from "./tool-status.js";
 
 type AgentRole = "proposer" | "challenger";
 
 const TOOL_STATUS_MAP: Record<string, "running" | "success" | "error"> = {
+	requested: "running",
 	running: "running",
-	done: "success",
-	error: "error",
+	succeeded: "success",
+	failed: "error",
+	denied: "error",
+	unknown: "error",
 };
 
 function toolToBlock(t: LiveToolEntry): RenderBlock {
@@ -25,15 +35,9 @@ function toolToBlock(t: LiveToolEntry): RenderBlock {
 }
 
 function buildLiveStatusLabel(state: LiveAgentPanelState): string | undefined {
-	if (state.status !== "tool") return undefined;
-	const running = state.tools.filter((tool) => tool.status === "running").length;
-	const done = state.tools.filter((tool) => tool.status === "done").length;
-	const error = state.tools.filter((tool) => tool.status === "error").length;
-	const parts: string[] = [];
-	if (running > 0) parts.push(`${running} running`);
-	if (done > 0) parts.push(`${done} done`);
-	if (error > 0) parts.push(`${error} error`);
-	return parts.length > 0 ? `tool (${parts.join(", ")})` : undefined;
+	const modeSuffix = state.executionMode ? ` [${state.executionMode}]` : "";
+	if (state.status !== "tool") return modeSuffix || undefined;
+	return `${buildToolActivityLabel(state.tools)}${modeSuffix}`;
 }
 
 export function snapshotToBlocks(
@@ -47,6 +51,7 @@ export function snapshotToBlocks(
 			role,
 			agentType,
 			status: "done",
+			statusLabel: snap.executionMode ? `done [${snap.executionMode}]` : undefined,
 			duration: snap.turnDurationMs,
 		},
 	];
@@ -111,7 +116,23 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 			status: subagent.status,
 		});
 	}
-	for (const t of state.tools) blocks.push(toolToBlock(t));
+	const failureSummary = summarizeRecentFailures(state.tools);
+	if (failureSummary) {
+		const toolName = state.tools.find((tool) => tool.status === "failed")?.toolName;
+		blocks.push({
+			kind: "warning",
+			text: toolName ? `${toolName} failures: ${failureSummary.replace(/^recent failures: /, "")}` : failureSummary,
+		});
+	}
+	const deniedSummary = summarizeDeniedTools(state.tools);
+	if (deniedSummary) {
+		blocks.push({ kind: "warning", text: deniedSummary });
+	}
+	const unknownSummary = summarizeUnknownOutcomes(state.tools);
+	if (unknownSummary) {
+		blocks.push({ kind: "warning", text: unknownSummary });
+	}
+	for (const t of selectVisibleLiveTools(state.tools)) blocks.push(toolToBlock(t));
 	for (const w of state.warnings) blocks.push({ kind: "warning", text: w });
 	if (state.error) blocks.push({ kind: "error", text: state.error });
 	const displayText = stripInternalToolBlocks(state.currentMessageText);
