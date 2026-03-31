@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ProfileConfig } from "./schema.js";
 
@@ -74,8 +74,10 @@ export function loadPromptTemplate(
 ): string {
 	for (const baseDir of searchPaths) {
 		const filePath = join(baseDir, family, `${role}.md`);
-		if (existsSync(filePath)) {
+		try {
 			return readFileSync(filePath, "utf-8").trim();
+		} catch {
+			// Not found in this search path; try next
 		}
 	}
 	throw new Error(

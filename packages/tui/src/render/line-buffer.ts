@@ -7,6 +7,7 @@ import {
 } from "../constants.js";
 import type {
 	ContentChunk,
+	PlanStepStatus,
 	RenderBlock,
 	ScreenLine,
 	StyledSegment,
@@ -256,7 +257,7 @@ export function buildPanelLines(
 				result.push(
 					screenLine([{ text: "Plan", style: { bold: true, dim: true } }]),
 				);
-				const STEP_PREFIXES: Record<string, string> = {
+				const STEP_PREFIXES: Record<PlanStepStatus, string> = {
 					completed: "[x] ",
 					in_progress: "[>] ",
 					pending: "[ ] ",

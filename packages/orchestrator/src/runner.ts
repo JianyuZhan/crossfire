@@ -418,7 +418,7 @@ export async function runDebate(
 			const proposerState = bus.snapshot();
 			let proposerPrompt: string;
 			if (proposerTurnCount === 1) {
-				const currentMaxRounds = bus.snapshot().config.maxRounds;
+				const currentMaxRounds = proposerState.config.maxRounds;
 				syncRecoveryMaxRounds(adapters, currentMaxRounds);
 				proposerPrompt = buildInitialPrompt({
 					role: "proposer",

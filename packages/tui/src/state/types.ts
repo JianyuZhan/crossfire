@@ -22,10 +22,12 @@ export interface LiveToolEntry {
 	expanded: boolean;
 }
 
+export type PlanStepStatus = "completed" | "in_progress" | "pending" | "failed";
+
 export interface PlanStep {
 	id: string;
 	title: string;
-	status: string;
+	status: PlanStepStatus;
 }
 
 export interface SubagentEntry {
@@ -217,7 +219,7 @@ export type RenderBlock =
 			role: "proposer" | "challenger";
 			agentType?: string;
 			executionMode?: string;
-			status: string;
+			status: "idle" | "thinking" | "tool" | "speaking" | "done" | "error";
 			statusLabel?: string;
 			duration?: number;
 	  }

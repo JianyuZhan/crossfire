@@ -223,13 +223,18 @@ async function waitForTurnCompletion(
 	promise: Promise<TurnCompletedEvent>,
 	timeoutMs: number,
 ): Promise<TurnCompletedEvent> {
-	return await Promise.race([
-		promise,
-		new Promise<TurnCompletedEvent>((_, reject) => {
-			setTimeout(
-				() => reject(new Error("template classifier timeout")),
-				timeoutMs,
-			);
-		}),
-	]);
+	let timeoutId: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<TurnCompletedEvent>((_, reject) => {
+				timeoutId = setTimeout(
+					() => reject(new Error("template classifier timeout")),
+					timeoutMs,
+				);
+			}),
+		]);
+	} finally {
+		if (timeoutId) clearTimeout(timeoutId);
+	}
 }

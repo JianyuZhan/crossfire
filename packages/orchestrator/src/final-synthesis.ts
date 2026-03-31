@@ -163,9 +163,15 @@ export async function runFinalSynthesis(
 			]);
 		} finally {
 			if (timeoutId) clearTimeout(timeoutId);
+			if (eventUnsub) {
+				eventUnsub();
+				eventUnsub = undefined;
+			}
 		}
 
-		diagnostics.capturedFinalPreview = longestFinal?.slice(0, 200);
+		diagnostics.capturedFinalPreview = (
+			exitPlanModePlan || longestFinal
+		)?.slice(0, 200);
 
 		return buildResult(
 			undefined,
