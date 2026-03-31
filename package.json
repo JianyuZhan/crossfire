@@ -12,7 +12,8 @@
 		"prepare": "simple-git-hooks"
 	},
 	"simple-git-hooks": {
-		"pre-commit": "pnpm lint-staged"
+		"pre-commit": "pnpm install --frozen-lockfile --silent && pnpm lint-staged",
+		"pre-push": "pnpm install --frozen-lockfile --silent && pnpm lint && pnpm build"
 	},
 	"lint-staged": {
 		"*.{ts,tsx,js,jsx,json}": "biome check --no-errors-on-unmatched"
