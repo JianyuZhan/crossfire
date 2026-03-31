@@ -6,10 +6,10 @@ import {
 	type AnyEvent,
 	type DebateState,
 	projectState,
+	stripInternalBlocks,
 } from "@crossfire/orchestrator-core";
 import { populateChunkLines, rebuildChunks } from "../render/chunk-builder.js";
 import { buildGlobalLineBuffer } from "../render/line-buffer.js";
-import { stripInternalToolBlocks } from "./strip-internal.js";
 import type {
 	AgentTurnSnapshot,
 	AgentUsage,
@@ -183,9 +183,9 @@ const DEFAULT_DEBATE_STATE: DebateState = {
 
 function captureSnapshot(panel: LiveAgentPanelState): AgentTurnSnapshot {
 	return {
-		messageText: stripInternalToolBlocks(panel.currentMessageText),
+		messageText: stripInternalBlocks(panel.currentMessageText),
 		narrationTexts: panel.narrationTexts.map((text) =>
-			stripInternalToolBlocks(text),
+			stripInternalBlocks(text),
 		),
 		executionMode: panel.executionMode,
 		thinkingText: panel.thinkingText || undefined,
@@ -201,7 +201,7 @@ function captureSnapshot(panel: LiveAgentPanelState): AgentTurnSnapshot {
 }
 
 function archiveNarration(panel: LiveAgentPanelState): void {
-	const narration = stripInternalToolBlocks(panel.currentMessageText).trim();
+	const narration = stripInternalBlocks(panel.currentMessageText).trim();
 	if (!narration) return;
 	const previous = panel.narrationTexts.at(-1)?.trim();
 	if (previous !== narration) {
@@ -823,7 +823,7 @@ export class TuiStore {
 						this.state.judge.judgeMessageText +
 						(event as { text: string }).text;
 					this.state.judge.judgeMessageText = rawJudge;
-					const stripped = stripInternalToolBlocks(rawJudge);
+					const stripped = stripInternalBlocks(rawJudge);
 					// Also update the active judgeResults entry (always stripped for display)
 					const jr = this.activeJudgeResult();
 					if (jr) jr.messageText = stripped;
@@ -833,7 +833,7 @@ export class TuiStore {
 			case "message.final": {
 				const p = this.panel();
 				if (p) {
-					const finalText = stripInternalToolBlocks(
+					const finalText = stripInternalBlocks(
 						(event as { text: string }).text,
 					);
 					if (finalText.trim().length > 0) {
@@ -842,7 +842,7 @@ export class TuiStore {
 					}
 				} else if (this.state.judge.judgeStatus === "evaluating") {
 					// Route judge final message to judge panel
-					this.state.judge.judgeMessageText = stripInternalToolBlocks(
+					this.state.judge.judgeMessageText = stripInternalBlocks(
 						(event as { text: string }).text,
 					);
 					const jr = this.activeJudgeResult();

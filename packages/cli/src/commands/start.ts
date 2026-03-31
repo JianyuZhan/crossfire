@@ -216,13 +216,33 @@ export const startCommand = new Command("start")
 				challengerSelection,
 				judgeSelection,
 			].some((selection) => selection === "auto");
-			const autoTemplateFamily = needsTemplateClassifier
-				? await classifyPromptTemplateFamily({
+
+			// Start classifier early without awaiting (overlaps with sync work below)
+			const classifierPromise = needsTemplateClassifier
+				? classifyPromptTemplateFamily({
 						topic,
 						profile: judgeProfile,
 						model: options.judgeModel ?? options.model,
 						factories,
 					})
+				: undefined;
+
+			// Build execution mode config (independent of classifier result)
+			const executionModes = buildExecutionModeConfig({
+				mode: options.mode,
+				proposerMode: options.proposerMode,
+				challengerMode: options.challengerMode,
+				turnMode: options.turnMode,
+			});
+
+			// Generate debate ID and output directory (independent of classifier result)
+			const debateId = generateDebateId();
+			const outputDir = options.output ?? `run_output/${debateId}`;
+			mkdirSync(outputDir, { recursive: true });
+
+			// Await classifier result now (LLM call overlapped with sync work above)
+			const autoTemplateFamily = classifierPromise
+				? await classifierPromise
 				: undefined;
 			if (options.verbose && autoTemplateFamily) {
 				console.log(
@@ -276,12 +296,6 @@ export const startCommand = new Command("start")
 			});
 
 			// Build debate config
-			const executionModes = buildExecutionModeConfig({
-				mode: options.mode,
-				proposerMode: options.proposerMode,
-				challengerMode: options.challengerMode,
-				turnMode: options.turnMode,
-			});
 			const config: DebateConfig = {
 				topic,
 				maxRounds,
@@ -301,11 +315,6 @@ export const startCommand = new Command("start")
 				challengerSystemPrompt: roles.challenger.systemPrompt,
 				judgeSystemPrompt: roles.judge?.systemPrompt,
 			};
-
-			// Generate debate ID and output directory
-			const debateId = generateDebateId();
-			const outputDir = options.output ?? `run_output/${debateId}`;
-			mkdirSync(outputDir, { recursive: true });
 
 			// Write initial index.json with profile mapping (EventStore merges runtime data on close)
 			const initialIndex = {

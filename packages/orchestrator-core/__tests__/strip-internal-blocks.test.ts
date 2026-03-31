@@ -63,4 +63,19 @@ describe("stripInternalBlocks", () => {
 		const input = 'Content.\n```json\n{"stance":"disagree","confidence":0.6';
 		expect(stripInternalBlocks(input)).toBe("Content.");
 	});
+
+	it("strips markdown-bold debate_meta labels", () => {
+		const input = "Content here.\n**debate_meta summary:**\nMore text.";
+		expect(stripInternalBlocks(input)).toBe("Content here.More text.");
+	});
+
+	it("strips markdown-bold judge_verdict labels with Chinese colon", () => {
+		const input = "Content.\n**judge_verdict 结构化总结：**\nRemaining.";
+		expect(stripInternalBlocks(input)).toBe("Content.Remaining.");
+	});
+
+	it("strips bare debate_meta label without bold formatting", () => {
+		const input = "Text.\ndebate_meta:\nMore.";
+		expect(stripInternalBlocks(input)).toBe("Text.More.");
+	});
 });

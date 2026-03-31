@@ -399,6 +399,141 @@ export async function runDebate(
 		return false;
 	}
 
+	interface AgentTurnInput {
+		role: "proposer" | "challenger";
+		round: number;
+		turnCount: number;
+		consecutiveFailures: number;
+		opponentRole: "proposer" | "challenger";
+		systemPrompt?: string;
+		adapterEntry: { adapter: AgentAdapter; session: SessionHandle };
+		operationalPreamble?: string;
+	}
+
+	interface AgentTurnResult {
+		status: "completed" | "interrupted";
+		consecutiveFailures: number;
+	}
+
+	/**
+	 * Execute a single agent turn (proposer or challenger).
+	 * Returns the turn result and updated consecutive failures count.
+	 */
+	async function executeAgentTurn(
+		input: AgentTurnInput,
+	): Promise<AgentTurnResult> {
+		const {
+			role,
+			round,
+			turnCount,
+			consecutiveFailures,
+			opponentRole,
+			systemPrompt,
+			adapterEntry,
+			operationalPreamble,
+		} = input;
+
+		// Step 1: Push round.started event
+		bus.push({
+			kind: "round.started",
+			roundNumber: round,
+			speaker: role,
+			timestamp: Date.now(),
+		});
+
+		// Step 2: Snapshot state, sync recovery max rounds (on first turn)
+		const currentState = bus.snapshot();
+		let prompt: string;
+		if (turnCount === 1) {
+			const currentMaxRounds = currentState.config.maxRounds;
+			syncRecoveryMaxRounds(adapters, currentMaxRounds);
+			prompt = buildInitialPrompt({
+				role,
+				topic: config.topic,
+				maxRounds: currentMaxRounds,
+				systemPrompt,
+				schemaType: "debate_meta",
+				...(operationalPreamble ? { operationalPreamble } : {}),
+			});
+		} else {
+			const opponentText = getLatestTurnContent(currentState, opponentRole);
+			const currentMaxRounds = currentState.config.maxRounds;
+			syncRecoveryMaxRounds(adapters, currentMaxRounds);
+			prompt = buildIncrementalPrompt({
+				roundNumber: round,
+				maxRounds: currentMaxRounds,
+				opponentRole,
+				opponentText,
+				judgeText: lastJudgeText,
+				schemaRefreshMode: getSchemaRefreshMode(
+					turnCount,
+					config.judgeEveryNRounds,
+					consecutiveFailures,
+				),
+			});
+		}
+
+		// Step 3: Append operational guidance from director
+		prompt = appendOperationalGuidance(prompt, director.getGuidance(role));
+
+		// Step 4: Clear lastJudgeText
+		lastJudgeText = undefined;
+
+		// Step 5: Resolve execution mode, push turn.mode.changed
+		const turnId = `${role[0]}-${round}`;
+		const executionModeResult = resolveExecutionMode(
+			config.executionModes,
+			role,
+			turnId,
+		);
+		bus.push({
+			kind: "turn.mode.changed",
+			roundNumber: round,
+			speaker: role,
+			turnId,
+			executionMode: executionModeResult.effectiveMode,
+			baselineMode: executionModeResult.baselineMode,
+			source: executionModeResult.source,
+			timestamp: Date.now(),
+		});
+
+		// Step 6: Set activeTurn, call sendTurn
+		activeTurn = {
+			role,
+			turnId,
+			adapter: adapterEntry.adapter,
+			adapterId: adapterEntry.session.adapterId,
+			adapterSessionId: adapterEntry.session.adapterSessionId,
+		};
+		await adapterEntry.adapter.sendTurn(adapterEntry.session, {
+			turnId,
+			prompt,
+			executionMode: executionModeResult.effectiveMode,
+		});
+
+		// Step 7: Await waitForTurnCompleted, clear activeTurn
+		const turnResult = await waitForTurnCompleted(bus, turnId);
+		activeTurn = undefined;
+		if (turnResult === "interrupted") {
+			return { status: "interrupted", consecutiveFailures };
+		}
+
+		// Step 8: Track schema refresh failures
+		const stateAfterTurn = bus.snapshot();
+		const lastTurn = stateAfterTurn.turns.filter((t) => t.role === role).at(-1);
+		const updatedFailures = lastTurn?.meta ? 0 : consecutiveFailures + 1;
+
+		// Step 9: Push round.completed
+		bus.push({
+			kind: "round.completed",
+			roundNumber: round,
+			speaker: role,
+			timestamp: Date.now(),
+		});
+
+		return { status: "completed", consecutiveFailures: updatedFailures };
+	}
+
 	try {
 		for (
 			let round = startRound;
@@ -408,196 +543,43 @@ export async function runDebate(
 			await pauseGate.waitIfPaused();
 
 			// Proposer turn
-			bus.push({
-				kind: "round.started",
-				roundNumber: round,
-				speaker: "proposer",
-				timestamp: Date.now(),
-			});
 			proposerTurnCount++;
-			const proposerState = bus.snapshot();
-			let proposerPrompt: string;
-			if (proposerTurnCount === 1) {
-				const currentMaxRounds = proposerState.config.maxRounds;
-				syncRecoveryMaxRounds(adapters, currentMaxRounds);
-				proposerPrompt = buildInitialPrompt({
-					role: "proposer",
-					topic: config.topic,
-					maxRounds: currentMaxRounds,
-					systemPrompt: config.proposerSystemPrompt,
-					schemaType: "debate_meta",
-				});
-			} else {
-				const opponentText = getLatestTurnContent(proposerState, "challenger");
-				const currentMaxRounds = proposerState.config.maxRounds;
-				syncRecoveryMaxRounds(adapters, currentMaxRounds);
-				proposerPrompt = buildIncrementalPrompt({
-					roundNumber: round,
-					maxRounds: currentMaxRounds,
-					opponentRole: "challenger",
-					opponentText,
-					judgeText: lastJudgeText,
-					schemaRefreshMode: getSchemaRefreshMode(
-						proposerTurnCount,
-						config.judgeEveryNRounds,
-						proposerConsecutiveFailures,
-					),
-				});
-			}
-			proposerPrompt = appendOperationalGuidance(
-				proposerPrompt,
-				director.getGuidance("proposer"),
-			);
-			lastJudgeText = undefined;
-			const proposerTurnId = `p-${round}`;
-			const proposerMode = resolveExecutionMode(
-				config.executionModes,
-				"proposer",
-				proposerTurnId,
-			);
-			bus.push({
-				kind: "turn.mode.changed",
-				roundNumber: round,
-				speaker: "proposer",
-				turnId: proposerTurnId,
-				executionMode: proposerMode.effectiveMode,
-				baselineMode: proposerMode.baselineMode,
-				source: proposerMode.source,
-				timestamp: Date.now(),
-			});
-			activeTurn = {
+			const proposerResult = await executeAgentTurn({
 				role: "proposer",
-				turnId: proposerTurnId,
-				adapter: adapters.proposer.adapter,
-				adapterId: adapters.proposer.session.adapterId,
-				adapterSessionId: adapters.proposer.session.adapterSessionId,
-			};
-			await adapters.proposer.adapter.sendTurn(adapters.proposer.session, {
-				turnId: proposerTurnId,
-				prompt: proposerPrompt,
-				executionMode: proposerMode.effectiveMode,
+				round,
+				turnCount: proposerTurnCount,
+				consecutiveFailures: proposerConsecutiveFailures,
+				opponentRole: "challenger",
+				systemPrompt: config.proposerSystemPrompt,
+				adapterEntry: adapters.proposer,
 			});
-			const proposerResult = await waitForTurnCompleted(bus, proposerTurnId);
-			activeTurn = undefined;
-			if (proposerResult === "interrupted") return completeInterruptedDebate();
-
-			// Track schema refresh failures
-			const stateAfterProposer = bus.snapshot();
-			const lastProposerTurn = stateAfterProposer.turns
-				.filter((t) => t.role === "proposer")
-				.at(-1);
-			if (lastProposerTurn?.meta) {
-				proposerConsecutiveFailures = 0;
-			} else {
-				proposerConsecutiveFailures++;
+			if (proposerResult.status === "interrupted") {
+				return completeInterruptedDebate();
 			}
-
-			bus.push({
-				kind: "round.completed",
-				roundNumber: round,
-				speaker: "proposer",
-				timestamp: Date.now(),
-			});
+			proposerConsecutiveFailures = proposerResult.consecutiveFailures;
 
 			await pauseGate.waitIfPaused();
 
 			// Challenger turn
-			bus.push({
-				kind: "round.started",
-				roundNumber: round,
-				speaker: "challenger",
-				timestamp: Date.now(),
-			});
 			challengerTurnCount++;
 			const challengerState = bus.snapshot();
-			let challengerPrompt: string;
-			if (challengerTurnCount === 1) {
-				const proposerText = getLatestTurnContent(challengerState, "proposer");
-				const currentMaxRounds = challengerState.config.maxRounds;
-				syncRecoveryMaxRounds(adapters, currentMaxRounds);
-				challengerPrompt = buildInitialPrompt({
-					role: "challenger",
-					topic: config.topic,
-					maxRounds: currentMaxRounds,
-					systemPrompt: config.challengerSystemPrompt,
-					schemaType: "debate_meta",
-					operationalPreamble: `Proposer's opening response:\n\n${proposerText}`,
-				});
-			} else {
-				const opponentText = getLatestTurnContent(challengerState, "proposer");
-				const currentMaxRounds = challengerState.config.maxRounds;
-				syncRecoveryMaxRounds(adapters, currentMaxRounds);
-				challengerPrompt = buildIncrementalPrompt({
-					roundNumber: round,
-					maxRounds: currentMaxRounds,
-					opponentRole: "proposer",
-					opponentText,
-					judgeText: lastJudgeText,
-					schemaRefreshMode: getSchemaRefreshMode(
-						challengerTurnCount,
-						config.judgeEveryNRounds,
-						challengerConsecutiveFailures,
-					),
-				});
-			}
-			challengerPrompt = appendOperationalGuidance(
-				challengerPrompt,
-				director.getGuidance("challenger"),
-			);
-			lastJudgeText = undefined;
-			const challengerTurnId = `c-${round}`;
-			const challengerMode = resolveExecutionMode(
-				config.executionModes,
-				"challenger",
-				challengerTurnId,
-			);
-			bus.push({
-				kind: "turn.mode.changed",
-				roundNumber: round,
-				speaker: "challenger",
-				turnId: challengerTurnId,
-				executionMode: challengerMode.effectiveMode,
-				baselineMode: challengerMode.baselineMode,
-				source: challengerMode.source,
-				timestamp: Date.now(),
-			});
-			activeTurn = {
+			const challengerResult = await executeAgentTurn({
 				role: "challenger",
-				turnId: challengerTurnId,
-				adapter: adapters.challenger.adapter,
-				adapterId: adapters.challenger.session.adapterId,
-				adapterSessionId: adapters.challenger.session.adapterSessionId,
-			};
-			await adapters.challenger.adapter.sendTurn(adapters.challenger.session, {
-				turnId: challengerTurnId,
-				prompt: challengerPrompt,
-				executionMode: challengerMode.effectiveMode,
+				round,
+				turnCount: challengerTurnCount,
+				consecutiveFailures: challengerConsecutiveFailures,
+				opponentRole: "proposer",
+				systemPrompt: config.challengerSystemPrompt,
+				adapterEntry: adapters.challenger,
+				operationalPreamble:
+					challengerTurnCount === 1
+						? `Proposer's opening response:\n\n${getLatestTurnContent(challengerState, "proposer")}`
+						: undefined,
 			});
-			const challengerResult = await waitForTurnCompleted(
-				bus,
-				challengerTurnId,
-			);
-			activeTurn = undefined;
-			if (challengerResult === "interrupted")
+			if (challengerResult.status === "interrupted") {
 				return completeInterruptedDebate();
-
-			// Track schema refresh failures
-			const stateAfterChallenger = bus.snapshot();
-			const lastChallengerTurn = stateAfterChallenger.turns
-				.filter((t) => t.role === "challenger")
-				.at(-1);
-			if (lastChallengerTurn?.meta) {
-				challengerConsecutiveFailures = 0;
-			} else {
-				challengerConsecutiveFailures++;
 			}
-
-			bus.push({
-				kind: "round.completed",
-				roundNumber: round,
-				speaker: "challenger",
-				timestamp: Date.now(),
-			});
+			challengerConsecutiveFailures = challengerResult.consecutiveFailures;
 
 			// Director evaluation after each round
 			const stateAfterRound = bus.snapshot();

@@ -3,6 +3,7 @@ import type {
 	NormalizedEvent,
 	SessionHandle,
 } from "@crossfire/adapter-core";
+import { isRecord } from "@crossfire/orchestrator-core";
 
 export interface SynthesisDiagnostics {
 	sessionCreated: boolean;
@@ -197,10 +198,6 @@ export async function runFinalSynthesis(
 			}
 		}
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
 }
 
 function isExitPlanModePayload(

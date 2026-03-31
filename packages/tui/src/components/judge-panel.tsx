@@ -1,6 +1,6 @@
+import { stripInternalBlocks } from "@crossfire/orchestrator-core";
 import { Box, Text } from "ink";
 import type React from "react";
-import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type { JudgeRoundResult } from "../state/types.js";
 
 interface JudgePanelProps {
@@ -49,7 +49,7 @@ export function JudgePanel({ result }: JudgePanelProps): React.ReactElement {
 				<Text color="yellow">Evaluating...</Text>
 			)}
 			{result.messageText && (
-				<Text>{stripInternalToolBlocks(result.messageText)}</Text>
+				<Text>{stripInternalBlocks(result.messageText)}</Text>
 			)}
 			{result.status === "done" && <VerdictSection verdict={result.verdict} />}
 		</Box>

@@ -1,3 +1,5 @@
+import { isRecord } from "./types.js";
+
 /** Required keys that identify debate_meta JSON */
 const DEBATE_META_KEYS = ["stance", "confidence", "key_points"];
 /** Required keys that identify judge_verdict JSON (need at least 3 of 4) */
@@ -11,7 +13,7 @@ const JUDGE_VERDICT_KEYS = ["leading", "score", "reasoning", "should_continue"];
 function isInternalJson(block: string): boolean {
 	try {
 		const obj = JSON.parse(block.trim());
-		if (typeof obj !== "object" || obj === null) return false;
+		if (!isRecord(obj)) return false;
 		const keys = Object.keys(obj);
 		const isDebateMeta = DEBATE_META_KEYS.every((k) => keys.includes(k));
 		const isJudgeVerdict =
@@ -48,6 +50,12 @@ export function stripInternalBlocks(text: string): string {
 			)
 			// Bare label followed by JSON (no backtick fencing)
 			.replace(/\n?(?:debate_meta|judge_verdict)\s*\n\s*\{[\s\S]*?\}\s*$/g, "")
+			// Markdown-bold labels like **debate_meta summary:** or **judge_verdict ...**
+			// Anchored to line start so it only matches standalone marker lines
+			.replace(
+				/\n?^[^\S\n]*\*{0,2}(?:debate_meta|judge_verdict)[^*\n]*\*{0,2}\s*[:：]?\s*(?:\n|$)/gim,
+				"",
+			)
 			.trim()
 	);
 }

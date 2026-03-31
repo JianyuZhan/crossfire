@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { stripInternalToolBlocks } from "../state/strip-internal.js";
+import { stripInternalBlocks } from "@crossfire/orchestrator-core";
 import type {
 	CollapsedRoundSummary,
 	ContentChunk,
@@ -89,7 +89,7 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
 			(j) => j.roundNumber === round.roundNumber && j.status === "done",
 		);
 		if (jr) {
-			const stripped = stripInternalToolBlocks(jr.messageText);
+			const stripped = stripInternalBlocks(jr.messageText);
 			const displayText = stripped || jr.verdict?.reasoning || "";
 			const judgeLines = displayText
 				? [screenLine([{ text: displayText, style: {} }])]
@@ -150,7 +150,7 @@ export function rebuildChunks(state: TuiState): ContentChunk[] {
 		!alreadyEmittedJudgeRounds.has(state.judge.roundNumber)
 	) {
 		const isDone = state.judge.judgeStatus === "done";
-		const stripped = stripInternalToolBlocks(state.judge.judgeMessageText);
+		const stripped = stripInternalBlocks(state.judge.judgeMessageText);
 		const displayText =
 			stripped || (isDone ? (state.judge.verdict?.reasoning ?? "") : "");
 

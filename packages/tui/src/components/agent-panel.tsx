@@ -1,3 +1,4 @@
+import { stripInternalBlocks } from "@crossfire/orchestrator-core";
 import { Box, Text } from "ink";
 import type React from "react";
 import {
@@ -13,7 +14,6 @@ import {
 	summarizeRecentFailures,
 	summarizeUnknownOutcomes,
 } from "../render/tool-status.js";
-import { stripInternalToolBlocks } from "../state/strip-internal.js";
 import type {
 	AgentTurnSnapshot,
 	LiveAgentPanelState,
@@ -51,6 +51,24 @@ export type AgentPanelProps =
 
 function agentSuffix(agentType?: string): string {
 	return agentType ? ` [${agentType}]` : "";
+}
+
+function toolWarnings(tools: LiveToolEntry[]): string[] {
+	const warnings: string[] = [];
+	const fail = summarizeRecentFailures(tools);
+	if (fail) {
+		const name = tools.find((t) => t.status === "failed")?.toolName;
+		warnings.push(
+			name
+				? `${name} failures: ${fail.replace(/^recent failures: /, "")}`
+				: fail,
+		);
+	}
+	const denied = summarizeDeniedTools(tools);
+	if (denied) warnings.push(denied);
+	const unknown = summarizeUnknownOutcomes(tools);
+	if (unknown) warnings.push(unknown);
+	return warnings;
 }
 
 function modeSuffix(executionMode?: string): string {
@@ -230,7 +248,7 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 
 	// Live mode
 	const { state } = props;
-	const displayText = stripInternalToolBlocks(state.currentMessageText);
+	const displayText = stripInternalBlocks(state.currentMessageText);
 
 	return (
 		<Box flexDirection="column" paddingX={1}>
@@ -281,35 +299,11 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 					<SubagentList subagents={state.subagents} />
 				</Box>
 			)}
-			{(() => {
-				const failureSummary = summarizeRecentFailures(state.tools);
-				return failureSummary ? (
-					<Box marginTop={1}>
-						<Text color="yellow">
-							⚠{" "}
-							{state.tools.find((tool) => tool.status === "failed")?.toolName ??
-								"Tool"}{" "}
-							failures: {failureSummary.replace(/^recent failures: /, "")}
-						</Text>
-					</Box>
-				) : null;
-			})()}
-			{(() => {
-				const deniedSummary = summarizeDeniedTools(state.tools);
-				return deniedSummary ? (
-					<Box marginTop={1}>
-						<Text color="yellow">⚠ {deniedSummary}</Text>
-					</Box>
-				) : null;
-			})()}
-			{(() => {
-				const unknownSummary = summarizeUnknownOutcomes(state.tools);
-				return unknownSummary ? (
-					<Box marginTop={1}>
-						<Text color="yellow">⚠ {unknownSummary}</Text>
-					</Box>
-				) : null;
-			})()}
+			{toolWarnings(state.tools).map((w, i) => (
+				<Box key={`tw-${i}`} marginTop={1}>
+					<Text color="yellow">⚠ {w}</Text>
+				</Box>
+			))}
 			<ToolList tools={selectVisibleLiveTools(state.tools)} />
 			{(state.status === "speaking" || state.status === "done") &&
 				displayText && (

@@ -1,4 +1,4 @@
-import { stripInternalToolBlocks } from "../state/strip-internal.js";
+import { stripInternalBlocks } from "@crossfire/orchestrator-core";
 import type {
 	AgentTurnSnapshot,
 	LiveAgentPanelState,
@@ -140,7 +140,7 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 		blocks.push(toolToBlock(t));
 	for (const w of state.warnings) blocks.push({ kind: "warning", text: w });
 	if (state.error) blocks.push({ kind: "error", text: state.error });
-	const displayText = stripInternalToolBlocks(state.currentMessageText);
+	const displayText = stripInternalBlocks(state.currentMessageText);
 	if (displayText && (state.status === "speaking" || state.status === "done")) {
 		blocks.push({
 			kind: "message",
