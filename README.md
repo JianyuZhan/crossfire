@@ -422,6 +422,9 @@ Built-in prompting is now split into two layers:
 - provider profiles choose the adapter, default model, and runtime wiring
 - prompt templates define the `proposer`, `challenger`, and `judge` role contract
 - template family `general` is for business, product, and research topics
+- the built-in proposer templates now force executable plans instead of high-level slogans; `general/proposer` pushes positioning, economics, controls, channel protection, and operations, while `code/proposer` pushes implementation detail, migration, tests, security, and rollout
+- the built-in challenger templates now force multi-dimensional challenge coverage instead of generic objections; `general/challenger` pushes trust/conversion, pricing abuse, security/compliance, channel leakage, and execution burden, while `code/challenger` pushes correctness, regression risk, testing, security, operations, and rollout
+- the built-in judge templates now penalize shallow risk lists and weak convergence calls; they explicitly look for evidence-backed challenges, concrete failure modes, and unresolved high-leverage gaps
 - template family `code` is for repository, implementation, and debugging topics
 - `--template auto` runs one lightweight classifier call first, using the judge profile's provider/model to choose between `general` and `code`
 - if the classifier times out or returns invalid JSON, Crossfire falls back to a local heuristic

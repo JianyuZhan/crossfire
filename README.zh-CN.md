@@ -422,6 +422,9 @@ provider profile 使用 JSON：
 - provider profile 负责选择 adapter、默认模型和运行时接线
 - prompt template 负责定义 `proposer`、`challenger`、`judge` 的角色契约
 - `general` 模板族用于商业、产品、研究类主题
+- 内置 proposer 模板现在会强制输出可执行方案，而不是停留在大方向；`general/proposer` 会覆盖定位、经济模型、控制措施、渠道保护和运营机制，`code/proposer` 会覆盖实现细节、迁移、测试、安全和发布落地
+- 内置 challenger 模板现在都会强制做多维度挑战，而不是停留在泛泛反对；`general/challenger` 会覆盖信任/转化、定价滥用、安全合规、渠道绕过和执行成本，`code/challenger` 会覆盖正确性、回归风险、测试、安全、运维和发布落地
+- 内置 judge 模板现在也会惩罚浅层风险清单和草率收敛，更明确要求基于证据的挑战、具体 failure mode，以及尚未闭环的高杠杆问题
 - `code` 模板族用于仓库、实现、调试类主题
 - `--template auto` 会先发起一次轻量 classifier 调用，使用 judge profile 对应的 provider/model 在 `general` 和 `code` 之间做选择
 - 如果 classifier 超时或没有返回合法 JSON，Crossfire 会退回本地启发式判定
