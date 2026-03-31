@@ -182,7 +182,7 @@ Important notes:
 
 - it waits for `turn.completed` on the bus
 - it resolves effective turn mode before each proposer / challenger turn using `debate default < role baseline < turn override`
-- it resolves each role's system prompt before execution by combining provider profile metadata, optional embedded profile prompt bodies, and the selected `general` / `code` prompt-template family
+- it resolves each role's system prompt before execution from the selected `general` / `code` prompt-template family, using CLI overrides, profile `prompt_family`, and the classifier fallback to choose that family
 - it emits `turn.mode.changed` before sending the turn to the adapter
 - it blocks on projected pause state between turns and before judge invocations
 - it can now route `/interrupt` requests to the active provider turn and terminates the debate with `debate.completed(reason="interrupted")` when the adapter reports `turn.completed(status="interrupted")`
@@ -213,7 +213,7 @@ Current built-in role guidance also matters:
 - built-in provider profiles are symmetric runtime shells for Claude, Codex, and Gemini rather than separate prompt contracts
 - `general` templates emphasize constructive adversarial review for product, research, and business topics
 - `code` templates emphasize repository evidence, tool-backed validation, and file/path citations for implementation topics
-- when a custom profile embeds its own body, that prompt overrides template-family selection unless the CLI explicitly requests a per-role template override
+- custom provider profiles currently supply runtime metadata such as adapter/model defaults and `prompt_family`; role prompt bodies still come from the resolved template files under `prompts/<family>/<role>.md`
 
 ## Judge Turn
 

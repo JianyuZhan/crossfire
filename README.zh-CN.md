@@ -133,7 +133,7 @@ crossfire start \
   --headless -v
 ```
 
-上面的示例之所以输出到 `run_output/microservices/`，是因为显式传入了 `--output run_output/microservices`。如果省略 `--output`，Crossfire 会写入默认目录 `run_output/debate-<ts>/`。随后优先查看其中的 `action-plan.html` 或 `action-plan.md`，也可以用 `crossfire status <output-dir>` 查看摘要，或用 `crossfire replay <output-dir>` 回放事件日志。
+上面的示例之所以输出到 `run_output/microservices/`，是因为显式传入了 `--output run_output/microservices`。如果省略 `--output`，Crossfire 会写入带时间戳的辩论目录，例如 `run_output/d-20260331-224500/`。随后优先查看其中的 `action-plan.html` 或 `action-plan.md`，也可以用 `crossfire status <output-dir>` 查看摘要，或用 `crossfire replay <output-dir>` 回放事件日志。
 
 ## 执行模式
 
@@ -269,7 +269,7 @@ crossfire start \
 | `--proposer-template <family>` | proposer 提示词模板覆盖            | 继承 `--template` |
 | `--challenger-template <family>` | challenger 提示词模板覆盖       | 继承 `--template` |
 | `--judge-template <family>`   | judge 提示词模板覆盖                | 继承 `--template` |
-| `--output <dir>`              | 输出目录                            | `run_output/debate-<ts>` |
+| `--output <dir>`              | 输出目录                            | `run_output/d-YYYYMMDD-HHMMSS` |
 | `--headless`                  | 禁用 TUI（完成信息仍输出到 stdout） | `false`                  |
 | `-v, --verbose`               | 详细日志                            | `false`                  |
 
@@ -293,6 +293,8 @@ debate default < role baseline < turn override
 | `--challenger <profile>` | 覆盖挑战者配置 | 来自 `index.json` |
 | `--judge <profile>`      | 覆盖裁判配置   | 来自 `index.json` |
 | `--headless`             | 禁用 TUI       | `false`          |
+
+只有原始辩论本身就带有 judge profile 时，`--judge` 覆盖才会生效。`resume` 不能给一个最初无裁判的运行临时补加全新的 judge。
 
 ### `crossfire replay <output-dir>`
 
@@ -509,8 +511,8 @@ crossfire start \
 
 ## 工作原理
 
-1. **加载配置** — CLI 读取 YAML 配置文件，用 Zod 校验，并把 `agent` 字段映射到适配器类型。
-2. **解析提示词模板** — 如果 profile 自带正文，Crossfire 直接用该系统提示词；否则会根据 topic 或 `--template` / `--*-template` 选择 `general` 或 `code` 模板族。这套机制现在对所有内置 provider 对称生效。
+1. **加载配置** — CLI 读取 JSON provider profile，用 Zod 校验，并把 `agent` 字段映射到适配器类型。
+2. **解析提示词模板** — Crossfire 会从 `--template`、按角色的 `--*-template` 覆盖、profile 的 `prompt_family`，或轻量 topic classifier 的回退结果中解析出 `general` / `code` 模板族，然后加载 `prompts/<family>/<role>.md`。这套机制现在对所有内置 provider 对称生效。
 3. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，把提供商特定协议统一为共享事件流。
 4. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 都订阅这个总线。
 5. **回合循环** — 编排器从投影状态构建提示词，发送给当前智能体，等待 `turn.completed`，再轮到另一方。每次决策前都会从事件重新投影状态。
@@ -543,7 +545,7 @@ packages/
 ├── orchestrator-core/   # 纯逻辑：状态投影、收敛、提示词构建、导演
 ├── orchestrator/        # 副作用：辩论运行器、DebateEventBus、EventStore、TranscriptWriter、综合流程
 ├── tui/                 # Ink（CLI 的 React）组件、TuiStore、EventSource/PlaybackClock
-└── cli/                 # Commander.js 入口、YAML 配置系统、组装工厂
+└── cli/                 # Commander.js 入口、JSON 配置系统、组装工厂
 ```
 
 分层说明：
@@ -557,6 +559,7 @@ packages/
 
 - `crossfire replay` 目前是非交互式的，不暴露实时辩论中的命令解析器
 - `/jump turn <turnId>` 已能被 TUI 解析，但目前还没有实时处理逻辑
+- `crossfire status` 对真正进行中的辩论仍只有有限的特殊处理
 - external history injection 目前仍只是 adapter 内部恢复能力；还没有用户可用的 `--history-file` 或实时导入命令
 - TODO：如果未来把 external history injection 做成产品能力，优先考虑 `start/resume --history-file <json>`，而不是实时导入命令，这样导入上下文仍然满足 event-sourced 和 replay-safe
 - 在多段恢复后的运行中，`replay --from-round` 目前不可靠

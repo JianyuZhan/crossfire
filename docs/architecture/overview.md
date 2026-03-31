@@ -53,7 +53,7 @@ Adapter (Claude/Codex/Gemini)
   → emits NormalizedEvent
   → DebateEventBus
     → TuiStore
-    → EventStore (events.jsonl + index.json)
+    → EventStore (event segments + index.json)
     → TranscriptWriter (transcript.md + transcript.html)
     → PlanAccumulator
     → Runner / DebateDirector
@@ -61,6 +61,7 @@ Adapter (Claude/Codex/Gemini)
     → synthesis.started / synthesis.error / synthesis.completed
     → action-plan.md
     → action-plan.html
+    → synthesis-debug.json
 ```
 
 Important implications:
@@ -113,7 +114,6 @@ crossfire/
 │   │   ├── orchestrator.md
 │   │   ├── synthesis.md
 │   │   └── tui-cli.md
-│   └── superpowers/
 ├── turbo.json
 ├── tsconfig.base.json
 ├── vitest.config.ts

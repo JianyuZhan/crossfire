@@ -133,7 +133,7 @@ crossfire start \
   --headless -v
 ```
 
-In the example above, output lands in `run_output/microservices/` because `--output run_output/microservices` is set explicitly. If you omit `--output`, Crossfire writes to the default `run_output/debate-<ts>/` directory. Inspect `action-plan.html` or `action-plan.md` there, use `crossfire status <output-dir>` for a summary, and `crossfire replay <output-dir>` to replay the event log.
+In the example above, output lands in `run_output/microservices/` because `--output run_output/microservices` is set explicitly. If you omit `--output`, Crossfire writes to a timestamped debate directory such as `run_output/d-20260331-224500/`. Inspect `action-plan.html` or `action-plan.md` there, use `crossfire status <output-dir>` for a summary, and `crossfire replay <output-dir>` to replay the event log.
 
 ## Execution Modes
 
@@ -269,7 +269,7 @@ Start a new debate.
 | `--proposer-template <family>` | Proposer prompt template override                      | inherited from `--template` |
 | `--challenger-template <family>` | Challenger prompt template override                 | inherited from `--template` |
 | `--judge-template <family>`   | Judge prompt template override                           | inherited from `--template` |
-| `--output <dir>`              | Output directory                                         | `run_output/debate-<ts>` |
+| `--output <dir>`              | Output directory                                         | `run_output/d-YYYYMMDD-HHMMSS` |
 | `--headless`                  | Disable TUI (completion info still printed to stdout)    | `false`                  |
 | `-v, --verbose`               | Verbose logging                                          | `false`                  |
 
@@ -293,6 +293,8 @@ Resume an interrupted debate. State is reconstructed from persisted events.
 | `--challenger <profile>` | Override challenger profile | from `index.json` |
 | `--judge <profile>`      | Override judge profile      | from `index.json` |
 | `--headless`             | Disable TUI                 | `false`           |
+
+`--judge` is only honored if the original debate already had a judge profile. Resume cannot add a brand-new judge to a run that started without one.
 
 ### `crossfire replay <output-dir>`
 
@@ -509,8 +511,8 @@ If model-backed synthesis fails, Crossfire still writes a fallback action plan s
 
 ## How It Works
 
-1. **Profile loading** — CLI reads YAML profiles, validates with Zod, and maps `agent` to adapter type.
-2. **Prompt template resolution** — If a profile embeds its own prompt body, Crossfire uses it directly; otherwise it selects the `general` or `code` template family automatically from the topic or from `--template` / `--*-template` overrides.
+1. **Profile loading** — CLI reads JSON provider profiles, validates them with Zod, and maps `agent` to adapter type.
+2. **Prompt template resolution** — Crossfire resolves the `general` or `code` template family from `--template`, per-role `--*-template` overrides, profile `prompt_family`, or the lightweight topic classifier fallback, then loads `prompts/<family>/<role>.md`.
 3. **Adapter creation** — Each role gets an `AgentAdapter` that normalizes provider-specific protocols into a shared event stream.
 4. **Event bus** — All events flow through `DebateEventBus`. The TUI, EventStore (JSONL persistence), and TranscriptWriter all subscribe here.
 5. **Turn loop** — The orchestrator builds prompts from projected state, sends them to the active agent, waits for `turn.completed`, then continues with the other side. State is re-projected from events before every decision.
@@ -543,7 +545,7 @@ packages/
 ├── orchestrator-core/   # Pure logic: state projection, convergence, prompt building, director
 ├── orchestrator/        # Side effects: debate runner, DebateEventBus, EventStore, TranscriptWriter, synthesis
 ├── tui/                 # Ink (React for CLI) components, TuiStore, EventSource/PlaybackClock
-└── cli/                 # Commander.js entry, YAML profile system, wiring factories
+└── cli/                 # Commander.js entry, JSON profile system, wiring factories
 ```
 
 Layer guide:
@@ -557,6 +559,7 @@ Layer guide:
 
 - `crossfire replay` is currently non-interactive and does not expose the live command parser
 - `/jump turn <turnId>` is parsed by the TUI but does not have a live handler yet
+- `crossfire status` still has limited special-casing for truly in-progress debates
 - external history injection remains an internal adapter recovery capability; there is no user-facing `--history-file` or live import command yet
 - TODO: if external history injection becomes a product feature, prefer `start/resume --history-file <json>` over a live import command so the imported context stays event-sourced and replay-safe
 - `replay --from-round` is not reliable across resumed multi-segment runs today
