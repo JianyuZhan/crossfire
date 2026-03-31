@@ -85,4 +85,14 @@ describe("renderMarkdownToHtml", () => {
 		expect(html).not.toContain("structured debate metadata");
 		expect(html).not.toContain("limited data");
 	});
+
+	it("includes a recovery notice for llm-recovered", () => {
+		const recoveredMeta: MarkdownReportMeta = {
+			...meta,
+			generationQuality: "llm-recovered",
+		};
+		const md = "## Summary\n\nContent";
+		const html = renderMarkdownToHtml(md, recoveredMeta);
+		expect(html).toContain("recovered from ExitPlanMode");
+	});
 });

@@ -702,8 +702,11 @@ export async function runDebate(
 			finalVerdict ?? lastJudgeVerdict,
 			terminationReason,
 		);
-		let synthesisQuality: "llm-full" | "local-structured" | "local-degraded" =
-			"local-degraded";
+		let synthesisQuality:
+			| "llm-full"
+			| "llm-recovered"
+			| "local-structured"
+			| "local-degraded" = "local-degraded";
 		let synthesisDebug: SynthesisAuditSummary | undefined;
 		let fullDebugMetadata: SynthesisDebugMetadata | undefined;
 		let synthRunResult: SynthesisRunResult | undefined;
@@ -802,10 +805,12 @@ export async function runDebate(
 				};
 
 				if (markdownResult) {
-					synthesisQuality = "llm-full";
+					synthesisQuality = synthRunResult?.recoveredFrom
+						? "llm-recovered"
+						: "llm-full";
 					const meta: MarkdownReportMeta = {
 						...baseMeta,
-						generationQuality: "llm-full",
+						generationQuality: synthesisQuality,
 					};
 					writeFileSync(
 						join(options.outputDir, "action-plan.md"),
@@ -854,6 +859,7 @@ export async function runDebate(
 									rawDeltaLength: synthRunResult.rawDeltaLength,
 									hadMarkdown: !!synthRunResult.markdown,
 									error: synthRunResult.error,
+									recoveredFrom: synthRunResult.recoveredFrom,
 									diagnostics: synthRunResult.diagnostics,
 								}
 							: undefined,

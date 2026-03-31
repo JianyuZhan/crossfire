@@ -28,7 +28,7 @@ describe("synthesis audit event types", () => {
 	it("SynthesisCompletedEvent works without debug (backward compat)", () => {
 		const event: SynthesisCompletedEvent = {
 			kind: "synthesis.completed",
-			quality: "local-degraded",
+			quality: "llm-recovered",
 			timestamp: Date.now(),
 		};
 		expect(event.debug).toBeUndefined();

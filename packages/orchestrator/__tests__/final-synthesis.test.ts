@@ -186,6 +186,66 @@ describe("runFinalSynthesis", () => {
 		expect(result.markdown).toBe(longText);
 	});
 
+	it("auto-approves ExitPlanMode during synthesis and returns the submitted plan", async () => {
+		let onEventCb: ((e: Record<string, unknown>) => void) | undefined;
+		const mockAdapter = {
+			id: "claude",
+			startSession: vi.fn().mockResolvedValue({
+				adapterSessionId: "synth-session-1",
+				providerSessionId: undefined,
+				adapterId: "claude",
+			}),
+			sendTurn: vi.fn().mockImplementation(async () => {
+				if (onEventCb) {
+					const cb = onEventCb;
+					queueMicrotask(() => {
+						cb({
+							kind: "approval.request",
+							turnId: "synthesis-final",
+							requestId: "ar-synthesis-final-exit",
+							approvalType: "tool",
+							title: "Approve tool: ExitPlanMode",
+							payload: {
+								tool_name: "ExitPlanMode",
+								tool_input: {
+									plan: "## Executive Summary\n\nRecovered plan",
+								},
+							},
+							timestamp: Date.now(),
+							adapterId: "claude",
+							adapterSessionId: "synth-session-1",
+						});
+					});
+				}
+			}),
+			approve: vi.fn().mockResolvedValue(undefined),
+			close: vi.fn().mockResolvedValue(undefined),
+			onEvent: vi
+				.fn()
+				.mockImplementation((cb: (e: Record<string, unknown>) => void) => {
+					onEventCb = cb;
+					return () => {
+						onEventCb = undefined;
+					};
+				}),
+		};
+
+		const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+		const result = await runFinalSynthesis(
+			mockAdapter as any,
+			"test prompt",
+			5000,
+		);
+
+		expect(mockAdapter.approve).toHaveBeenCalledWith({
+			requestId: "ar-synthesis-final-exit",
+			decision: "allow",
+		});
+		expect(result.markdown).toBe("## Executive Summary\n\nRecovered plan");
+		expect(result.error).toBeUndefined();
+		expect(result.recoveredFrom).toBe("exit-plan-mode");
+	});
+
 	describe("runFinalSynthesis structured result", () => {
 		it("returns structured result with markdown and durationMs on success", async () => {
 			const mockAdapter = createMockAdapter([
@@ -281,6 +341,74 @@ describe("runFinalSynthesis", () => {
 			// Key assertion: intermediate data is NOT discarded
 			expect(result.rawDeltaLength).toBeGreaterThan(0);
 			expect(result.markdown).toContain("exploring");
+		});
+
+		it("recovers from ExitPlanMode when the provider never emits turn.completed", async () => {
+			let onEventCb: ((e: Record<string, unknown>) => void) | undefined;
+			const mockAdapter = {
+				id: "claude",
+				startSession: vi.fn().mockResolvedValue({
+					adapterSessionId: "synth-session-1",
+					providerSessionId: undefined,
+					adapterId: "claude",
+				}),
+				sendTurn: vi.fn().mockImplementation(async () => {
+					if (onEventCb) {
+						const cb = onEventCb;
+						queueMicrotask(() => {
+							cb({
+								kind: "message.final",
+								turnId: "synthesis-final",
+								text: "Plan ready for review.",
+								role: "assistant",
+								timestamp: Date.now(),
+								adapterId: "claude",
+								adapterSessionId: "synth-session-1",
+							});
+							cb({
+								kind: "approval.request",
+								turnId: "synthesis-final",
+								requestId: "ar-synthesis-final-exit",
+								approvalType: "tool",
+								title: "Approve tool: ExitPlanMode",
+								payload: {
+									tool_name: "ExitPlanMode",
+									tool_input: {
+										plan: "## Executive Summary\n\nRecovered after timeout",
+									},
+								},
+								timestamp: Date.now(),
+								adapterId: "claude",
+								adapterSessionId: "synth-session-1",
+							});
+							// No turn.completed -> provider bug; should still recover.
+						});
+					}
+				}),
+				approve: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+				onEvent: vi
+					.fn()
+					.mockImplementation((cb: (e: Record<string, unknown>) => void) => {
+						onEventCb = cb;
+						return () => {
+							onEventCb = undefined;
+						};
+					}),
+			};
+
+			const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+			const result = await runFinalSynthesis(
+				mockAdapter as any,
+				"test prompt",
+				100,
+			);
+
+			expect(result.error).toBeUndefined();
+			expect(result.markdown).toBe(
+				"## Executive Summary\n\nRecovered after timeout",
+			);
+			expect(result.recoveredFrom).toBe("exit-plan-mode");
 		});
 
 		it("includes diagnostics in result", async () => {

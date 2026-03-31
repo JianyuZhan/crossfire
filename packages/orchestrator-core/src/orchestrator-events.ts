@@ -154,7 +154,7 @@ export interface SynthesisStartedEvent {
 
 export interface SynthesisCompletedEvent {
 	kind: "synthesis.completed";
-	quality: "llm-full" | "local-structured" | "local-degraded";
+	quality: "llm-full" | "llm-recovered" | "local-structured" | "local-degraded";
 	timestamp: number;
 	debug?: SynthesisAuditSummary;
 }

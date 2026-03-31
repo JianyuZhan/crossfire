@@ -17,6 +17,7 @@ export interface SynthesisRunResult {
 	durationMs: number;
 	rawDeltaLength: number;
 	error?: string;
+	recoveredFrom?: "exit-plan-mode";
 	diagnostics?: SynthesisDiagnostics;
 }
 
@@ -41,6 +42,7 @@ export async function runFinalSynthesis(
 	// Hoisted so catch/finally blocks can access intermediate data
 	let longestFinal: string | undefined;
 	let deltaBuffer = "";
+	let exitPlanModePlan: string | undefined;
 	const diagnostics: SynthesisDiagnostics = {
 		sessionCreated: false,
 		firstEventMs: undefined,
@@ -49,13 +51,21 @@ export async function runFinalSynthesis(
 		capturedFinalPreview: undefined,
 	};
 
-	function buildResult(error?: string): SynthesisRunResult {
+	function buildResult(
+		error?: string,
+		recoveredFrom?: "exit-plan-mode",
+	): SynthesisRunResult {
+		const recoveredMarkdown =
+			recoveredFrom === "exit-plan-mode" ? exitPlanModePlan : undefined;
 		return {
 			markdown:
-				longestFinal || (deltaBuffer.length > 0 ? deltaBuffer : undefined),
+				recoveredMarkdown ||
+				longestFinal ||
+				(deltaBuffer.length > 0 ? deltaBuffer : undefined),
 			durationMs: Date.now() - startTime,
 			rawDeltaLength: deltaBuffer.length,
 			...(error ? { error } : {}),
+			...(recoveredFrom ? { recoveredFrom } : {}),
 			diagnostics,
 		};
 	}
@@ -70,9 +80,13 @@ export async function runFinalSynthesis(
 		const turnId = "synthesis-final";
 
 		let resolveCompletion: () => void;
+		let resolveRecovered: () => void;
 
 		const completionPromise = new Promise<void>((resolve) => {
 			resolveCompletion = resolve;
+		});
+		const recoveredPromise = new Promise<void>((resolve) => {
+			resolveRecovered = resolve;
 		});
 
 		// Subscribe directly to adapter events (not via bus) to avoid
@@ -90,6 +104,13 @@ export async function runFinalSynthesis(
 
 			if (event.kind === "tool.call") {
 				diagnostics.toolCallCount++;
+				if (
+					event.toolName === "ExitPlanMode" &&
+					isRecord(event.input) &&
+					typeof event.input.plan === "string"
+				) {
+					exitPlanModePlan = event.input.plan;
+				}
 			}
 			if (event.kind === "message.delta") {
 				deltaBuffer += event.text;
@@ -100,6 +121,21 @@ export async function runFinalSynthesis(
 				if (!longestFinal || event.text.length > longestFinal.length) {
 					longestFinal = event.text;
 				}
+			}
+			if (
+				event.kind === "approval.request" &&
+				isExitPlanModePayload(event.payload)
+			) {
+				exitPlanModePlan = event.payload.tool_input.plan;
+				void adapter
+					.approve?.({
+						requestId: event.requestId,
+						decision: "allow",
+					})
+					.catch(() => {
+						// Best-effort only; recovery still has the submitted plan.
+					});
+				resolveRecovered();
 			}
 			if (event.kind === "turn.completed") {
 				resolveCompletion();
@@ -117,6 +153,7 @@ export async function runFinalSynthesis(
 		try {
 			await Promise.race([
 				completionPromise,
+				recoveredPromise,
 				new Promise<void>((_, reject) => {
 					timeoutId = setTimeout(
 						() => reject(new Error("synthesis timeout")),
@@ -130,9 +167,18 @@ export async function runFinalSynthesis(
 
 		diagnostics.capturedFinalPreview = longestFinal?.slice(0, 200);
 
-		return buildResult();
+		return buildResult(
+			undefined,
+			exitPlanModePlan ? "exit-plan-mode" : undefined,
+		);
 	} catch (err) {
-		diagnostics.capturedFinalPreview = longestFinal?.slice(0, 200);
+		diagnostics.capturedFinalPreview = (
+			exitPlanModePlan || longestFinal
+		)?.slice(0, 200);
+
+		if (exitPlanModePlan) {
+			return buildResult(undefined, "exit-plan-mode");
+		}
 
 		return buildResult(err instanceof Error ? err.message : String(err));
 	} finally {
@@ -145,4 +191,17 @@ export async function runFinalSynthesis(
 			}
 		}
 	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isExitPlanModePayload(
+	payload: unknown,
+): payload is { tool_name: "ExitPlanMode"; tool_input: { plan: string } } {
+	if (!isRecord(payload)) return false;
+	if (payload.tool_name !== "ExitPlanMode") return false;
+	if (!isRecord(payload.tool_input)) return false;
+	return typeof payload.tool_input.plan === "string";
 }

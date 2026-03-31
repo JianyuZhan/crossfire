@@ -158,6 +158,7 @@ The runner projects this richer metadata down to a lighter `SynthesisAuditSummar
 Output quality tiers:
 
 - `llm-full`
+- `llm-recovered`
 - `local-structured`
 - `local-degraded`
 
@@ -166,6 +167,7 @@ These tiers are surfaced in `synthesis.completed`, but rendering differs by outp
 Current classification rules:
 
 - `llm-full` only applies when `runFinalSynthesis()` completes without an error and yields markdown
+- `llm-recovered` applies when synthesis captures a complete `ExitPlanMode` plan payload and uses that payload as the final markdown, even if the provider never emits `turn.completed`
 - synthesis runs that timeout or error may still retain partial text for diagnostics, but that partial output is not rendered as `llm-full`
 - fallback quality is classified from the enriched local report (`consensusItems`, `unresolvedIssues`, `argumentEvolution`), not from the sparse pre-render draft alone
 
@@ -191,11 +193,13 @@ Current classification rules:
 - creates a fresh isolated session
 - sends exactly one synthesis turn in `executionMode: "plan"` so synthesis is treated as tool-free consolidation rather than a new research pass
 - listens directly to adapter events for that session
+- auto-approves Claude `ExitPlanMode` requests during synthesis and captures the submitted `plan` payload
 - prefers `message.final`, falls back to accumulated deltas
+- can recover markdown directly from `ExitPlanMode.tool_input.plan` when the provider does not cleanly finish the turn
 - records `SynthesisDiagnostics`
 - preserves partial output for debugging even on timeout/error
 - always closes the temporary session
-- returns `SynthesisRunResult` with `markdown`, `durationMs`, `rawDeltaLength`, optional `error`, and optional `diagnostics`
+- returns `SynthesisRunResult` with `markdown`, `durationMs`, `rawDeltaLength`, optional `error`, optional `recoveredFrom`, and optional `diagnostics`
 
 `SynthesisDiagnostics` currently tracks:
 

@@ -1329,6 +1329,139 @@ describe("recoveryContext wiring", () => {
 });
 
 describe("synthesis audit logging", () => {
+	it("classifies ExitPlanMode recovery as llm-recovered and writes the recovered markdown", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "crossfire-recovered-"));
+		try {
+			const bus = new DebateEventBus();
+			const collected: AnyEvent[] = [];
+			bus.subscribe((e) => collected.push(e));
+
+			let sessionCounter = 0;
+			const proposerListeners: Set<(e: NormalizedEvent) => void> = new Set();
+			const proposer: AgentAdapter = {
+				id: "claude",
+				capabilities: {} as any,
+				async startSession() {
+					sessionCounter += 1;
+					return {
+						adapterSessionId: `claude-s${sessionCounter}`,
+						providerSessionId: `p-claude-s${sessionCounter}`,
+						adapterId: "claude",
+						transcript: [],
+					};
+				},
+				async sendTurn(handle: SessionHandle, input: TurnInput) {
+					setTimeout(() => {
+						const emit = (event: NormalizedEvent) => {
+							for (const listener of proposerListeners) listener(event);
+						};
+						if (input.turnId === "p-1") {
+							for (const event of turnEvents(
+								"p-1",
+								"claude",
+								handle.adapterSessionId,
+								"Proposer r1",
+								{
+									stance: "agree",
+									confidence: 0.7,
+									key_points: ["A"],
+								},
+							)) {
+								emit(event);
+							}
+							return;
+						}
+						if (input.turnId === "synthesis-final") {
+							emit({
+								kind: "approval.request",
+								requestId: "ar-synthesis-final-exit",
+								approvalType: "tool",
+								title: "Approve tool: ExitPlanMode",
+								payload: {
+									tool_name: "ExitPlanMode",
+									tool_input: {
+										plan: "## Executive Summary\n\nRecovered synthesis",
+									},
+								},
+								timestamp: Date.now(),
+								adapterId: "claude",
+								adapterSessionId: handle.adapterSessionId,
+								turnId: "synthesis-final",
+							});
+							return;
+						}
+						emit({
+							kind: "turn.completed",
+							status: "completed",
+							durationMs: 0,
+							timestamp: Date.now(),
+							adapterId: "claude",
+							adapterSessionId: handle.adapterSessionId,
+							turnId: input.turnId,
+						});
+					}, 0);
+					return { turnId: input.turnId, status: "running" };
+				},
+				onEvent(cb: (e: NormalizedEvent) => void) {
+					proposerListeners.add(cb);
+					return () => proposerListeners.delete(cb);
+				},
+				approve: async () => {},
+				async close() {},
+			};
+
+			const challenger = createScriptedAdapter("codex", {
+				"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", {
+					stance: "disagree",
+					confidence: 0.7,
+					key_points: ["B"],
+				}),
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+				},
+			};
+
+			await runDebate({ ...config, maxRounds: 1 }, adapters, {
+				bus,
+				outputDir: tmpDir,
+			});
+
+			const completedEvent = collected.find(
+				(e) => e.kind === "synthesis.completed",
+			);
+			expect(completedEvent).toBeDefined();
+			expect((completedEvent as any).quality).toBe("llm-recovered");
+
+			const markdown = readFileSync(join(tmpDir, "action-plan.md"), "utf-8");
+			expect(markdown).toContain("Recovered synthesis");
+			expect(markdown).not.toContain("fallback synthesis");
+
+			const html = readFileSync(join(tmpDir, "action-plan.html"), "utf-8");
+			expect(html).toContain("recovered from ExitPlanMode");
+
+			const debug = JSON.parse(
+				readFileSync(join(tmpDir, "synthesis-debug.json"), "utf-8"),
+			);
+			expect(debug.llmResult.recoveredFrom).toBe("exit-plan-mode");
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
 	it("synthesis.completed includes debug metadata when outputDir is set", async () => {
 		const tmpDir = mkdtempSync(join(tmpdir(), "crossfire-audit-"));
 		try {

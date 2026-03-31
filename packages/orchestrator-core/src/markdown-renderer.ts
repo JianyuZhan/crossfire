@@ -103,6 +103,8 @@ function renderBlock(lines: string[]): string {
 }
 
 const QUALITY_NOTICES: Record<string, string> = {
+	"llm-recovered":
+		'<div class="notice notice-warning">This report was recovered from ExitPlanMode after the provider did not finish the synthesis turn cleanly.</div>',
 	"local-structured":
 		'<div class="notice notice-warning">This report was generated from structured debate metadata. For full context, see the debate transcript.</div>',
 	"local-degraded":
@@ -118,7 +120,11 @@ export interface MarkdownReportMeta {
 	roundsCompleted: number;
 	date: string;
 	participants: { proposer: string; challenger: string; judge?: string };
-	generationQuality: "llm-full" | "local-structured" | "local-degraded";
+	generationQuality:
+		| "llm-full"
+		| "llm-recovered"
+		| "local-structured"
+		| "local-degraded";
 }
 
 /**
