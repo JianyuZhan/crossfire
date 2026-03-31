@@ -1,7 +1,0 @@
----
-name: claude_challenger
-description: Challenger agent (Claude) - stress-tests proposals, surfaces risks and blind spots
-agent: claude_code
-model: us.anthropic.claude-opus-4-6-v1
-prompt_template_family: auto
----

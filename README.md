@@ -377,24 +377,25 @@ Any agent can play any role (proposer, challenger, or judge). Mix and match free
 
 ## Profiles
 
-Profiles are Markdown files with YAML frontmatter. Custom profiles may also include a Markdown system-prompt body:
+Crossfire now separates provider/runtime profiles from reusable role prompts.
 
-```yaml
----
-name: my_debater
-description: A skilled technical debater
-agent: claude_code
-model: claude-sonnet-4-20250514
-inherit_global_config: true
-mcp_servers:
-  filesystem:
-    command: npx
-    args: ["-y", "@anthropic-ai/mcp-filesystem"]
----
-## Your Role
+Provider profiles are JSON files:
 
-You are a skilled debater. Present clear arguments backed by evidence.
-Use the debate_meta tool to report your stance after each response.
+```json
+{
+  "name": "my_debater",
+  "description": "A skilled technical debater",
+  "agent": "claude_code",
+  "model": "claude-sonnet-4-20250514",
+  "prompt_family": "auto",
+  "inherit_global_config": true,
+  "mcp_servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-filesystem"]
+    }
+  }
+}
 ```
 
 | Field                   | Description                                       | Required | Default          |
@@ -403,10 +404,16 @@ Use the debate_meta tool to report your stance after each response.
 | `description`           | Human-readable description                        | no       | —                |
 | `agent`                 | Agent type (`claude_code`, `codex`, `gemini_cli`) | yes      | —                |
 | `model`                 | Preferred model                                   | no       | provider default |
+| `prompt_family`         | Default prompt family (`auto`, `general`, `code`) | no       | `auto`           |
 | `inherit_global_config` | Merge user's global MCP config                    | no       | `true`           |
 | `mcp_servers`           | Profile-specific MCP servers                      | no       | `{}`             |
 
-**Search paths:** `./profiles/` then `~/.config/crossfire/profiles/`
+Prompt contracts are plain Markdown files under `prompts/<family>/<role>.md`.
+
+**Search paths:**
+
+- provider profiles: `./profiles/providers/` then `~/.config/crossfire/profiles/providers/`
+- prompt templates: `./prompts/` then `~/.config/crossfire/prompts/`
 
 **Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (for example, `claude/proposer` defaults to `claude/judge`).
 
@@ -417,20 +424,20 @@ Built-in prompting is now split into two layers:
 - template family `general` is for business, product, and research topics
 - template family `code` is for repository, implementation, and debugging topics
 - `--template auto` infers the family from the topic text, while `--proposer-template`, `--challenger-template`, and `--judge-template` can override it manually
-- custom profiles can still embed a full system prompt body; if they do, that embedded prompt wins unless a role-specific template override is passed on the CLI
 
 This split is now symmetric across Claude, Codex, and Gemini. Built-in provider profiles no longer hard-code provider-specific role prompts. Instead, all built-in providers share the same reusable `general` and `code` role-template families, while adapter/runtime differences stay in the provider profile layer.
 
-Built-in profiles:
+Built-in files:
 
 ```text
 profiles/
-├── claude/       # provider/runtime config only
-├── codex/        # provider/runtime config only
-├── gemini/       # provider/runtime config only
-└── templates/
-    ├── general/  # proposer.md, challenger.md, judge.md
-    └── code/     # proposer.md, challenger.md, judge.md
+└── providers/
+    ├── claude/   # proposer.json, challenger.json, judge.json
+    ├── codex/    # proposer.json, challenger.json, judge.json
+    └── gemini/   # proposer.json, challenger.json, judge.json
+prompts/
+├── general/      # proposer.md, challenger.md, judge.md
+└── code/         # proposer.md, challenger.md, judge.md
 ```
 
 Typical usage:

@@ -13,8 +13,7 @@ const makeProfile = (
 	agent: "claude_code",
 	inherit_global_config: true,
 	mcp_servers: {},
-	systemPrompt: "test prompt",
-	filePath: "/test.md",
+	filePath: "/test.json",
 	...overrides,
 });
 
@@ -90,16 +89,21 @@ describe("resolveRoles", () => {
 		expect(result.judge).toBeDefined();
 	});
 
-	it("defaults prompt resolution to the embedded profile prompt", () => {
+	it("uses the resolved prompt instead of expecting embedded profile prompt", () => {
 		const result = resolveRoles({
-			proposer: { profile: makeProfile(), cliModel: undefined },
+			proposer: {
+				profile: makeProfile(),
+				cliModel: undefined,
+				systemPrompt: "template proposer prompt",
+			},
 			challenger: {
 				profile: makeProfile({ agent: "codex" }),
 				cliModel: undefined,
+				systemPrompt: "template challenger prompt",
 			},
 			judge: "none",
 		});
-		expect(result.proposer.systemPrompt).toBe("test prompt");
+		expect(result.proposer.systemPrompt).toBe("template proposer prompt");
 		expect(result.proposer.promptTemplateFamily).toBeUndefined();
 	});
 });

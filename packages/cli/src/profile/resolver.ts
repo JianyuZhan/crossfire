@@ -52,7 +52,7 @@ export function resolveRoles(input: {
 			profile: role.profile,
 			model: resolveModel(role.cliModel, role.profile),
 			adapterType: resolveAdapterType(role.profile.agent),
-			systemPrompt: role.systemPrompt ?? role.profile.systemPrompt,
+			systemPrompt: role.systemPrompt ?? "",
 			promptTemplateFamily: role.promptTemplateFamily,
 		};
 	}

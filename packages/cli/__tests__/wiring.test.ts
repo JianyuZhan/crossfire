@@ -30,8 +30,7 @@ const makeProfile = (agent: string) => ({
 	agent: agent as any,
 	inherit_global_config: true,
 	mcp_servers: {},
-	systemPrompt: "test",
-	filePath: "/test.md",
+	filePath: "/test.json",
 });
 
 describe("createAdapters", () => {

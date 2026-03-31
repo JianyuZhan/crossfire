@@ -1,7 +1,0 @@
----
-name: codex_challenger
-description: Challenger agent (Codex) - stress-tests proposals, surfaces risks and blind spots
-agent: codex
-model: gpt-5.1-codex-mini
-prompt_template_family: auto
----

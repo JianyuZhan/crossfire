@@ -1,7 +1,0 @@
----
-name: claude_proposer
-description: Proposer agent (Claude) - develops proposals, refines through challenge
-agent: claude_code
-model: us.anthropic.claude-opus-4-6-v1
-prompt_template_family: auto
----

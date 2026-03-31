@@ -15,8 +15,7 @@ function makeProfile(
 		model,
 		inherit_global_config: true,
 		mcp_servers: {},
-		systemPrompt: "test prompt",
-		filePath: `/test/${agent}.md`,
+		filePath: `/test/${agent}.json`,
 	};
 }
 

@@ -186,7 +186,7 @@ The CLI is a thin assembly layer. It is responsible for:
 
 ## Profile System
 
-Profiles are Markdown files with YAML frontmatter. Crossfire now separates provider/runtime config from reusable role prompting.
+Crossfire separates provider/runtime config from reusable role prompting.
 
 Key fields:
 
@@ -194,27 +194,26 @@ Key fields:
 - `description?`
 - `agent`
 - `model?`
-- `prompt_template_family?`
+- `prompt_family?`
 - `inherit_global_config`
 - `mcp_servers`
 
 Search paths:
 
-- `./profiles`
-- `~/.config/crossfire/profiles`
+- provider profiles: `./profiles/providers` then `~/.config/crossfire/profiles/providers`
+- prompt templates: `./prompts` then `~/.config/crossfire/prompts`
 
 Built-in prompt resolution is two-layered:
 
 - provider profiles choose the adapter, default model, and runtime wiring
 - prompt templates define the built-in `proposer`, `challenger`, and `judge` role contract
-- built-in provider profiles typically set `prompt_template_family: auto` and rely on template resolution unless a custom profile embeds its own prompt body
-- reusable built-in templates live under `profiles/templates/general/*.md` and `profiles/templates/code/*.md`
+- built-in provider profiles typically set `prompt_family: auto` and rely on template resolution
+- reusable built-in templates live under `prompts/general/*.md` and `prompts/code/*.md`
 
 Resolution rules:
 
-- if a profile body is non-empty, that embedded system prompt is used by default
-- otherwise Crossfire resolves the template family from `--template`, per-role `--*-template` overrides, or topic-based auto inference
-- the selected family then loads `templates/<family>/<role>.md`
+- Crossfire resolves the template family from `--template`, per-role `--*-template` overrides, or topic-based auto inference
+- the selected family then loads `prompts/<family>/<role>.md`
 - this split is symmetric across Claude, Codex, and Gemini; built-in role prompting no longer lives only inside one provider's profile files
 
 ## Commands

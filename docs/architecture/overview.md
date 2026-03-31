@@ -103,6 +103,8 @@ crossfire/
 │   ├── tui/
 │   └── cli/
 ├── profiles/
+│   └── providers/
+├── prompts/
 ├── docs/
 │   ├── architecture/
 │   │   ├── overview.md

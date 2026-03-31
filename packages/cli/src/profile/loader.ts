@@ -1,15 +1,15 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import matter from "gray-matter";
 import { type ProfileConfig, ProfileSchema } from "./schema.js";
 
 export const DEFAULT_PROFILE_SEARCH_PATHS = [
-	resolve("profiles"),
+	resolve("profiles", "providers"),
 	join(
 		process.env.HOME ?? process.env.USERPROFILE ?? "~",
 		".config",
 		"crossfire",
 		"profiles",
+		"providers",
 	),
 ];
 
@@ -17,7 +17,7 @@ export function loadProfile(
 	name: string,
 	searchPaths: string[] = DEFAULT_PROFILE_SEARCH_PATHS,
 ): ProfileConfig {
-	const filename = name.endsWith(".md") ? name : `${name}.md`;
+	const filename = name.endsWith(".json") ? name : `${name}.json`;
 	for (const dir of searchPaths) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) return parseProfileFile(filePath);
@@ -31,7 +31,14 @@ export function loadProfile(
 
 function parseProfileFile(filePath: string): ProfileConfig {
 	const raw = readFileSync(filePath, "utf-8");
-	const { data, content } = matter(raw);
+	let data: unknown;
+	try {
+		data = JSON.parse(raw);
+	} catch (error) {
+		throw new Error(
+			`Profile validation failed (${filePath}): invalid JSON (${error instanceof Error ? error.message : String(error)})`,
+		);
+	}
 	const result = ProfileSchema.safeParse(data);
 	if (!result.success) {
 		const issues = result.error.issues
@@ -39,7 +46,7 @@ function parseProfileFile(filePath: string): ProfileConfig {
 			.join("; ");
 		throw new Error(`Profile validation failed (${filePath}): ${issues}`);
 	}
-	return { ...result.data, systemPrompt: content.trim(), filePath };
+	return { ...result.data, filePath };
 }
 
 function listAvailableProfiles(searchPaths: string[]): string[] {
@@ -57,10 +64,9 @@ function collectProfiles(base: string, prefix: string, out: string[]): void {
 	})) {
 		const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
 		if (entry.isDirectory()) {
-			if (entry.name === "templates") continue;
 			collectProfiles(base, rel, out);
-		} else if (entry.name.endsWith(".md")) {
-			out.push(rel.replace(/\.md$/, ""));
+		} else if (entry.name.endsWith(".json")) {
+			out.push(rel.replace(/\.json$/, ""));
 		}
 	}
 }

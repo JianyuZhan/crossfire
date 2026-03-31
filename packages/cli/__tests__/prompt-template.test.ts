@@ -44,25 +44,25 @@ describe("resolvePromptTemplateFamily", () => {
 });
 
 describe("loadPromptTemplate", () => {
-	let profilesDir: string;
+	let promptsDir: string;
 
 	beforeEach(() => {
-		profilesDir = mkdtempSync(join(tmpdir(), "crossfire-templates-"));
-		mkdirSync(join(profilesDir, "templates", "general"), { recursive: true });
+		promptsDir = mkdtempSync(join(tmpdir(), "crossfire-prompts-"));
+		mkdirSync(join(promptsDir, "general"), { recursive: true });
 	});
 
-	it("loads a role template from templates/<family>/<role>.md", () => {
+	it("loads a role template from prompts/<family>/<role>.md", () => {
 		writeFileSync(
-			join(profilesDir, "templates", "general", "challenger.md"),
+			join(promptsDir, "general", "challenger.md"),
 			"Challenge the plan with market evidence.\n",
 		);
-		expect(loadPromptTemplate("general", "challenger", [profilesDir])).toBe(
+		expect(loadPromptTemplate("general", "challenger", [promptsDir])).toBe(
 			"Challenge the plan with market evidence.",
 		);
 	});
 
 	it("throws a helpful error when the template is missing", () => {
-		expect(() => loadPromptTemplate("code", "judge", [profilesDir])).toThrow(
+		expect(() => loadPromptTemplate("code", "judge", [promptsDir])).toThrow(
 			/Prompt template "code\/judge" not found/i,
 		);
 	});

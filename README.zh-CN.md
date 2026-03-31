@@ -377,24 +377,25 @@ Inject 语义说明：
 
 ## 配置文件
 
-配置文件是带 YAML frontmatter 的 Markdown 文件。自定义 profile 还可以附带 Markdown 系统提示词正文：
+Crossfire 现在把 provider/runtime profile 和可复用角色提示词彻底拆开。
 
-```yaml
----
-name: my_debater
-description: A skilled technical debater
-agent: claude_code
-model: claude-sonnet-4-20250514
-inherit_global_config: true
-mcp_servers:
-  filesystem:
-    command: npx
-    args: ["-y", "@anthropic-ai/mcp-filesystem"]
----
-## Your Role
+provider profile 使用 JSON：
 
-你是一名擅长技术辩论的智能体。请基于证据提出清晰论点。
-每次回复结束后，使用 `debate_meta` 工具上报你的立场。
+```json
+{
+  "name": "my_debater",
+  "description": "A skilled technical debater",
+  "agent": "claude_code",
+  "model": "claude-sonnet-4-20250514",
+  "prompt_family": "auto",
+  "inherit_global_config": true,
+  "mcp_servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-filesystem"]
+    }
+  }
+}
 ```
 
 | 字段                    | 说明                                              | 必填 | 默认值     |
@@ -403,10 +404,16 @@ mcp_servers:
 | `description`           | 可读描述                                          | 否   | —          |
 | `agent`                 | 智能体类型 (`claude_code`, `codex`, `gemini_cli`) | 是   | —          |
 | `model`                 | 首选模型                                          | 否   | 提供商默认 |
+| `prompt_family`         | 默认提示词模板族 (`auto`、`general`、`code`)      | 否   | `auto`     |
 | `inherit_global_config` | 合并用户全局 MCP 配置                             | 否   | `true`     |
 | `mcp_servers`           | 配置文件专属 MCP 服务器                           | 否   | `{}`       |
 
-**搜索路径：** `./profiles/` → `~/.config/crossfire/profiles/`
+角色提示词是普通 Markdown 文件，放在 `prompts/<family>/<role>.md`。
+
+**搜索路径：**
+
+- provider profile：`./profiles/providers/` → `~/.config/crossfire/profiles/providers/`
+- prompt template：`./prompts/` → `~/.config/crossfire/prompts/`
 
 **裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（例如 `claude/proposer` 默认使用 `claude/judge`）。
 
@@ -417,20 +424,20 @@ mcp_servers:
 - `general` 模板族用于商业、产品、研究类主题
 - `code` 模板族用于仓库、实现、调试类主题
 - `--template auto` 会根据 topic 文本自动推断模板族，`--proposer-template`、`--challenger-template`、`--judge-template` 可分别手工覆盖
-- 自定义 profile 仍然可以内嵌完整系统提示词；如果 profile 有正文，就优先使用该正文，除非你在 CLI 上显式传了对应角色的 template override
 
 这套拆分现在对 Claude、Codex、Gemini 是对称的。Crossfire 不再只给 Codex 特判“代码型 challenger 提示词”；三家内置 provider 都共享 `general` 和 `code` 两个角色模板族，而 provider 差异只留在 profile/runtime 层。
 
-内置配置文件：
+内置文件结构：
 
 ```text
 profiles/
-├── claude/       # 仅 provider/runtime 配置
-├── codex/        # 仅 provider/runtime 配置
-├── gemini/       # 仅 provider/runtime 配置
-└── templates/
-    ├── general/  # proposer.md, challenger.md, judge.md
-    └── code/     # proposer.md, challenger.md, judge.md
+└── providers/
+    ├── claude/   # proposer.json, challenger.json, judge.json
+    ├── codex/    # proposer.json, challenger.json, judge.json
+    └── gemini/   # proposer.json, challenger.json, judge.json
+prompts/
+├── general/      # proposer.md, challenger.md, judge.md
+└── code/         # proposer.md, challenger.md, judge.md
 ```
 
 典型用法：

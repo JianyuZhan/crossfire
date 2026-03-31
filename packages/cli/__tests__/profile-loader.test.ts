@@ -53,25 +53,26 @@ describe("loadProfile", () => {
 	});
 
 	it("loads valid profile with all fields", () => {
-		const content =
-			"---\nname: test_agent\nagent: claude_code\nmodel: claude-sonnet-4-20250514\n---\nYou are a test agent.";
-		writeFileSync(join(profilesDir, "test_agent.md"), content);
+		const content = JSON.stringify({
+			name: "test_agent",
+			agent: "claude_code",
+			model: "claude-sonnet-4-20250514",
+		});
+		writeFileSync(join(profilesDir, "test_agent.json"), content);
 		const profile = loadProfile("test_agent", [profilesDir]);
 		expect(profile.name).toBe("test_agent");
 		expect(profile.agent).toBe("claude_code");
-		expect(profile.systemPrompt).toBe("You are a test agent.");
-		expect(profile.filePath).toContain("test_agent.md");
+		expect(profile.filePath).toContain("test_agent.json");
 	});
 
 	it("loads profile with minimal fields and applies defaults", () => {
 		writeFileSync(
-			join(profilesDir, "minimal.md"),
-			"---\nname: minimal\nagent: codex\n---",
+			join(profilesDir, "minimal.json"),
+			JSON.stringify({ name: "minimal", agent: "codex" }),
 		);
 		const profile = loadProfile("minimal", [profilesDir]);
 		expect(profile.inherit_global_config).toBe(true);
 		expect(profile.mcp_servers).toEqual({});
-		expect(profile.systemPrompt).toBe("");
 	});
 
 	it("throws on missing file with path hint", () => {
@@ -82,18 +83,14 @@ describe("loadProfile", () => {
 
 	it("throws on Zod validation failure with details", () => {
 		writeFileSync(
-			join(profilesDir, "bad_agent.md"),
-			"---\nname: bad_agent\n---\nSome prompt",
+			join(profilesDir, "bad_agent.json"),
+			JSON.stringify({ name: "bad_agent" }),
 		);
 		expect(() => loadProfile("bad_agent", [profilesDir])).toThrow(/agent/i);
 	});
 
-	it("extracts system prompt from body", () => {
-		writeFileSync(
-			join(profilesDir, "prompt_test.md"),
-			"---\nname: prompt_test\nagent: gemini_cli\n---\nLine 1\nLine 2",
-		);
-		const profile = loadProfile("prompt_test", [profilesDir]);
-		expect(profile.systemPrompt).toBe("Line 1\nLine 2");
+	it("rejects invalid JSON", () => {
+		writeFileSync(join(profilesDir, "broken.json"), "{ invalid");
+		expect(() => loadProfile("broken", [profilesDir])).toThrow(/invalid json/i);
 	});
 });

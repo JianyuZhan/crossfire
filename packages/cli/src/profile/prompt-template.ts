@@ -1,11 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { DEFAULT_PROFILE_SEARCH_PATHS } from "./loader.js";
+import { join, resolve } from "node:path";
 import type { ProfileConfig } from "./schema.js";
 
 export type PromptTemplateFamily = "general" | "code";
 export type PromptTemplateSelection = PromptTemplateFamily | "auto";
 export type PromptTemplateRole = "proposer" | "challenger" | "judge";
+
+export const DEFAULT_PROMPT_SEARCH_PATHS = [
+	resolve("prompts"),
+	join(
+		process.env.HOME ?? process.env.USERPROFILE ?? "~",
+		".config",
+		"crossfire",
+		"prompts",
+	),
+];
 
 const CODE_TOPIC_PATTERN =
 	/\b(code|repo|repository|file|files|bug|fix|implement|implementation|refactor|test|tests|typescript|javascript|python|rust|java|go|react|node|package\.json|tsconfig|readme|agents\.md|docs\/architecture|build|compile|lint|patch|diff|pr|pull request)\b/i;
@@ -22,7 +31,7 @@ export interface ResolveRolePromptInput {
 export interface ResolvedRolePrompt {
 	systemPrompt: string;
 	promptTemplateFamily?: PromptTemplateFamily;
-	promptTemplateSource: "embedded-profile" | "template";
+	promptTemplateSource: "template";
 }
 
 export function parsePromptTemplateSelection(
@@ -51,17 +60,17 @@ export function resolvePromptTemplateFamily(
 export function loadPromptTemplate(
 	family: PromptTemplateFamily,
 	role: PromptTemplateRole,
-	searchPaths: string[] = DEFAULT_PROFILE_SEARCH_PATHS,
+	searchPaths: string[] = DEFAULT_PROMPT_SEARCH_PATHS,
 ): string {
 	for (const baseDir of searchPaths) {
-		const filePath = join(baseDir, "templates", family, `${role}.md`);
+		const filePath = join(baseDir, family, `${role}.md`);
 		if (existsSync(filePath)) {
 			return readFileSync(filePath, "utf-8").trim();
 		}
 	}
 	throw new Error(
 		`Prompt template "${family}/${role}" not found. Searched: ${searchPaths
-			.map((dir) => join(dir, "templates", family, `${role}.md`))
+			.map((dir) => join(dir, family, `${role}.md`))
 			.join(", ")}`,
 	);
 }
@@ -83,15 +92,8 @@ export function resolveRolePrompt({
 		};
 	}
 
-	if (profile.systemPrompt.trim().length > 0) {
-		return {
-			systemPrompt: profile.systemPrompt,
-			promptTemplateSource: "embedded-profile",
-		};
-	}
-
 	const family = resolvePromptTemplateFamily(
-		profile.prompt_template_family ?? inheritedSelection ?? "auto",
+		profile.prompt_family ?? inheritedSelection ?? "auto",
 		topic,
 	);
 	return {

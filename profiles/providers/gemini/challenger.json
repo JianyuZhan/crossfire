@@ -1,0 +1,7 @@
+{
+	"name": "gemini_challenger",
+	"description": "Challenger agent (Gemini) - stress-tests proposals, surfaces risks and blind spots",
+	"agent": "gemini_cli",
+	"model": "gemini-2.5-flash",
+	"prompt_family": "auto"
+}

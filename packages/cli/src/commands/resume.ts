@@ -63,15 +63,13 @@ export const resumeCommand = new Command("resume")
 				proposer: {
 					profile: proposerProfile,
 					cliModel: undefined,
-					systemPrompt:
-						config.proposerSystemPrompt ?? proposerProfile.systemPrompt,
+					systemPrompt: config.proposerSystemPrompt ?? "",
 					promptTemplateFamily: config.promptTemplates?.proposer,
 				},
 				challenger: {
 					profile: challengerProfile,
 					cliModel: undefined,
-					systemPrompt:
-						config.challengerSystemPrompt ?? challengerProfile.systemPrompt,
+					systemPrompt: config.challengerSystemPrompt ?? "",
 					promptTemplateFamily: config.promptTemplates?.challenger,
 				},
 				judge:
@@ -80,8 +78,7 @@ export const resumeCommand = new Command("resume")
 						: {
 								profile: judgeProfile,
 								cliModel: undefined,
-								systemPrompt:
-									config.judgeSystemPrompt ?? judgeProfile.systemPrompt,
+								systemPrompt: config.judgeSystemPrompt ?? "",
 								promptTemplateFamily: config.promptTemplates?.judge,
 							},
 			});
