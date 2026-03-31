@@ -49,7 +49,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 - **Event sourcing** — Every event is persisted to JSONL. Resume interrupted debates and replay completed ones from the same source of truth
 - **Structured extraction** — Agents report stance, confidence, key points, and concessions via tool calls (Zod-validated)
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
-- **Adaptive final synthesis** — After the debate, Crossfire generates a final action plan in a fresh synthesis session with local fallback if model-backed synthesis fails
+- **Adaptive final synthesis** — After the debate, Crossfire generates a final action plan in a fresh synthesis session, forces synthesis into a tool-free planning turn, and falls back to a structured local report if model-backed synthesis fails
 - **Incremental prompts** — Turn 1 sends full context; Turn 2+ sends only new opponent/judge messages, leveraging provider session memory for ~O(1) per-turn cost
 - **Profiles + prompt templates** — Built-in provider profiles now hold agent/model/runtime config, while reusable `general` and `code` prompt templates define the role contract
 - **Execution modes** — Set debate defaults, per-role baselines, and per-turn overrides such as `research`, `guarded`, `dangerous`, and `plan`
@@ -493,7 +493,7 @@ On resume, a new segment file is created (for example, `events-resumed-<ts>.json
 
 Visible transcript-style outputs automatically strip embedded `debate_meta` / `judge_verdict` JSON blocks after extraction. The structured payloads remain preserved in `events.jsonl` and derived state.
 
-If model-backed synthesis fails, Crossfire still writes a fallback action plan so the run produces a usable report. The fallback report is enriched from the debate summary rather than relying only on sparse draft state.
+If model-backed synthesis fails, Crossfire still writes a fallback action plan so the run produces a usable report. The fallback report is enriched from the debate summary rather than relying only on sparse draft state, keeps the executive summary as short structured paragraphs, and avoids dumping the full judge essay into the recommendation line.
 
 ## How It Works
 
@@ -506,7 +506,7 @@ If model-backed synthesis fails, Crossfire still writes a fallback action plan s
 7. **Incremental prompts** — Turn 1 sends the full system prompt, topic, and output schema; subsequent turns send only the opponent's latest response plus optional judge feedback.
 8. **Convergence** — Crossfire tracks stance delta, concessions, and whether both sides want to conclude. Debates can terminate early when convergence is high enough.
 9. **Persistence** — Events batch-flush to JSONL every 100ms, with sync flush on turn/debate completion. The full log enables deterministic replay and resume.
-10. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session, records synthesis diagnostics for auditing, and falls back to an enriched local report if model-backed synthesis fails.
+10. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session, runs that synthesis turn in tool-free `plan` mode with a longer timeout budget, records synthesis diagnostics for auditing, and falls back to an enriched local report if model-backed synthesis fails.
 
 For the architecture reference set, start at **[docs/architecture/overview.md](docs/architecture/overview.md)**.
 

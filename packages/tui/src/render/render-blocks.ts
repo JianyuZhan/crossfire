@@ -51,7 +51,9 @@ export function snapshotToBlocks(
 			role,
 			agentType,
 			status: "done",
-			statusLabel: snap.executionMode ? `done [${snap.executionMode}]` : undefined,
+			statusLabel: snap.executionMode
+				? `done [${snap.executionMode}]`
+				: undefined,
 			duration: snap.turnDurationMs,
 		},
 	];
@@ -118,10 +120,14 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 	}
 	const failureSummary = summarizeRecentFailures(state.tools);
 	if (failureSummary) {
-		const toolName = state.tools.find((tool) => tool.status === "failed")?.toolName;
+		const toolName = state.tools.find(
+			(tool) => tool.status === "failed",
+		)?.toolName;
 		blocks.push({
 			kind: "warning",
-			text: toolName ? `${toolName} failures: ${failureSummary.replace(/^recent failures: /, "")}` : failureSummary,
+			text: toolName
+				? `${toolName} failures: ${failureSummary.replace(/^recent failures: /, "")}`
+				: failureSummary,
 		});
 	}
 	const deniedSummary = summarizeDeniedTools(state.tools);
@@ -132,7 +138,8 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 	if (unknownSummary) {
 		blocks.push({ kind: "warning", text: unknownSummary });
 	}
-	for (const t of selectVisibleLiveTools(state.tools)) blocks.push(toolToBlock(t));
+	for (const t of selectVisibleLiveTools(state.tools))
+		blocks.push(toolToBlock(t));
 	for (const w of state.warnings) blocks.push({ kind: "warning", text: w });
 	if (state.error) blocks.push({ kind: "error", text: state.error });
 	const displayText = stripInternalToolBlocks(state.currentMessageText);

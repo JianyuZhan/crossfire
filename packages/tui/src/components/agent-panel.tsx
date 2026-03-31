@@ -286,8 +286,10 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 				return failureSummary ? (
 					<Box marginTop={1}>
 						<Text color="yellow">
-							⚠ {(state.tools.find((tool) => tool.status === "failed")?.toolName ?? "Tool")} failures:{" "}
-							{failureSummary.replace(/^recent failures: /, "")}
+							⚠{" "}
+							{state.tools.find((tool) => tool.status === "failed")?.toolName ??
+								"Tool"}{" "}
+							failures: {failureSummary.replace(/^recent failures: /, "")}
 						</Text>
 					</Box>
 				) : null;

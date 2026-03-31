@@ -175,8 +175,15 @@ export interface FallbackSummaryInput {
 	leading?: string;
 	judgeScore?: { proposer: number; challenger: number } | null;
 	recommendedAction?: string | null;
+	judgeAssessment?: string | null;
+	shouldContinue?: boolean | null;
 	consensus?: string[];
 	unresolved?: string[];
+	unresolvedDetails?: Array<{
+		title: string;
+		proposerPosition: string | null;
+		challengerPosition: string | null;
+	}>;
 }
 
 export function draftToAuditReport(
@@ -212,43 +219,55 @@ export function draftToAuditReport(
 	const mergedUnresolved = [...draft.unresolved];
 	for (const su of summary?.unresolved ?? []) {
 		if (!draftUnresolvedTitles.has(su.toLowerCase())) {
+			const structured = summary?.unresolvedDetails?.find(
+				(detail) => detail.title.toLowerCase() === su.toLowerCase(),
+			);
 			mergedUnresolved.push({
 				title: su,
-				proposerArguments: [],
-				challengerArguments: [],
+				proposerArguments: structured?.proposerPosition
+					? [structured.proposerPosition]
+					: [],
+				challengerArguments: structured?.challengerPosition
+					? [structured.challengerPosition]
+					: [],
 				relatedRisks: [],
 			});
 		}
 	}
 
 	// --- Executive summary: use summary data when available, fall back to judge notes ---
-	const parts: string[] = [`Debate covered ${totalRounds} round(s).`];
+	const overviewParts: string[] = [`Debate covered ${totalRounds} round(s).`];
 
 	if (mergedConsensus.length > 0) {
-		parts.push(`${mergedConsensus.length} item(s) reached consensus.`);
+		overviewParts.push(`${mergedConsensus.length} item(s) reached consensus.`);
 	}
 	if (mergedUnresolved.length > 0) {
-		parts.push(`${mergedUnresolved.length} issue(s) remain unresolved.`);
+		overviewParts.push(
+			`${mergedUnresolved.length} issue(s) remain unresolved.`,
+		);
 	}
 	if (summary?.leading && summary.leading !== "unknown") {
 		const scoreStr = summary.judgeScore
 			? ` (${summary.judgeScore.proposer} vs ${summary.judgeScore.challenger})`
 			: "";
-		parts.push(`Leading: ${summary.leading}${scoreStr}.`);
+		overviewParts.push(`Leading: ${summary.leading}${scoreStr}.`);
 	}
+	const summaryParagraphs = [overviewParts.join(" ")];
+
 	if (summary?.recommendedAction) {
-		parts.push(`Recommendation: ${summary.recommendedAction}`);
-	} else {
-		// Fall back to last judge note reasoning
-		const lastJudgeNote =
-			draft.judgeNotes.length > 0
-				? draft.judgeNotes[draft.judgeNotes.length - 1]
-				: undefined;
-		if (lastJudgeNote?.reasoning) {
-			parts.push(`Judge assessment: ${lastJudgeNote.reasoning}`);
-		}
+		summaryParagraphs.push(`Recommendation: ${summary.recommendedAction}`);
 	}
-	const executiveSummary = parts.join(" ");
+
+	const judgeAssessment =
+		summary?.judgeAssessment ??
+		(draft.judgeNotes.length > 0
+			? draft.judgeNotes[draft.judgeNotes.length - 1]?.reasoning
+			: undefined);
+	const condensedAssessment = condenseAssessment(judgeAssessment);
+	if (condensedAssessment) {
+		summaryParagraphs.push(`Judge assessment: ${condensedAssessment}`);
+	}
+	const executiveSummary = summaryParagraphs.join("\n\n");
 
 	// --- Consensus items ---
 	const consensusItems = mergedConsensus.map((c) => ({
@@ -261,15 +280,19 @@ export function draftToAuditReport(
 	// --- Unresolved issues ---
 	const unresolvedIssues = mergedUnresolved.map((u) => {
 		const proposerPos =
-			u.proposerArguments.join("; ") || "No specific position recorded.";
+			u.proposerArguments.join("; ") ||
+			"No structured proposer position was preserved in fallback synthesis.";
 		const challengerPos =
-			u.challengerArguments.join("; ") || "No specific position recorded.";
-		const risk = u.relatedRisks.join("; ") || "No specific risk identified.";
+			u.challengerArguments.join("; ") ||
+			"No structured challenger position was preserved in fallback synthesis.";
+		const risk =
+			u.relatedRisks.join("; ") ||
+			"Review the linked transcript before implementation to clarify the risk.";
 		const exploration =
-			proposerPos !== "No specific position recorded." &&
-			challengerPos !== "No specific position recorded."
+			!proposerPos.startsWith("No structured") &&
+			!challengerPos.startsWith("No structured")
 				? `Compare: proposer argues ${proposerPos.slice(0, 80)}; challenger argues ${challengerPos.slice(0, 80)}. Prototype both approaches to resolve.`
-				: `Review ${u.title} with additional stakeholder input.`;
+				: `Reconstruct both sides' positions from the latest transcript excerpts before making an implementation decision on ${u.title}.`;
 		return {
 			title: u.title,
 			proposerPosition: proposerPos,
@@ -330,7 +353,7 @@ function formatConsensusDetail(c: DraftReport["consensus"][number]): string {
 	if (c.supportingRounds.length > 0) {
 		return `Discussed in round(s) ${c.supportingRounds.join(", ")}.`;
 	}
-	return "Agreed upon without significant challenge.";
+	return "Accepted across the debate and no longer materially contested.";
 }
 
 function severityToLikelihood(severity: string): string {
@@ -347,5 +370,19 @@ function extractActionStep(text: string): string {
 	if (verbMatch) {
 		return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 	}
-	return "See consensus detail above.";
+	return `Convert this consensus into an owned task with a deadline and success metric: ${text.length > 100 ? `${text.slice(0, 97)}...` : text}`;
+}
+
+function condenseAssessment(text: string | null | undefined): string | null {
+	if (!text) return null;
+	const normalized = text
+		.replace(/^#+\s+/gm, "")
+		.replace(/\*\*/g, "")
+		.trim();
+	const paragraphs = normalized
+		.split(/\n\s*\n/)
+		.map((paragraph) => paragraph.trim())
+		.filter(Boolean);
+	if (paragraphs.length === 0) return null;
+	return paragraphs[0]!;
 }

@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { NormalizedEvent } from "@crossfire/adapter-core";
@@ -15,6 +16,13 @@ interface SpawnBehavior {
 	exitDelay?: number;
 }
 
+type MockChildProcess = ChildProcess &
+	EventEmitter & {
+		pid: number;
+		stdout: PassThrough;
+		kill: (signal?: number | NodeJS.Signals) => boolean;
+	};
+
 function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 	pm: ProcessManager;
 	spawnArgs: string[][];
@@ -23,7 +31,11 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 	let spawnIndex = 0;
 	const spawnArgs: string[][] = [];
 
-	const spawnFn = (_cmd: string, args: string[], _opts?: object) => {
+	const spawnFn = (
+		_cmd: string,
+		args: string[],
+		_opts?: object,
+	): ChildProcess => {
 		const behavior = spawnBehaviors[spawnIndex++];
 		if (!behavior) {
 			throw new Error("createMockProcessManager: no more spawn behaviors");
@@ -31,16 +43,13 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 		spawnArgs.push(args);
 
 		const stdout = new PassThrough();
-		const proc = new EventEmitter() as EventEmitter & {
-			pid: number;
-			stdout: PassThrough;
-			kill: () => void;
-		};
+		const proc = new EventEmitter() as unknown as MockChildProcess;
 		proc.pid = 1000 + spawnIndex;
 		proc.stdout = stdout;
 		proc.kill = () => {
 			stdout.end();
 			proc.emit("exit", null);
+			return true;
 		};
 
 		setImmediate(() => {
@@ -53,11 +62,11 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 			}, behavior.exitDelay ?? 0);
 		});
 
-		return proc as any;
+		return proc;
 	};
 
 	return {
-		pm: new ProcessManager(spawnFn as any),
+		pm: new ProcessManager(spawnFn),
 		spawnArgs,
 		spawnCount: () => spawnIndex,
 	};

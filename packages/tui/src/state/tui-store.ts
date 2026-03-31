@@ -220,7 +220,9 @@ function parseClaudeToolUseIdFromApproval(
 ): string | undefined {
 	if (!turnId) return undefined;
 	const prefix = `ar-${turnId}-`;
-	return requestId.startsWith(prefix) ? requestId.slice(prefix.length) : undefined;
+	return requestId.startsWith(prefix)
+		? requestId.slice(prefix.length)
+		: undefined;
 }
 
 export class TuiStore {
@@ -454,7 +456,10 @@ export class TuiStore {
 		let changed = false;
 		for (const panel of [this.state.proposer, this.state.challenger]) {
 			for (const tool of panel.tools) {
-				if (!isActiveToolStatus(tool.status) || tool.startedAtMs === undefined) {
+				if (
+					!isActiveToolStatus(tool.status) ||
+					tool.startedAtMs === undefined
+				) {
 					continue;
 				}
 				const localElapsedMs = Math.max(0, nowMs - tool.startedAtMs);
@@ -901,7 +906,7 @@ export class TuiStore {
 						tool.elapsedMs = Math.max(tool.elapsedMs ?? 0, localElapsedMs);
 					}
 					tool.status = e.success ? "succeeded" : "failed";
-					tool.resultSummary = e.success ? "success" : e.error ?? "error";
+					tool.resultSummary = e.success ? "success" : (e.error ?? "error");
 				}
 				break;
 			}

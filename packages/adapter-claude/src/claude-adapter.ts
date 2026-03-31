@@ -6,9 +6,9 @@ import type {
 	ApprovalOption,
 	LocalTurnMetrics,
 	NormalizedEvent,
-	TurnExecutionMode,
 	SessionHandle,
 	StartSessionInput,
+	TurnExecutionMode,
 	TurnHandle,
 	TurnInput,
 } from "@crossfire/adapter-core";
@@ -95,8 +95,7 @@ function mapExecutionModeToClaudeQueryOptions(
 	}
 }
 
-function buildApprovalOptions(
-): ApprovalOption[] {
+function buildApprovalOptions(): ApprovalOption[] {
 	const options: ApprovalOption[] = [
 		{
 			id: "allow",
@@ -156,7 +155,9 @@ function buildApprovalCapabilities(
 	};
 }
 
-function buildSessionPermissionUpdates(toolName: string): ClaudePermissionUpdate[] {
+function buildSessionPermissionUpdates(
+	toolName: string,
+): ClaudePermissionUpdate[] {
 	return [
 		{
 			type: "addRules",
@@ -432,7 +433,10 @@ export class ClaudeAdapter implements AgentAdapter {
 			await this.consumeStream(messages, ctx, handle, turnInput);
 		} catch (err) {
 			const queryCtx = this.queries.get(ctx.adapterSessionId);
-			if (queryCtx?.currentTurnId === turnInput.turnId && queryCtx.turnCompleted) {
+			if (
+				queryCtx?.currentTurnId === turnInput.turnId &&
+				queryCtx.turnCompleted
+			) {
 				return;
 			}
 			const message = err instanceof Error ? err.message : String(err);

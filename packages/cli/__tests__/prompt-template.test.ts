@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -56,14 +56,14 @@ describe("loadPromptTemplate", () => {
 			join(profilesDir, "templates", "general", "challenger.md"),
 			"Challenge the plan with market evidence.\n",
 		);
-		expect(
-			loadPromptTemplate("general", "challenger", [profilesDir]),
-		).toBe("Challenge the plan with market evidence.");
+		expect(loadPromptTemplate("general", "challenger", [profilesDir])).toBe(
+			"Challenge the plan with market evidence.",
+		);
 	});
 
 	it("throws a helpful error when the template is missing", () => {
-		expect(() =>
-			loadPromptTemplate("code", "judge", [profilesDir]),
-		).toThrow(/Prompt template "code\/judge" not found/i);
+		expect(() => loadPromptTemplate("code", "judge", [profilesDir])).toThrow(
+			/Prompt template "code\/judge" not found/i,
+		);
 	});
 });

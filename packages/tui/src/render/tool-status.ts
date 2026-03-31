@@ -15,7 +15,9 @@ function normalizeFailureLabel(summary?: string): string {
 	return summary.length <= 40 ? summary : `${summary.slice(0, 39)}…`;
 }
 
-export function summarizeRecentFailures(tools: LiveToolEntry[]): string | undefined {
+export function summarizeRecentFailures(
+	tools: LiveToolEntry[],
+): string | undefined {
 	const recentErrors = tools
 		.filter((tool) => tool.status === "failed")
 		.slice(-RECENT_FAILURE_LIMIT);
@@ -34,7 +36,9 @@ export function summarizeRecentFailures(tools: LiveToolEntry[]): string | undefi
 	return parts.length > 0 ? `recent failures: ${parts.join(", ")}` : undefined;
 }
 
-export function summarizeDeniedTools(tools: LiveToolEntry[]): string | undefined {
+export function summarizeDeniedTools(
+	tools: LiveToolEntry[],
+): string | undefined {
 	const deniedTools = tools.filter((tool) => tool.status === "denied");
 	if (deniedTools.length === 0) return undefined;
 
@@ -68,7 +72,9 @@ export function summarizeUnknownOutcomes(
 	return parts.length > 0 ? `unknown outcomes: ${parts.join(", ")}` : undefined;
 }
 
-export function selectVisibleLiveTools(tools: LiveToolEntry[]): LiveToolEntry[] {
+export function selectVisibleLiveTools(
+	tools: LiveToolEntry[],
+): LiveToolEntry[] {
 	return tools.filter(
 		(tool) => tool.status === "requested" || tool.status === "running",
 	);
@@ -77,17 +83,20 @@ export function selectVisibleLiveTools(tools: LiveToolEntry[]): LiveToolEntry[] 
 export function buildToolActivityLabel(tools: LiveToolEntry[]): string {
 	const requested = tools.filter((tool) => tool.status === "requested").length;
 	const running = tools.filter((tool) => tool.status === "running").length;
-	const longestRunningMs = tools.reduce<number | undefined>((maxElapsed, tool) => {
-		if (
-			(tool.status !== "requested" && tool.status !== "running") ||
-			tool.elapsedMs === undefined
-		) {
-			return maxElapsed;
-		}
-		return maxElapsed === undefined
-			? tool.elapsedMs
-			: Math.max(maxElapsed, tool.elapsedMs);
-	}, undefined);
+	const longestRunningMs = tools.reduce<number | undefined>(
+		(maxElapsed, tool) => {
+			if (
+				(tool.status !== "requested" && tool.status !== "running") ||
+				tool.elapsedMs === undefined
+			) {
+				return maxElapsed;
+			}
+			return maxElapsed === undefined
+				? tool.elapsedMs
+				: Math.max(maxElapsed, tool.elapsedMs);
+		},
+		undefined,
+	);
 	const parts: string[] = [];
 	if (requested > 0) parts.push(`${requested} requested`);
 	if (running > 0) parts.push(`${running} running`);

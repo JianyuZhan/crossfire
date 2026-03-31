@@ -49,7 +49,7 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 - **事件溯源** — 所有事件持久化为 JSONL。支持中断恢复，并可从同一事实来源回放已完成辩论
 - **结构化提取** — 智能体通过 tool call 上报立场、置信度、关键论点和让步（Zod 校验）
 - **裁判仲裁** — 可选的裁判智能体评分论证、检测停滞、可提前终止辩论，并优先评估证据责任而不是奖励无依据断言
-- **自适应最终综合** — 辩论结束后在独立综合会话中生成最终行动计划，模型综合失败时仍有本地回退
+- **自适应最终综合** — 辩论结束后在独立综合会话中生成最终行动计划，并强制综合阶段走无工具的 `plan` turn；模型综合失败时仍有结构化本地回退
 - **增量提示词** — 第 1 轮发送完整上下文，第 2 轮起仅发送对手/裁判的新消息，利用提供商会话记忆实现每轮 ~O(1) token 开销
 - **配置文件 + 提示词模板** — 内置 provider profile 负责适配器/模型/运行时配置，可复用的 `general` / `code` 模板负责 proposer/challenger/judge 的角色契约
 - **执行模式** — 支持 debate 默认模式、按角色 baseline，以及 `research`、`guarded`、`dangerous`、`plan` 这类按 turn 覆盖
@@ -493,7 +493,7 @@ crossfire start \
 
 面向人类阅读的 transcript / action plan 输出会在提取后自动剥离嵌入的 `debate_meta` / `judge_verdict` JSON 块；这些结构化载荷仍会保留在 `events.jsonl` 和派生状态里。
 
-如果基于模型的最终综合失败，Crossfire 仍会写出一个可用的回退版行动计划，而且该回退报告会结合 debate summary 做补强，而不只依赖稀疏的 draft 状态。
+如果基于模型的最终综合失败，Crossfire 仍会写出一个可用的回退版行动计划，而且该回退报告会结合 debate summary 做补强，而不只依赖稀疏的 draft 状态；同时 executive summary 会保持为短的结构化段落，不再把整段裁判长文直接塞进 recommendation。
 
 ## 工作原理
 
@@ -506,7 +506,7 @@ crossfire start \
 7. **增量提示词** — 第 1 轮发送完整系统提示词、主题和输出格式；后续轮次仅发送对手最新回复和可选裁判反馈。
 8. **收敛检测** — Crossfire 跟踪立场差值、让步情况以及双方是否希望结束。达到阈值时可提前终止辩论。
 9. **持久化** — 事件每 100ms 批量写入 JSONL，并在回合或辩论完成时同步刷新。完整日志支持确定性回放和恢复。
-10. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，记录综合诊断元数据供审计使用；如果模型综合失败，则回退到经 debate summary 补强的本地报告。
+10. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，综合 turn 会以无工具的 `plan` 模式运行并拥有更长的 timeout 预算；同时记录综合诊断元数据供审计使用。如果模型综合失败，则回退到经 debate summary 补强的本地报告。
 
 完整架构文档请从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 进入。
 

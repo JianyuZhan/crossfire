@@ -10,6 +10,14 @@ import {
 import { GeminiAdapter } from "../src/gemini-adapter.js";
 import { ProcessManager } from "../src/process-manager.js";
 
+type MockChildProcess = ChildProcess &
+	EventEmitter & {
+		stdout: PassThrough;
+		stderr: PassThrough;
+		pid: number;
+		kill: (signal?: number | NodeJS.Signals) => boolean;
+	};
+
 /**
  * Converts a ScenarioStep into a Gemini JSONL line.
  */
@@ -128,7 +136,7 @@ function createMockSpawnFn(
 		const stderr = new PassThrough();
 
 		// Create mock process using EventEmitter
-		const proc = new EventEmitter() as any;
+		const proc = new EventEmitter() as unknown as MockChildProcess;
 		proc.stdout = stdout;
 		proc.stderr = stderr;
 		proc.pid = 99999;
@@ -137,6 +145,7 @@ function createMockSpawnFn(
 			setImmediate(() => {
 				proc.emit("exit", null, signal);
 			});
+			return true;
 		};
 
 		// Emit JSONL lines and exit asynchronously

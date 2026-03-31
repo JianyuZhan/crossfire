@@ -42,7 +42,8 @@ export async function createAdapters(
 			executionMode:
 				roleName === "judge"
 					? undefined
-					: executionModes?.roleModes?.[roleName] ?? executionModes?.defaultMode,
+					: (executionModes?.roleModes?.[roleName] ??
+						executionModes?.defaultMode),
 			providerOptions: { systemPrompt: role.systemPrompt },
 		});
 		started.push({ adapter, session });

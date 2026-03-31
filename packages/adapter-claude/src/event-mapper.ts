@@ -205,9 +205,7 @@ export function mapSdkMessage(
 					toolUseId,
 					toolName,
 					input:
-						denial.tool_input ??
-						denial.toolInput ??
-						(denial.input as unknown),
+						denial.tool_input ?? denial.toolInput ?? (denial.input as unknown),
 				});
 			}
 

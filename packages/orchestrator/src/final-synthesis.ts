@@ -20,6 +20,8 @@ export interface SynthesisRunResult {
 	diagnostics?: SynthesisDiagnostics;
 }
 
+export const DEFAULT_SYNTHESIS_TIMEOUT_MS = 300_000;
+
 /**
  * Run final synthesis in a new isolated adapter session.
  * Creates session, subscribes directly to adapter events (not via bus to avoid
@@ -104,7 +106,11 @@ export async function runFinalSynthesis(
 			}
 		});
 
-		await adapter.sendTurn(session, { turnId, prompt });
+		await adapter.sendTurn(session, {
+			turnId,
+			prompt,
+			executionMode: "plan",
+		});
 
 		// Wait for turn.completed or timeout
 		let timeoutId: ReturnType<typeof setTimeout> | undefined;

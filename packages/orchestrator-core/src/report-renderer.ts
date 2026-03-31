@@ -26,6 +26,11 @@ export function renderActionPlanHtml(
 	report: AuditReport,
 	meta: ReportMeta,
 ): string {
+	const executiveSummaryParagraphs = report.executiveSummary
+		.split(/\n\s*\n/)
+		.map((paragraph) => paragraph.trim())
+		.filter(Boolean);
+
 	let qualityBadge: string;
 	if (meta.generationQuality === "full") {
 		qualityBadge = '<span class="badge badge-green">Enhanced synthesis</span>';
@@ -213,7 +218,7 @@ export function renderActionPlanHtml(
 		${qualityBadge}
 
 		<h2>Executive Summary</h2>
-		<p>${esc(report.executiveSummary)}</p>
+		${executiveSummaryParagraphs.map((paragraph) => `<p>${esc(paragraph)}</p>`).join("\n\t\t")}
 
 		<h2>Consensus</h2>
 		${report.consensusItems

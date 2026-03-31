@@ -245,7 +245,8 @@ After the main loop exits, the runner:
 Current fallback behavior is important:
 
 - successful LLM synthesis writes markdown/HTML directly and is classified as `llm-full`
+- the isolated synthesis turn is sent in `executionMode: "plan"` so the provider is nudged toward tool-free consolidation instead of starting a fresh research pass
 - timeout/error paths may retain partial synthesis text for diagnostics, but do not render that partial text as a successful final report
-- local fallback rendering uses `draftToAuditReport(draft, summary)` so the fallback report can consume `DebateSummary` fields such as consensus, unresolved items, and recommended action
+- local fallback rendering uses `draftToAuditReport(draft, summary)` so the fallback report can consume `DebateSummary` fields such as consensus, unresolved items, short recommended action, condensed judge assessment, and structured unresolved positions
 
 The runner does not currently append a separate “Final Outcome” markdown block to the transcript.

@@ -226,7 +226,7 @@ export function buildPanelLines(
 				result.push(
 					screenLine([
 						{
-							text: `  ${(block.statusLabel ?? block.status)}${dur}`,
+							text: `  ${block.statusLabel ?? block.status}${dur}`,
 							style: { color: statusColor },
 						},
 					]),

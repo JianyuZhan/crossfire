@@ -65,6 +65,32 @@ describe("runFinalSynthesis", () => {
 		expect(mockAdapter.close).toHaveBeenCalled();
 	});
 
+	it("sends synthesis turns in plan mode to discourage tool use", async () => {
+		const mockAdapter = createMockAdapter([
+			{
+				kind: "turn.completed",
+				turnId: "synthesis-final",
+				status: "completed",
+				durationMs: 50,
+				timestamp: Date.now(),
+				adapterId: "mock",
+				adapterSessionId,
+			},
+		]);
+
+		const { runFinalSynthesis } = await import("../src/final-synthesis.js");
+		await runFinalSynthesis(mockAdapter as any, "test prompt", 10_000);
+
+		expect(mockAdapter.sendTurn).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				turnId: "synthesis-final",
+				prompt: "test prompt",
+				executionMode: "plan",
+			}),
+		);
+	});
+
 	it("returns undefined on timeout and still closes session", async () => {
 		const mockAdapter = createMockAdapter(); // no events → timeout
 

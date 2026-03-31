@@ -12,11 +12,7 @@ describe("resolveExecutionMode", () => {
 
 	it("uses the debate default when no role override exists", () => {
 		expect(
-			resolveExecutionMode(
-				{ defaultMode: "research" },
-				"challenger",
-				"c-1",
-			),
+			resolveExecutionMode({ defaultMode: "research" }, "challenger", "c-1"),
 		).toEqual({
 			baselineMode: "research",
 			effectiveMode: "research",

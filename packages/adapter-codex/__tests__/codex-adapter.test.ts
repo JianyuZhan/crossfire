@@ -665,11 +665,7 @@ describe("CodexAdapter", () => {
 				).toEqual(["allow", "allow-session", "deny"]);
 				expect(
 					req.capabilities?.nativeOptions?.map((option) => option.id),
-				).toEqual([
-					"accept",
-					"acceptForSession",
-					"decline",
-				]);
+				).toEqual(["accept", "acceptForSession", "decline"]);
 				expect(req.capabilities?.nativeOptions?.[1]).toMatchObject({
 					kind: "allow-always",
 					scope: "session",

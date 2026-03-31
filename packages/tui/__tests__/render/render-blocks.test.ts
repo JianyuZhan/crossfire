@@ -310,7 +310,9 @@ describe("liveStateToBlocks", () => {
 			warnings: [],
 		};
 		const blocks = liveStateToBlocks(state);
-		expect(blocks.filter((block) => block.kind === "tool-call")).toHaveLength(0);
+		expect(blocks.filter((block) => block.kind === "tool-call")).toHaveLength(
+			0,
+		);
 		const warning = blocks.find((block) => block.kind === "warning");
 		expect(warning).toBeDefined();
 		if (warning?.kind === "warning") {

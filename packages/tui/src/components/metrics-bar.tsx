@@ -2,8 +2,8 @@ import { Box, Text } from "ink";
 import type React from "react";
 import { buildCompactActiveStatus } from "../render/tool-status.js";
 import type {
-	LiveAgentPanelState,
 	AgentUsage,
+	LiveAgentPanelState,
 	MetricsState,
 	ViewportState,
 } from "../state/types.js";
@@ -61,9 +61,7 @@ export function metricsBarHeight(): number {
 	return 4;
 }
 
-function ScrollStatus({
-	viewport,
-}: { viewport?: ViewportState }): string {
+function ScrollStatus({ viewport }: { viewport?: ViewportState }): string {
 	if (!viewport) {
 		return "Ready";
 	}

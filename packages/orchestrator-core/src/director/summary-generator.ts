@@ -7,12 +7,19 @@ export interface DebateSummary {
 	leading: string;
 	judgeScore: { proposer: number; challenger: number } | null;
 	recommendedAction: string | null;
+	judgeAssessment: string | null;
+	shouldContinue: boolean | null;
 	stanceTrajectory: {
 		proposer: Array<{ round: number; stance: string; confidence: number }>;
 		challenger: Array<{ round: number; stance: string; confidence: number }>;
 	};
 	consensus: string[];
 	unresolved: string[];
+	unresolvedDetails: Array<{
+		title: string;
+		proposerPosition: string | null;
+		challengerPosition: string | null;
+	}>;
 	totalTurns: number;
 }
 
@@ -44,6 +51,12 @@ export function generateSummary(
 				t.meta?.keyPoints,
 		)
 		.flatMap((t) => t.meta?.keyPoints ?? []);
+	const unresolvedDetails = computeUnresolvedDetails(
+		latestProposerPoints,
+		latestChallengerPoints,
+		proposerConcessions,
+		challengerConcessions,
+	);
 
 	// Infer leading from stance trajectory when no verdict available
 	let leading = verdict?.leading ?? "unknown";
@@ -65,7 +78,9 @@ export function generateSummary(
 		roundsCompleted: state.currentRound,
 		leading,
 		judgeScore: verdict?.score ?? null,
-		recommendedAction: verdict?.reasoning ?? null,
+		recommendedAction: deriveRecommendedAction(verdict),
+		judgeAssessment: verdict?.reasoning ?? null,
+		shouldContinue: verdict?.shouldContinue ?? null,
 		stanceTrajectory: {
 			proposer: proposerTrajectory,
 			challenger: challengerTrajectory,
@@ -77,6 +92,7 @@ export function generateSummary(
 			proposerConcessions,
 			challengerConcessions,
 		),
+		unresolvedDetails,
 		totalTurns: state.turns.length,
 	};
 }
@@ -120,12 +136,24 @@ export function formatFinalOutcome(
 
 	if (summary.recommendedAction)
 		lines.push(`**Recommended Action**: ${summary.recommendedAction}`);
+	if (summary.judgeAssessment)
+		lines.push(`**Judge Assessment**: ${summary.judgeAssessment}`);
 	lines.push(`**Cost**: ${summary.totalTurns} turns`);
 	if (summary.consensus.length > 0 || summary.unresolved.length > 0) {
 		lines.push("");
 		lines.push("*Detailed action plan saved to `action-plan.html`*");
 	}
 	return lines.join("\n");
+}
+
+function deriveRecommendedAction(
+	verdict: JudgeVerdict | undefined,
+): string | null {
+	if (!verdict) return null;
+	if (verdict.shouldContinue) {
+		return "Continue the debate for another round and target the remaining unresolved gaps.";
+	}
+	return "Stop the debate and consolidate the agreed actions into a final action plan.";
 }
 
 /** Collects all concession strings for a given role. */
@@ -161,6 +189,66 @@ function computeUnresolved(
 		[...proposerPoints, ...challengerPoints],
 		allConcessions,
 	);
+}
+
+function computeUnresolvedDetails(
+	proposerPoints: string[],
+	challengerPoints: string[],
+	proposerConcessions: Set<string>,
+	challengerConcessions: Set<string>,
+): Array<{
+	title: string;
+	proposerPosition: string | null;
+	challengerPosition: string | null;
+}> {
+	const details = new Map<
+		string,
+		{
+			title: string;
+			proposerPosition: string | null;
+			challengerPosition: string | null;
+		}
+	>();
+
+	for (const point of proposerPoints) {
+		if (matchesConcession(point, challengerConcessions)) continue;
+		details.set(point.toLowerCase(), {
+			title: point,
+			proposerPosition: point,
+			challengerPosition: null,
+		});
+	}
+
+	for (const point of challengerPoints) {
+		if (matchesConcession(point, proposerConcessions)) continue;
+		const key = point.toLowerCase();
+		const existing = details.get(key);
+		if (existing) {
+			existing.challengerPosition = point;
+			continue;
+		}
+		details.set(key, {
+			title: point,
+			proposerPosition: null,
+			challengerPosition: point,
+		});
+	}
+
+	return [...details.values()];
+}
+
+function matchesConcession(point: string, concessions: Set<string>): boolean {
+	const normalizedPoint = point.toLowerCase();
+	for (const concession of concessions) {
+		const normalizedConcession = concession.toLowerCase();
+		if (
+			normalizedConcession.includes(normalizedPoint.slice(0, 16)) ||
+			normalizedPoint.includes(normalizedConcession.slice(0, 16))
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function buildTrajectory(

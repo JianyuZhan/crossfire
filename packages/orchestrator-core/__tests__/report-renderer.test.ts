@@ -80,6 +80,19 @@ describe("renderActionPlanHtml", () => {
 		expect(html).toContain("&lt;script&gt;");
 	});
 
+	it("renders multi-paragraph executive summaries as separate paragraphs", () => {
+		const report = {
+			...sampleReport,
+			executiveSummary:
+				"First paragraph with the top-level recommendation.\n\nSecond paragraph with judge assessment.",
+		};
+		const html = renderActionPlanHtml(report, meta);
+		expect(html).toContain(
+			"<p>First paragraph with the top-level recommendation.</p>",
+		);
+		expect(html).toContain("<p>Second paragraph with judge assessment.</p>");
+	});
+
 	it("shows generation quality badge", () => {
 		const html = renderActionPlanHtml(sampleReport, meta);
 		expect(html).toContain("Enhanced synthesis");

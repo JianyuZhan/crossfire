@@ -207,12 +207,23 @@ function makeRichSummary(): DebateSummary {
 		leading: "challenger",
 		judgeScore: { proposer: 6, challenger: 8 },
 		recommendedAction: "Adopt modular monolith as compromise",
+		judgeAssessment:
+			"The challenger exposed execution risk, but both sides converged on a narrower architecture.",
+		shouldContinue: false,
 		stanceTrajectory: {
 			proposer: [{ round: 1, stance: "strongly_agree", confidence: 0.9 }],
 			challenger: [{ round: 1, stance: "disagree", confidence: 0.8 }],
 		},
 		consensus: ["API-first design", "Incremental migration path"],
 		unresolved: ["Service boundary granularity", "Team readiness"],
+		unresolvedDetails: [
+			{
+				title: "Service boundary granularity",
+				proposerPosition: "Prefer smaller services for future scale",
+				challengerPosition:
+					"Keep boundaries coarse until the team has more operational maturity",
+			},
+		],
 		totalTurns: 4,
 	};
 }
@@ -265,6 +276,35 @@ describe("draftToAuditReport — with DebateSummary", () => {
 		const report = draftToAuditReport(draft);
 		expect(report.executiveSummary).toBeTruthy();
 	});
+
+	it("does not dump long judge markdown into executive summary", () => {
+		const draft = buildDraftReport(makePlanWith2Rounds());
+		const report = draftToAuditReport(draft, {
+			leading: "proposer",
+			judgeScore: { proposer: 8.5, challenger: 3.5 },
+			recommendedAction:
+				"Stop the debate and consolidate the agreed actions into a final plan.",
+			judgeAssessment:
+				"## Round Review\n\n### Strengths\n\nThe proposer integrated valid criticism and improved the plan.",
+			shouldContinue: false,
+		});
+
+		expect(report.executiveSummary).not.toContain("## Round Review");
+		expect(report.executiveSummary).toContain(
+			"Stop the debate and consolidate the agreed actions into a final plan.",
+		);
+	});
+
+	it("uses structured unresolved details when they are available", () => {
+		const draft = buildDraftReport(makePlanWith2Rounds());
+		const summary = makeRichSummary();
+		const report = draftToAuditReport(draft, summary);
+		const issue = report.unresolvedIssues.find(
+			(entry) => entry.title === "Service boundary granularity",
+		);
+		expect(issue?.proposerPosition).toContain("Prefer smaller services");
+		expect(issue?.challengerPosition).toContain("Keep boundaries coarse");
+	});
 });
 
 describe("draftToAuditReport — template quality (enriched)", () => {
@@ -303,6 +343,14 @@ describe("draftToAuditReport — template quality (enriched)", () => {
 		for (const ev of report.evidenceRegistry) {
 			expect(ev.usedBy).not.toBe("unknown");
 			expect(ev.usedBy).toMatch(/round \d+/);
+		}
+	});
+
+	it("does not fall back to 'See consensus detail above.' for next steps", () => {
+		const draft = buildDraftReport(makePlanWith2Rounds());
+		const report = draftToAuditReport(draft);
+		for (const item of report.consensusItems) {
+			expect(item.nextSteps).not.toBe("See consensus detail above.");
 		}
 	});
 });

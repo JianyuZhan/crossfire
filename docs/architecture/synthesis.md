@@ -189,7 +189,7 @@ Current classification rules:
 ### runFinalSynthesis()
 
 - creates a fresh isolated session
-- sends exactly one synthesis turn
+- sends exactly one synthesis turn in `executionMode: "plan"` so synthesis is treated as tool-free consolidation rather than a new research pass
 - listens directly to adapter events for that session
 - prefers `message.final`, falls back to accumulated deltas
 - records `SynthesisDiagnostics`
@@ -231,9 +231,10 @@ The current runner:
 - chooses `judge ?? proposer` as the synthesis adapter
 - uses a `128_000` token budget for prompt assembly
 - prefixes the adaptive prompt with `buildInstructions()`, including explicit no-exploration constraints
-- passes `180_000ms` as synthesis timeout
+- passes `300_000ms` as synthesis timeout
 - emits `synthesis.error` for `judge-final`, `prompt-assembly`, `llm-synthesis`, and `file-write` failures
 - writes markdown and HTML when synthesis succeeds
 - falls back to local report rendering when it does not
 - enriches fallback rendering with a subset of `debate.completed.summary` via `draftToAuditReport(draft, summary)`
+- keeps fallback summaries structured: a short recommendation, a condensed judge assessment, multi-paragraph executive summary rendering, and structured unresolved positions when the debate summary preserved them
 - includes `quality` plus optional lightweight debug audit data on `synthesis.completed`

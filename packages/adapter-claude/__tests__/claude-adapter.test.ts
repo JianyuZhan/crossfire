@@ -962,11 +962,7 @@ describe("ClaudeAdapter", () => {
 			if (req.kind === "approval.request") {
 				expect(
 					req.capabilities?.semanticOptions?.map((option) => option.id),
-				).toEqual([
-					"allow",
-					"allow-session",
-					"deny",
-				]);
+				).toEqual(["allow", "allow-session", "deny"]);
 				expect(req.capabilities?.supportedScopes).toEqual(["session"]);
 				expect(req.capabilities?.supportsUpdatedInput).toBe(true);
 				await adapter.approve?.({
@@ -1133,7 +1129,12 @@ describe("ClaudeAdapter", () => {
 
 			const finals = events.filter((event) => event.kind === "message.final");
 			expect(finals).toHaveLength(2);
-			expect(finals.every((event) => event.kind !== "message.final" || event.text.trim().length > 0)).toBe(true);
+			expect(
+				finals.every(
+					(event) =>
+						event.kind !== "message.final" || event.text.trim().length > 0,
+				),
+			).toBe(true);
 			expect(handle.transcript).toHaveLength(1);
 			expect(handle.transcript[0]).toEqual({
 				roundNumber: 1,

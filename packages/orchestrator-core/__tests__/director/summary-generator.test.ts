@@ -105,7 +105,11 @@ describe("generateSummary", () => {
 		const summary = generateSummary(state, verdict);
 		expect(summary.leading).toBe("proposer");
 		expect(summary.judgeScore).toEqual({ proposer: 8, challenger: 6 });
-		expect(summary.recommendedAction).toBe("Proposer was stronger");
+		expect(summary.recommendedAction).toMatch(
+			/stop|consolidate|final action plan/i,
+		);
+		expect(summary.judgeAssessment).toBe("Proposer was stronger");
+		expect(summary.shouldContinue).toBe(false);
 	});
 
 	it("sets judge fields to null when no verdict", () => {
@@ -113,6 +117,8 @@ describe("generateSummary", () => {
 		const summary = generateSummary(state, undefined);
 		expect(summary.judgeScore).toBeNull();
 		expect(summary.recommendedAction).toBeNull();
+		expect(summary.judgeAssessment).toBeNull();
+		expect(summary.shouldContinue).toBeNull();
 	});
 });
 

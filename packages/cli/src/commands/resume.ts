@@ -63,7 +63,8 @@ export const resumeCommand = new Command("resume")
 				proposer: {
 					profile: proposerProfile,
 					cliModel: undefined,
-					systemPrompt: config.proposerSystemPrompt ?? proposerProfile.systemPrompt,
+					systemPrompt:
+						config.proposerSystemPrompt ?? proposerProfile.systemPrompt,
 					promptTemplateFamily: config.promptTemplates?.proposer,
 				},
 				challenger: {

@@ -1,4 +1,7 @@
-import type { RoleExecutionMode, TurnExecutionMode } from "@crossfire/adapter-core";
+import type {
+	RoleExecutionMode,
+	TurnExecutionMode,
+} from "@crossfire/adapter-core";
 import type { DebateExecutionConfig } from "@crossfire/orchestrator-core";
 
 const ROLE_EXECUTION_MODES = new Set<RoleExecutionMode>([
@@ -14,16 +17,20 @@ const TURN_EXECUTION_MODES = new Set<TurnExecutionMode>([
 	"plan",
 ]);
 
-function parseRoleExecutionMode(value: string, label: string): RoleExecutionMode {
+function parseRoleExecutionMode(
+	value: string,
+	label: string,
+): RoleExecutionMode {
 	if (ROLE_EXECUTION_MODES.has(value as RoleExecutionMode)) {
 		return value as RoleExecutionMode;
 	}
-	throw new Error(
-		`${label} must be one of: research, guarded, dangerous`,
-	);
+	throw new Error(`${label} must be one of: research, guarded, dangerous`);
 }
 
-function parseTurnExecutionMode(value: string, label: string): TurnExecutionMode {
+function parseTurnExecutionMode(
+	value: string,
+	label: string,
+): TurnExecutionMode {
 	if (TURN_EXECUTION_MODES.has(value as TurnExecutionMode)) {
 		return value as TurnExecutionMode;
 	}

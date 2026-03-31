@@ -15,7 +15,6 @@ import {
 	type JudgeVerdict,
 	type MarkdownReportMeta,
 	type ReportMeta,
-	resolveExecutionMode,
 	type SynthesisAuditSummary,
 	type SynthesisDebugMetadata,
 	type TerminationReason,
@@ -32,9 +31,11 @@ import {
 	renderActionPlanHtml,
 	renderActionPlanMarkdown,
 	renderMarkdownToHtml,
+	resolveExecutionMode,
 } from "@crossfire/orchestrator-core";
 import { DebateEventBus } from "./event-bus.js";
 import {
+	DEFAULT_SYNTHESIS_TIMEOUT_MS,
 	type SynthesisRunResult,
 	runFinalSynthesis,
 } from "./final-synthesis.js";
@@ -759,7 +760,7 @@ export async function runDebate(
 						synthRunResult = await runFinalSynthesis(
 							synthesisAdapter,
 							prompt,
-							180_000,
+							DEFAULT_SYNTHESIS_TIMEOUT_MS,
 						);
 
 						synthesisDebug.durationMs = synthRunResult.durationMs;

@@ -6,10 +6,6 @@ import { App } from "@crossfire/tui";
 import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
-import {
-	buildExecutionModeConfig,
-	collectOptionValues,
-} from "./execution-mode-options.js";
 import { loadProfile } from "../profile/loader.js";
 import {
 	parsePromptTemplateSelection,
@@ -21,6 +17,10 @@ import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
 import { createLiveCommandHandler } from "../wiring/live-command-handler.js";
+import {
+	buildExecutionModeConfig,
+	collectOptionValues,
+} from "./execution-mode-options.js";
 
 function requirePositiveInt(value: string, label: string): number {
 	const n = Number.parseInt(value, 10);
@@ -102,7 +102,7 @@ export const startCommand = new Command("start")
 	)
 	.option(
 		"--template <family>",
-		'Prompt template family: auto, general, or code',
+		"Prompt template family: auto, general, or code",
 	)
 	.option(
 		"--proposer-template <family>",

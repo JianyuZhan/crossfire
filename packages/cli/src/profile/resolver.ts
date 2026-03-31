@@ -1,5 +1,5 @@
-import type { ProfileConfig } from "./schema.js";
 import type { PromptTemplateFamily } from "./prompt-template.js";
+import type { ProfileConfig } from "./schema.js";
 
 export type AdapterType = "claude" | "codex" | "gemini";
 

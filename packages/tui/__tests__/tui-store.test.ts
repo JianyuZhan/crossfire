@@ -357,9 +357,7 @@ describe("TuiStore", () => {
 		);
 		const s = store.getState();
 		expect(s.proposer.status).toBe("tool");
-		expect(s.proposer.narrationTexts).toEqual([
-			"Let me research this first.",
-		]);
+		expect(s.proposer.narrationTexts).toEqual(["Let me research this first."]);
 		expect(s.proposer.currentMessageText).toBe("");
 	});
 
@@ -430,9 +428,9 @@ describe("TuiStore", () => {
 		expect(s.command.pendingApprovals[0].detail).toContain(
 			"ls -la /tmp/somewhere",
 		);
-		expect(s.command.pendingApprovals[0].capabilities?.supportedScopes).toEqual([
-			"session",
-		]);
+		expect(s.command.pendingApprovals[0].capabilities?.supportedScopes).toEqual(
+			["session"],
+		);
 		expect(s.command.pendingApprovals[0].options).toHaveLength(2);
 		expect(s.command.pendingApprovals[0].options?.[1]?.scope).toBe("session");
 	});

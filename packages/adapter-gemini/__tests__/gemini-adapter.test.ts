@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { NormalizedEvent } from "@crossfire/adapter-core";
@@ -16,6 +17,13 @@ interface SpawnBehavior {
 	exitDelay?: number;
 }
 
+type MockChildProcess = ChildProcess &
+	EventEmitter & {
+		pid: number;
+		stdout: PassThrough;
+		kill: (signal?: number | NodeJS.Signals) => boolean;
+	};
+
 /**
  * Creates a mock ProcessManager where each spawn() call replays the next
  * SpawnBehavior. Uses real PassThrough streams so ProcessManager's readline
@@ -28,7 +36,11 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 	let spawnIndex = 0;
 	const spawnArgs: string[][] = [];
 
-	const spawnFn = (_cmd: string, args: string[], _opts?: object) => {
+	const spawnFn = (
+		_cmd: string,
+		args: string[],
+		_opts?: object,
+	): ChildProcess => {
 		const behavior = spawnBehaviors[spawnIndex++];
 		if (!behavior) {
 			throw new Error("createMockProcessManager: no more spawn behaviors");
@@ -37,11 +49,7 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 
 		const stdout = new PassThrough();
 		let killed = false;
-		const proc = new EventEmitter() as EventEmitter & {
-			pid: number;
-			stdout: PassThrough;
-			kill: () => void;
-		};
+		const proc = new EventEmitter() as unknown as MockChildProcess;
 		proc.pid = 1000 + spawnIndex;
 		proc.stdout = stdout;
 		proc.kill = () => {
@@ -49,6 +57,7 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 			killed = true;
 			stdout.end();
 			proc.emit("exit", null);
+			return true;
 		};
 
 		// Write lines then exit after a tick
@@ -66,10 +75,10 @@ function createMockProcessManager(spawnBehaviors: SpawnBehavior[]): {
 			}, behavior.exitDelay ?? 0);
 		});
 
-		return proc as any;
+		return proc;
 	};
 
-	return { pm: new ProcessManager(spawnFn as any), spawnArgs };
+	return { pm: new ProcessManager(spawnFn), spawnArgs };
 }
 
 function collectEvents(adapter: GeminiAdapter): {
@@ -154,13 +163,17 @@ describe("GeminiAdapter", () => {
 		it("does NOT have approve method", () => {
 			const { pm } = createMockProcessManager([]);
 			const adapter = new GeminiAdapter({ processManager: pm });
-			expect((adapter as any).approve).toBeUndefined();
+			expect(
+				(adapter as GeminiAdapter & { approve?: unknown }).approve,
+			).toBeUndefined();
 		});
 
 		it("does NOT have interrupt method", () => {
 			const { pm } = createMockProcessManager([]);
 			const adapter = new GeminiAdapter({ processManager: pm });
-			expect((adapter as any).interrupt).toBeUndefined();
+			expect(
+				(adapter as GeminiAdapter & { interrupt?: unknown }).interrupt,
+			).toBeUndefined();
 		});
 	});
 
@@ -645,17 +658,14 @@ describe("GeminiAdapter", () => {
 		it("kills running process", async () => {
 			let killCalled = false;
 			const stdout = new PassThrough();
-			const proc = new EventEmitter() as EventEmitter & {
-				pid: number;
-				stdout: PassThrough;
-				kill: () => void;
-			};
+			const proc = new EventEmitter() as unknown as MockChildProcess;
 			proc.pid = 9999;
 			proc.stdout = stdout;
 			proc.kill = () => {
 				killCalled = true;
 				stdout.end();
 				proc.emit("exit", null);
+				return true;
 			};
 
 			// Emit init but never exit — long-running process
@@ -663,8 +673,8 @@ describe("GeminiAdapter", () => {
 				stdout.write(`${initLine("s1")}\n`);
 			});
 
-			const spawnFn = () => proc as any;
-			const pm = new ProcessManager(spawnFn as any);
+			const spawnFn = (): ChildProcess => proc;
+			const pm = new ProcessManager(spawnFn);
 			const adapter = new GeminiAdapter({ processManager: pm });
 			collectEvents(adapter);
 			const handle = await adapter.startSession({

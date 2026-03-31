@@ -1,12 +1,21 @@
+import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { type ProcessHandle, ProcessManager } from "../src/process-manager.js";
 
+type MockChildProcess = ChildProcess &
+	EventEmitter & {
+		stdout: PassThrough;
+		stderr: PassThrough;
+		kill: ReturnType<typeof vi.fn>;
+		pid: number;
+	};
+
 function createMockProcess(lines: string[] = [], exitCode = 0) {
 	const stdout = new PassThrough();
 	const stderr = new PassThrough();
-	const proc = new EventEmitter() as any;
+	const proc = new EventEmitter() as unknown as MockChildProcess;
 	proc.stdout = stdout;
 	proc.stderr = stderr;
 	proc.kill = vi.fn();

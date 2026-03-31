@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ProfileConfig } from "./schema.js";
 import { DEFAULT_PROFILE_SEARCH_PATHS } from "./loader.js";
+import type { ProfileConfig } from "./schema.js";
 
 export type PromptTemplateFamily = "general" | "code";
 export type PromptTemplateSelection = PromptTemplateFamily | "auto";
