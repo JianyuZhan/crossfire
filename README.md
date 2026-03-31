@@ -423,7 +423,9 @@ Built-in prompting is now split into two layers:
 - prompt templates define the `proposer`, `challenger`, and `judge` role contract
 - template family `general` is for business, product, and research topics
 - template family `code` is for repository, implementation, and debugging topics
-- `--template auto` infers the family from the topic text, while `--proposer-template`, `--challenger-template`, and `--judge-template` can override it manually
+- `--template auto` runs one lightweight classifier call first, using the judge profile's provider/model to choose between `general` and `code`
+- if the classifier times out or returns invalid JSON, Crossfire falls back to a local heuristic
+- `--proposer-template`, `--challenger-template`, and `--judge-template` still override the family manually and skip the classifier
 
 This split is now symmetric across Claude, Codex, and Gemini. Built-in provider profiles no longer hard-code provider-specific role prompts. Instead, all built-in providers share the same reusable `general` and `code` role-template families, while adapter/runtime differences stay in the provider profile layer.
 
@@ -443,7 +445,7 @@ prompts/
 Typical usage:
 
 ```bash
-# Let Crossfire infer the template family from the topic
+# Let Crossfire classify the template family automatically
 crossfire start \
   --topic "Should we launch an API resale product?" \
   --proposer claude/proposer \

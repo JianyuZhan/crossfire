@@ -6,6 +6,8 @@ import {
 	inferPromptTemplateFamily,
 	loadPromptTemplate,
 	resolvePromptTemplateFamily,
+	resolveRolePrompt,
+	selectPromptTemplateSelection,
 } from "../src/profile/prompt-template.js";
 
 describe("inferPromptTemplateFamily", () => {
@@ -28,17 +30,56 @@ describe("inferPromptTemplateFamily", () => {
 
 describe("resolvePromptTemplateFamily", () => {
 	it("honors an explicit manual selection", () => {
+		expect(resolvePromptTemplateFamily("code", "general")).toBe("code");
+	});
+
+	it("falls back to the classifier family when selection is auto", () => {
+		expect(resolvePromptTemplateFamily("auto", "code")).toBe("code");
+	});
+});
+
+describe("selectPromptTemplateSelection", () => {
+	it("prefers explicit per-role selection", () => {
 		expect(
-			resolvePromptTemplateFamily("code", "A general business topic"),
+			selectPromptTemplateSelection({
+				profile: {
+					name: "claude_proposer",
+					agent: "claude_code",
+					prompt_family: "general",
+					inherit_global_config: true,
+					mcp_servers: {},
+					filePath: "/tmp/profile.json",
+				},
+				explicitSelection: "code",
+				inheritedSelection: "general",
+			}),
 		).toBe("code");
 	});
 
-	it("falls back to inference when selection is auto", () => {
+	it("falls back to profile default and then inherited selection", () => {
 		expect(
-			resolvePromptTemplateFamily(
-				"auto",
-				"Fix the failing TypeScript build in this repository",
-			),
+			selectPromptTemplateSelection({
+				profile: {
+					name: "claude_proposer",
+					agent: "claude_code",
+					prompt_family: "general",
+					inherit_global_config: true,
+					mcp_servers: {},
+					filePath: "/tmp/profile.json",
+				},
+			}),
+		).toBe("general");
+		expect(
+			selectPromptTemplateSelection({
+				profile: {
+					name: "claude_proposer",
+					agent: "claude_code",
+					inherit_global_config: true,
+					mcp_servers: {},
+					filePath: "/tmp/profile.json",
+				},
+				inheritedSelection: "code",
+			}),
 		).toBe("code");
 	});
 });
@@ -65,5 +106,23 @@ describe("loadPromptTemplate", () => {
 		expect(() => loadPromptTemplate("code", "judge", [promptsDir])).toThrow(
 			/Prompt template "code\/judge" not found/i,
 		);
+	});
+
+	it("resolves a role prompt from a chosen family", () => {
+		writeFileSync(
+			join(promptsDir, "general", "proposer.md"),
+			"Build the plan.\n",
+		);
+		expect(
+			resolveRolePrompt({
+				role: "proposer",
+				family: "general",
+				searchPaths: [promptsDir],
+			}),
+		).toEqual({
+			systemPrompt: "Build the plan.",
+			promptTemplateFamily: "general",
+			promptTemplateSource: "template",
+		});
 	});
 });

@@ -21,10 +21,7 @@ const CODE_TOPIC_PATTERN =
 
 export interface ResolveRolePromptInput {
 	role: PromptTemplateRole;
-	topic: string;
-	profile: ProfileConfig;
-	explicitSelection?: PromptTemplateSelection;
-	inheritedSelection?: PromptTemplateSelection;
+	family: PromptTemplateFamily;
 	searchPaths?: string[];
 }
 
@@ -51,10 +48,23 @@ export function inferPromptTemplateFamily(topic: string): PromptTemplateFamily {
 
 export function resolvePromptTemplateFamily(
 	selection: PromptTemplateSelection | undefined,
-	topic: string,
+	autoFamily: PromptTemplateFamily,
 ): PromptTemplateFamily {
 	if (selection && selection !== "auto") return selection;
-	return inferPromptTemplateFamily(topic);
+	return autoFamily;
+}
+
+export function selectPromptTemplateSelection(input: {
+	profile: ProfileConfig;
+	explicitSelection?: PromptTemplateSelection;
+	inheritedSelection?: PromptTemplateSelection;
+}): PromptTemplateSelection {
+	return (
+		input.explicitSelection ??
+		input.profile.prompt_family ??
+		input.inheritedSelection ??
+		"auto"
+	);
 }
 
 export function loadPromptTemplate(
@@ -77,25 +87,9 @@ export function loadPromptTemplate(
 
 export function resolveRolePrompt({
 	role,
-	topic,
-	profile,
-	explicitSelection,
-	inheritedSelection,
+	family,
 	searchPaths,
 }: ResolveRolePromptInput): ResolvedRolePrompt {
-	if (explicitSelection) {
-		const family = resolvePromptTemplateFamily(explicitSelection, topic);
-		return {
-			systemPrompt: loadPromptTemplate(family, role, searchPaths),
-			promptTemplateFamily: family,
-			promptTemplateSource: "template",
-		};
-	}
-
-	const family = resolvePromptTemplateFamily(
-		profile.prompt_family ?? inheritedSelection ?? "auto",
-		topic,
-	);
 	return {
 		systemPrompt: loadPromptTemplate(family, role, searchPaths),
 		promptTemplateFamily: family,

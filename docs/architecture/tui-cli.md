@@ -212,7 +212,8 @@ Built-in prompt resolution is two-layered:
 
 Resolution rules:
 
-- Crossfire resolves the template family from `--template`, per-role `--*-template` overrides, or topic-based auto inference
+- Crossfire resolves the template family from `--template`, per-role `--*-template` overrides, or a lightweight classifier call
+- when `auto` is still in effect, CLI runs one classifier turn with the resolved judge profile, asks for strict JSON, and falls back to the local heuristic only on timeout or invalid output
 - the selected family then loads `prompts/<family>/<role>.md`
 - this split is symmetric across Claude, Codex, and Gemini; built-in role prompting no longer lives only inside one provider's profile files
 

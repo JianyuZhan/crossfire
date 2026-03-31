@@ -9,9 +9,12 @@ import React from "react";
 import { loadProfile } from "../profile/loader.js";
 import {
 	parsePromptTemplateSelection,
+	resolvePromptTemplateFamily,
 	resolveRolePrompt,
+	selectPromptTemplateSelection,
 } from "../profile/prompt-template.js";
 import { resolveAdapterType, resolveRoles } from "../profile/resolver.js";
+import { classifyPromptTemplateFamily } from "../profile/topic-template-classifier.js";
 import { createAdapters } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
@@ -192,26 +195,62 @@ export const startCommand = new Command("start")
 			}
 			const judgeProfile = loadProfile(judgeName);
 
-			const proposerPrompt = resolveRolePrompt({
-				role: "proposer",
-				topic,
+			const factories = createDefaultFactories();
+			const proposerSelection = selectPromptTemplateSelection({
 				profile: proposerProfile,
 				explicitSelection: proposerTemplateSelection,
 				inheritedSelection: templateSelection,
 			});
-			const challengerPrompt = resolveRolePrompt({
-				role: "challenger",
-				topic,
+			const challengerSelection = selectPromptTemplateSelection({
 				profile: challengerProfile,
 				explicitSelection: challengerTemplateSelection,
 				inheritedSelection: templateSelection,
 			});
-			const judgePrompt = resolveRolePrompt({
-				role: "judge",
-				topic,
+			const judgeSelection = selectPromptTemplateSelection({
 				profile: judgeProfile,
 				explicitSelection: judgeTemplateSelection,
 				inheritedSelection: templateSelection,
+			});
+			const needsTemplateClassifier = [
+				proposerSelection,
+				challengerSelection,
+				judgeSelection,
+			].some((selection) => selection === "auto");
+			const autoTemplateFamily = needsTemplateClassifier
+				? await classifyPromptTemplateFamily({
+						topic,
+						profile: judgeProfile,
+						model: options.judgeModel ?? options.model,
+						factories,
+					})
+				: undefined;
+			if (options.verbose && autoTemplateFamily) {
+				console.log(
+					`  Template classifier: ${autoTemplateFamily.family} (${autoTemplateFamily.source}, confidence ${autoTemplateFamily.confidence.toFixed(2)})`,
+				);
+				console.log(`    Reason: ${autoTemplateFamily.reason}`);
+			}
+
+			const proposerPrompt = resolveRolePrompt({
+				role: "proposer",
+				family: resolvePromptTemplateFamily(
+					proposerSelection,
+					autoTemplateFamily?.family ?? "general",
+				),
+			});
+			const challengerPrompt = resolveRolePrompt({
+				role: "challenger",
+				family: resolvePromptTemplateFamily(
+					challengerSelection,
+					autoTemplateFamily?.family ?? "general",
+				),
+			});
+			const judgePrompt = resolveRolePrompt({
+				role: "judge",
+				family: resolvePromptTemplateFamily(
+					judgeSelection,
+					autoTemplateFamily?.family ?? "general",
+				),
 			});
 
 			// Resolve roles
@@ -340,7 +379,7 @@ export const startCommand = new Command("start")
 
 			const adapterBundle = await createAdapters(
 				roles,
-				createDefaultFactories(),
+				factories,
 				executionModes,
 			);
 			const busBundle = createBus({ outputDir });

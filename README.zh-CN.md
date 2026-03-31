@@ -423,7 +423,9 @@ provider profile 使用 JSON：
 - prompt template 负责定义 `proposer`、`challenger`、`judge` 的角色契约
 - `general` 模板族用于商业、产品、研究类主题
 - `code` 模板族用于仓库、实现、调试类主题
-- `--template auto` 会根据 topic 文本自动推断模板族，`--proposer-template`、`--challenger-template`、`--judge-template` 可分别手工覆盖
+- `--template auto` 会先发起一次轻量 classifier 调用，使用 judge profile 对应的 provider/model 在 `general` 和 `code` 之间做选择
+- 如果 classifier 超时或没有返回合法 JSON，Crossfire 会退回本地启发式判定
+- `--proposer-template`、`--challenger-template`、`--judge-template` 仍然可以手工覆盖，并直接跳过 classifier
 
 这套拆分现在对 Claude、Codex、Gemini 是对称的。Crossfire 不再只给 Codex 特判“代码型 challenger 提示词”；三家内置 provider 都共享 `general` 和 `code` 两个角色模板族，而 provider 差异只留在 profile/runtime 层。
 
@@ -443,7 +445,7 @@ prompts/
 典型用法：
 
 ```bash
-# 让 Crossfire 根据 topic 自动推断模板族
+# 让 Crossfire 自动分类模板族
 crossfire start \
   --topic "Should we launch an API resale product?" \
   --proposer claude/proposer \
