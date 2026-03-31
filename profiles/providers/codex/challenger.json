@@ -2,6 +2,6 @@
 	"name": "codex_challenger",
 	"description": "Challenger agent (Codex) - stress-tests proposals, surfaces risks and blind spots",
 	"agent": "codex",
-	"model": "gpt-5.1-codex-mini",
+	"model": "gpt-5.4",
 	"prompt_family": "auto"
 }

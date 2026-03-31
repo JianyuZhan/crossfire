@@ -45,7 +45,7 @@ Always `pnpm build` after source changes — CLI runs from `dist/`.
 
 ```bash
 RUN_INTEGRATION=1 pnpm --filter @crossfire/cli exec vitest run __tests__/smoke.integration.test.ts
-# Add HAVE_CODEX=1 CODEX_MODEL=gpt-5.1-codex-mini for Codex combos
+# Add HAVE_CODEX=1 CODEX_MODEL=gpt-5.4 for Codex combos
 # Add HAVE_GEMINI=1 for full 9-combo matrix
 ```
 

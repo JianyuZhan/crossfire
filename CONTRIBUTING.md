@@ -73,15 +73,15 @@ pnpm --filter @crossfire/adapter-claude test
 RUN_INTEGRATION=1 pnpm test
 
 # Specific adapter combos
-RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.1-codex-mini \
+RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.4 \
   pnpm --filter @crossfire/cli exec vitest run __tests__/smoke.integration.test.ts
 
 # Full 9-combo matrix (Claude + Codex + Gemini)
-RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.1-codex-mini HAVE_GEMINI=1 \
+RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.4 HAVE_GEMINI=1 \
   pnpm --filter @crossfire/cli exec vitest run __tests__/smoke.integration.test.ts
 
 # Single combo
-RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.1-codex-mini HAVE_GEMINI=1 \
+RUN_INTEGRATION=1 HAVE_CODEX=1 CODEX_MODEL=gpt-5.4 HAVE_GEMINI=1 \
   pnpm --filter @crossfire/cli exec vitest run __tests__/smoke.integration.test.ts -t "gemini vs claude"
 ```
 

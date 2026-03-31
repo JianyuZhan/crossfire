@@ -1,6 +1,6 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadProfile } from "../src/profile/loader.js";
 import { ProfileSchema } from "../src/profile/schema.js";
@@ -92,5 +92,17 @@ describe("loadProfile", () => {
 	it("rejects invalid JSON", () => {
 		writeFileSync(join(profilesDir, "broken.json"), "{ invalid");
 		expect(() => loadProfile("broken", [profilesDir])).toThrow(/invalid json/i);
+	});
+
+	it("loads the bundled codex challenger profile with the flagship GPT-5.4 model", () => {
+		const bundledProfilesDir = resolve(
+			process.cwd(),
+			"..",
+			"..",
+			"profiles",
+			"providers",
+		);
+		const profile = loadProfile("codex/challenger", [bundledProfilesDir]);
+		expect(profile.model).toBe("gpt-5.4");
 	});
 });

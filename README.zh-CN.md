@@ -329,7 +329,7 @@ Profiles:
   Proposer: claude_proposer (claude_code)
     Model: us.anthropic.claude-opus-4-6-v1
   Challenger: codex_challenger (codex)
-    Model: gpt-5.1-codex-mini
+    Model: gpt-5.4
   Judge: claude_judge (claude_code)
     Model: us.anthropic.claude-opus-4-6-v1
 

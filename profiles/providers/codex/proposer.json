@@ -2,6 +2,6 @@
 	"name": "codex_proposer",
 	"description": "Proposer agent (Codex) - develops proposals, refines through challenge",
 	"agent": "codex",
-	"model": "gpt-5.1-codex-mini",
+	"model": "gpt-5.4",
 	"prompt_family": "auto"
 }

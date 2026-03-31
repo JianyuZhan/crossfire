@@ -267,7 +267,7 @@ describe("crossfire status", () => {
 						challenger: {
 							name: "debate_challenger",
 							agent: "codex",
-							model: "gpt-5.1-codex-mini",
+							model: "gpt-5.4",
 						},
 					},
 				}),
@@ -276,7 +276,7 @@ describe("crossfire status", () => {
 
 			const output = logOutput.join("\n");
 			expect(output).toContain("    Model: claude-sonnet-4-20250514");
-			expect(output).toContain("    Model: gpt-5.1-codex-mini");
+			expect(output).toContain("    Model: gpt-5.4");
 		});
 
 		it("omits model line when model is not set", async () => {

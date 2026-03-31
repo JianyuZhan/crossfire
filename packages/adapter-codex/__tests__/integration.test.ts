@@ -8,7 +8,7 @@ import { CodexAdapter } from "../src/codex-adapter.js";
 
 const RUN_INTEGRATION = process.env.RUN_INTEGRATION === "1";
 const INTEGRATION_TIMEOUT_MS = 90000;
-const TEST_MODEL = process.env.CODEX_MODEL || "gpt-5.1-codex-mini";
+const TEST_MODEL = process.env.CODEX_MODEL || "gpt-5.4";
 
 function spawnFn() {
 	const proc = spawn("codex", ["app-server"], {

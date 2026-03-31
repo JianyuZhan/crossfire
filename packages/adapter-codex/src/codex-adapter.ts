@@ -324,7 +324,7 @@ export class CodexAdapter implements AgentAdapter {
 	async startSession(input: StartSessionInput): Promise<SessionHandle> {
 		sessionCounter++;
 		const adapterSessionId = `codex-session-${sessionCounter}-${Date.now()}`;
-		const model = input.model ?? "gpt-5.1-codex-mini";
+		const model = input.model ?? "gpt-5.4";
 		const executionMode = input.executionMode ?? "guarded";
 		const policies = mapExecutionModeToCodexPolicies(executionMode);
 
@@ -486,7 +486,7 @@ export class CodexAdapter implements AgentAdapter {
 			input.executionMode ?? session?.executionMode,
 		);
 		const threadResult = (await this.client.request("thread/start", {
-			model: session?.model ?? "gpt-5.1-codex-mini",
+			model: session?.model ?? "gpt-5.4",
 			cwd: "/tmp",
 			approvalPolicy: recoveryPolicies.approvalPolicy,
 			...(recoveryPolicies.sandboxPolicy

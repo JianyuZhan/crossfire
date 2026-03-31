@@ -115,6 +115,32 @@ describe("CodexAdapter", () => {
 	});
 
 	describe("startSession()", () => {
+		it("uses gpt-5.4 as the default model when none is provided", async () => {
+			const sessionPromise = adapter.startSession({
+				profile: "test-profile",
+				workingDirectory: "/tmp/work",
+			});
+
+			let msg = await mock.readNextMessage();
+			mock.sendResponse(msg.id as number, { ok: true });
+
+			await mock.readNextMessage();
+
+			msg = await mock.readNextMessage();
+			expect(msg.method).toBe("thread/start");
+			expect(msg.params).toEqual({
+				model: "gpt-5.4",
+				cwd: "/tmp/work",
+				approvalPolicy: "on-failure",
+			});
+			mock.sendResponse(msg.id as number, {
+				thread: { id: "thread-default-model" },
+			});
+
+			const handle = await sessionPromise;
+			expect(handle.providerSessionId).toBe("thread-default-model");
+		});
+
 		it("sends initialize, initialized, and thread/start requests", async () => {
 			// Start the session call (it sends three messages)
 			const sessionPromise = adapter.startSession({
