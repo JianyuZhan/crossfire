@@ -43,7 +43,8 @@ describe("AgentPanel — live mode", () => {
 			/>,
 		);
 		expect(lastFrame()).toContain("Thinking");
-		expect(lastFrame()).toContain("research");
+		expect(lastFrame()).toContain("mode: research");
+		expect(lastFrame()).not.toContain("Thinking... [research]");
 		expect(lastFrame()).toContain("Analyzing...");
 	});
 

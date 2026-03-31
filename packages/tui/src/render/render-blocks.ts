@@ -35,9 +35,8 @@ function toolToBlock(t: LiveToolEntry): RenderBlock {
 }
 
 function buildLiveStatusLabel(state: LiveAgentPanelState): string | undefined {
-	const modeSuffix = state.executionMode ? ` [${state.executionMode}]` : "";
-	if (state.status !== "tool") return modeSuffix || undefined;
-	return `${buildToolActivityLabel(state.tools)}${modeSuffix}`;
+	if (state.status !== "tool") return undefined;
+	return buildToolActivityLabel(state.tools);
 }
 
 export function snapshotToBlocks(
@@ -50,10 +49,8 @@ export function snapshotToBlocks(
 			kind: "agent-header",
 			role,
 			agentType,
+			executionMode: snap.executionMode,
 			status: "done",
-			statusLabel: snap.executionMode
-				? `done [${snap.executionMode}]`
-				: undefined,
 			duration: snap.turnDurationMs,
 		},
 	];
@@ -92,6 +89,7 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 			kind: "agent-header",
 			role: state.role,
 			agentType: state.agentType,
+			executionMode: state.executionMode,
 			status: state.status,
 			statusLabel: buildLiveStatusLabel(state),
 			duration: state.turnDurationMs,

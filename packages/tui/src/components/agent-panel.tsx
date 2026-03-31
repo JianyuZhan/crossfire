@@ -53,24 +53,27 @@ function agentSuffix(agentType?: string): string {
 	return agentType ? ` [${agentType}]` : "";
 }
 
+function modeSuffix(executionMode?: string): string {
+	return executionMode ? ` [mode: ${executionMode}]` : "";
+}
+
 function statusText(state: LiveAgentPanelState): string {
-	const modeSuffix = state.executionMode ? ` [${state.executionMode}]` : "";
 	switch (state.status) {
 		case "idle":
-			return `Idle${modeSuffix}`;
+			return "Idle";
 		case "thinking":
-			return `Thinking...${modeSuffix}`;
+			return "Thinking...";
 		case "tool":
-			if (state.tools.length === 0) return `Tool${modeSuffix}`;
-			return `Tool: ${state.tools[state.tools.length - 1].toolName} ${buildToolActivityLabel(state.tools).replace(/^tool /, "")}${modeSuffix}`;
+			if (state.tools.length === 0) return "Tool";
+			return `Tool: ${state.tools[state.tools.length - 1].toolName} ${buildToolActivityLabel(state.tools).replace(/^tool /, "")}`;
 		case "speaking":
-			return `Responding...${modeSuffix}`;
+			return "Responding...";
 		case "done":
 			return state.turnDurationMs !== undefined
-				? `Done (${formatDuration(state.turnDurationMs)})${modeSuffix}`
-				: `Done${modeSuffix}`;
+				? `Done (${formatDuration(state.turnDurationMs)})`
+				: "Done";
 		case "error":
-			return `Error${modeSuffix}`;
+			return "Error";
 	}
 }
 
@@ -170,20 +173,16 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 		const duration = snapshot.turnDurationMs
 			? ` (${formatDuration(snapshot.turnDurationMs)})`
 			: "";
-		const modeLabel = snapshot.executionMode
-			? ` [${snapshot.executionMode}]`
-			: "";
+		const headerMode = modeSuffix(snapshot.executionMode);
 		return (
 			<Box flexDirection="column" paddingX={1}>
 				<Box>
 					<Text bold color={color}>
 						{label}
 						<Text dimColor>{agent}</Text>
+						<Text dimColor>{headerMode}</Text>
 					</Text>
-					<Text dimColor>
-						{duration}
-						{modeLabel}
-					</Text>
+					{duration ? <Text dimColor>{duration}</Text> : null}
 				</Box>
 				{snapshot.tools.length > 0 && <ToolList tools={snapshot.tools} />}
 				{snapshot.error && (
@@ -239,6 +238,7 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 				<Text bold color={color}>
 					{STATUS_ICONS[state.status] ?? "○"} {label}
 					<Text dimColor>{agent}</Text>
+					<Text dimColor>{modeSuffix(state.executionMode)}</Text>
 				</Text>
 				<Text> </Text>
 				<Text color={state.status === "error" ? "red" : "cyan"}>

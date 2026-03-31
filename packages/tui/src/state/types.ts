@@ -216,6 +216,7 @@ export type RenderBlock =
 			kind: "agent-header";
 			role: "proposer" | "challenger";
 			agentType?: string;
+			executionMode?: string;
 			status: string;
 			statusLabel?: string;
 			duration?: number;

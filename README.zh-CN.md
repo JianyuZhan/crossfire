@@ -237,7 +237,7 @@ crossfire start \
 - **Claude 六态工具模型** — Claude 的工具请求现在会被投影为 `requested`、`running`、`succeeded`、`failed`、`denied`、`unknown`，而不是假设每条 `tool.call` 都已经真正开始执行。provider 发出 `tool.progress` 后才升级为 `running`，权限拒绝会收束成 `denied`，只有观察到终态 hook 才会被判成 `succeeded` / `failed`
 - **未闭合工具自动收束** — 如果某个 turn 结束时 provider 侧工具请求始终没有给出终态 hook，Crossfire 会把这些 live 行收束为 `unknown outcome`，不再让它们永远停留在 `running`
 - **命令/审批区** — 实时辩论中根据上下文切换提示符（`>`、`approval>`），并在有待审批请求时展开高亮卡片，显示待调用的工具/命令、批量操作，以及带 provider 语义的短命令，如 `/approve 2`、`/approve 2 2` 或 `/approve all`
-- **模式可见性** — proposer / challenger 的 live header 会显示当前 turn 实际生效的模式，方便快速判断是 `research`、`guarded`、`dangerous` 还是 `plan`
+- **模式可见性** — proposer / challenger 的 header 会直接以内联形式显示 `Role [provider] [mode: ...]`，不用再去看单独一行状态，方便快速判断当前是 `research`、`guarded`、`dangerous` 还是 `plan`
 
 使用 `--headless` 可跳过 UI。事件和综合输出仍会落盘，之后可以回放或审阅。
 

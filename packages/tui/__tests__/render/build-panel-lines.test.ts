@@ -9,12 +9,30 @@ describe("buildPanelLines", () => {
 				kind: "agent-header",
 				role: "proposer",
 				agentType: "claude",
+				executionMode: "research",
 				status: "speaking",
 				duration: 1500,
 			},
 		];
 		const lines = buildPanelLines(blocks, 40);
 		expect(lines).toHaveLength(2);
+	});
+
+	it("renders execution mode on the header line with an explicit mode label", () => {
+		const blocks: RenderBlock[] = [
+			{
+				kind: "agent-header",
+				role: "proposer",
+				agentType: "claude",
+				executionMode: "research",
+				status: "thinking",
+			},
+		];
+		const text = buildPanelLines(blocks, 80)
+			.flatMap((line) => line.segments.map((segment) => segment.text))
+			.join("\n");
+		expect(text).toContain("Proposer [claude] [mode: research]");
+		expect(text).not.toContain("Thinking... [research]");
 	});
 
 	it("renders message with preceding blank line", () => {

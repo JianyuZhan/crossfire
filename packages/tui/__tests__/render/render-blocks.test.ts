@@ -321,7 +321,7 @@ describe("liveStateToBlocks", () => {
 		}
 	});
 
-	it("includes the current execution mode in the live header label", () => {
+	it("stores the current execution mode on the live header block", () => {
 		const state: LiveAgentPanelState = {
 			role: "proposer",
 			status: "thinking",
@@ -335,7 +335,8 @@ describe("liveStateToBlocks", () => {
 		const header = liveStateToBlocks(state)[0];
 		expect(header.kind).toBe("agent-header");
 		if (header.kind === "agent-header") {
-			expect(header.statusLabel).toContain("research");
+			expect(header.executionMode).toBe("research");
+			expect(header.statusLabel).toBeUndefined();
 		}
 	});
 });
