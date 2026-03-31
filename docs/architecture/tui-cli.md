@@ -144,7 +144,7 @@ Writes:
 Current behavior:
 
 - batch flush every 100ms
-- force flush on `turn.completed` and `debate.completed`
+- force flush on `turn.completed`, `debate.completed`, `synthesis.started`, `synthesis.completed`, and `synthesis.error`
 - close writes final index metadata
 
 ### index.json
@@ -208,7 +208,7 @@ Built-in prompt resolution is two-layered:
 - provider profiles choose the adapter, default model, and runtime wiring
 - prompt templates define the built-in `proposer`, `challenger`, and `judge` role contract
 - built-in provider profiles typically set `prompt_family: auto` and rely on template resolution
-- reusable built-in templates live under `prompts/general/*.md` and `prompts/code/*.md`
+- reusable built-in templates live under `prompts/general/{proposer,challenger,judge}.md` and `prompts/code/{proposer,challenger,judge}.md`
 
 Resolution rules:
 

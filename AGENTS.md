@@ -69,6 +69,6 @@ RUN_INTEGRATION=1 pnpm --filter @crossfire/cli exec vitest run __tests__/smoke.i
 
 - TDD: write failing test first, then implement, then verify. No untested code ships.
 - Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, etc.)
-- If a change affects end-user experience, update BOTH `README.md` and `README_zh.md`.
+- If a change affects end-user experience, update BOTH `README.md` and `README.zh-CN.md`.
 - Logging: use structured events via DebateEventBus, not console.log.
 - Forbidden: `any` type (use `unknown`), `console.log` in production code, mutable global state.

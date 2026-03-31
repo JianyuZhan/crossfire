@@ -248,10 +248,10 @@ interface StartSessionInput {
 - `startSession()` creates only the adapter handle; `providerSessionId` becomes known when the first `system/init` event arrives
 - session state is tracked in a local query-context map keyed by `adapterSessionId`
 - Crossfire execution modes map directly onto Claude permission modes per turn: `research` → `dontAsk` + allowlist + bounded `maxTurns`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
-- the Claude query bridge now forwards SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; Crossfire currently uses this to cap research-mode Claude turns before they sprawl indefinitely
+- the Claude query function type signature accepts SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; the adapter's built-in execution-mode mapping currently only sets `maxTurns` (for research mode) to cap research-mode Claude turns before they sprawl indefinitely
 - tool and subagent lifecycle visibility comes from SDK hooks: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, and `SubagentStop`
 - approval support is bridged through `canUseTool(toolName, input, options)`, which emits `approval.request` and blocks until `approve()` resolves it
-- `approval.request.payload` now retains Claude `suggestions`, `blockedPath`, and `decisionReason` metadata for display/debugging
+- `approval.request.payload` now retains Claude `suggestions`, `blockedPath`, `decisionReason`, and `agentId` metadata for display/debugging
 - Claude does not expose a provider-native button array; Crossfire fills `approval.request.capabilities.semanticOptions[]` itself and augments them with SDK permission context when available
 - Claude tool approvals always advertise a normalized session-scoped allow option; when the SDK does not provide reusable `suggestions`, Crossfire synthesizes a session `addRules` permission update for the requested tool instead
 - `approve()` may pass both `updatedInput` and session-scoped `updatedPermissions`, so Claude's "allow for session" flow is now preserved instead of being flattened to plain allow
@@ -289,7 +289,7 @@ interface StartSessionInput {
 - Crossfire execution modes currently map only to CLI approval-mode arguments: `dangerous` → `yolo`, `plan` → `plan`, `research` currently reuses `plan`, and `guarded` leaves the CLI default in place
 - resume is attempted through CLI arguments managed by `ResumeManager`
 - `session.started` is emitted from the first successful `init` event and is not re-emitted on later turns or fallback retries
-- current CLI normalization reads assistant text from `message.content`, tool metadata from `tool_id` / `tool_name` / `parameters`, tool results from `tool_id` plus `status`, and usage from `result.stats`
+- current CLI normalization reads assistant text from `content` or `text` fields on the event, tool metadata from `tool_id` / `tool_use_id` / `tool_name` / `name` / `parameters` / `input`, tool results from `tool_id` / `tool_use_id` plus `success` or `status` with `output`, and usage from `event.usage` (with fallback to `event.stats`)
 - raw-thinking support depends on the CLI actually emitting `thought` events; current real runs may produce no `thinking.delta` even when text streaming and tool events are present
 - `message.delta` events are buffered; `message.final` is synthesized from the accumulated buffer before `usage.updated` and `turn.completed`
 - local prompt metrics are attached to `usage.updated`

@@ -123,9 +123,9 @@ If the assembled prompt is still too large, `shrinkToFit()` applies ordered shri
 
 1. cut snippets
 2. demote full-text rounds
-3. trim summaries
+3. trim summaries (progressive: 80 chars, then 40 chars)
 4. compact Layer 1
-5. emergency debate-timeline compression
+5. emergency debate-timeline compression (drops Layer 4 entirely and truncates all timeline entries to 2 lines)
 6. excerpt recent full-text rounds
 
 `shrinkTrace` records only steps that actually reduced estimated size.
@@ -225,8 +225,9 @@ Current detection behavior:
 - strips ` ```json ` blocks when parsed keys identify internal metadata
 - falls back to key-presence matching for incomplete or malformed JSON during streaming
 - strips unlabeled trailing JSON blocks prefixed by `debate_meta` or `judge_verdict`
+- strips markdown-bold label lines matching patterns like `**debate_meta ...**` or `**judge_verdict ...**`
 
-The TUI applies the parallel `stripInternalToolBlocks()` pass before rendering streamed assistant text, so these internal JSON payloads remain in `events.jsonl` but are removed from visible transcript-style output.
+The TUI applies the same `stripInternalBlocks()` pass before rendering streamed assistant text, so these internal JSON payloads remain in `events.jsonl` but are removed from visible transcript-style output.
 
 ## Runner Integration
 

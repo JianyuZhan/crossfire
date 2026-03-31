@@ -149,7 +149,7 @@ Current implementation status is important:
 - proposer / challenger / both `user.inject` events are consumed through the director guidance queue and appended to the next prompt for the targeted role(s)
 - `/pause` and `/resume` emit replay-safe `debate.paused` / `debate.unpaused` control events; the runner honors them at turn boundaries and before judge invocations
 - `/extend <N>` emits `debate.extended`, and projection updates `config.maxRounds` so replay, resume, and live execution all agree on the new round budget
-- `/interrupt [role]` emits `turn.interrupt.requested`; the runner routes it to the currently active provider turn, and a successful provider interrupt ends the debate with `terminationReason: "interrupted"`
+- `/interrupt [role]` emits `turn.interrupt.requested`; the runner routes it to the currently active provider turn, and a successful provider interrupt ends the debate with `terminationReason: "interrupted"` or `"user-interrupt"`
 
 ## DebateEventBus
 
@@ -182,7 +182,7 @@ Important notes:
 
 - it waits for `turn.completed` on the bus
 - it resolves effective turn mode before each proposer / challenger turn using `debate default < role baseline < turn override`
-- it resolves each role's system prompt before execution from the selected `general` / `code` prompt-template family, using CLI overrides, profile `prompt_family`, and the classifier fallback to choose that family
+- system prompt resolution is handled at the CLI layer: the runner receives pre-resolved system prompts from `config.proposerSystemPrompt` / `config.challengerSystemPrompt` / `config.judgeSystemPrompt`, falling back to `defaultSystemPrompt(role)` inside `buildInitialPrompt()`
 - it emits `turn.mode.changed` before sending the turn to the adapter
 - it blocks on projected pause state between turns and before judge invocations
 - it can now route `/interrupt` requests to the active provider turn and terminates the debate with `debate.completed(reason="interrupted")` when the adapter reports `turn.completed(status="interrupted")`

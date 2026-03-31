@@ -39,9 +39,9 @@ Subsystem details live in:
   ├── @crossfire/tui
   │     └── @crossfire/orchestrator-core
   │           └── @crossfire/adapter-core
-  ├── @crossfire/adapter-claude ── @crossfire/adapter-core
-  ├── @crossfire/adapter-codex  ── @crossfire/adapter-core
-  └── @crossfire/adapter-gemini ── @crossfire/adapter-core
+  ├── @crossfire/adapter-claude ── @crossfire/adapter-core, @crossfire/orchestrator-core
+  ├── @crossfire/adapter-codex  ── @crossfire/adapter-core, @crossfire/orchestrator-core
+  └── @crossfire/adapter-gemini ── @crossfire/adapter-core, @crossfire/orchestrator-core
 ```
 
 Key principle: pure logic lives in `-core` packages, while file/process/network effects live in the outer packages.
@@ -105,7 +105,12 @@ crossfire/
 │   └── cli/
 ├── profiles/
 │   └── providers/
+│       ├── claude/    # proposer.json, challenger.json, judge.json
+│       ├── codex/     # proposer.json, challenger.json, judge.json
+│       └── gemini/    # proposer.json, challenger.json, judge.json
 ├── prompts/
+│   ├── general/       # proposer.md, challenger.md, judge.md
+│   └── code/          # proposer.md, challenger.md, judge.md
 ├── docs/
 │   ├── architecture/
 │   │   ├── overview.md

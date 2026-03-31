@@ -326,12 +326,12 @@ Total Events: 4523
 Termination Reason: convergence
 
 Profiles:
-  Proposer: proposer (claude_code)
-    Model: claude-sonnet-4-20250514
-  Challenger: challenger (codex)
-    Model: o3-mini
-  Judge: judge (claude_code)
-    Model: claude-sonnet-4-20250514
+  Proposer: claude_proposer (claude_code)
+    Model: us.anthropic.claude-opus-4-6-v1
+  Challenger: codex_challenger (codex)
+    Model: gpt-5.1-codex-mini
+  Judge: claude_judge (claude_code)
+    Model: us.anthropic.claude-opus-4-6-v1
 
 Configuration:
   Max Rounds: 10
@@ -388,7 +388,7 @@ Provider profiles are JSON files:
   "name": "my_debater",
   "description": "A skilled technical debater",
   "agent": "claude_code",
-  "model": "claude-sonnet-4-20250514",
+  "model": "us.anthropic.claude-opus-4-6-v1",
   "prompt_family": "auto",
   "inherit_global_config": true,
   "mcp_servers": {
