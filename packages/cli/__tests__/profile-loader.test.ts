@@ -96,7 +96,8 @@ describe("loadProfile", () => {
 
 	it("loads the bundled codex challenger profile with the flagship GPT-5.4 model", () => {
 		const bundledProfilesDir = resolve(
-			process.cwd(),
+			__dirname,
+			"..",
 			"..",
 			"..",
 			"profiles",
