@@ -195,7 +195,9 @@ The `adapter-core` package exports a policy compilation module (`policy/`) that 
 - **Presets** (`policy/presets.ts`): `PRESET_EXPANSIONS` — frozen table expanding `research | guarded | dangerous | plan` to capability + interaction policy
 - **Compiler** (`policy/compiler.ts`): `compilePolicy(input) → ResolvedPolicy` — preset expansion → role ceiling clamping → legacy tool override attachment
 
-Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslationResult<NativeOptions>` pure function that maps the resolved policy to provider-native parameters plus structured warnings.
+Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslationResult<NativeOptions>` pure function that maps the resolved policy to provider-native parameters plus structured warnings:
+
+- **Claude** (`adapter-claude/src/policy-translation.ts`): maps approval to `ClaudePermissionMode`, capabilities to tool deny lists (`Bash`, `Edit`, `Write`, `WebFetch`, `Task`), with `isPlanShape()` for exact `plan` mode matching
 
 ## Session, Turn, and Recovery Types
 
