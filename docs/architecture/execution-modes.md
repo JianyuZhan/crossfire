@@ -1,6 +1,6 @@
-# Execution Modes
+# Execution Modes and Policy Model
 
-> Crossfire's execution-mode model, precedence rules, and provider mappings.
+> Crossfire's policy compilation pipeline, execution-mode presets, precedence rules, and provider translation.
 
 Back to the overview: [overview.md](./overview.md)
 
@@ -12,26 +12,44 @@ See also:
 
 ## Purpose
 
-Crossfire reduces approval fatigue by modeling turn execution as a small set of orchestration-level modes instead of exposing only provider-native approval prompts.
+Crossfire reduces approval fatigue and provider lock-in by modeling turn execution through a layered policy system. Instead of mapping mode strings directly to provider-native parameters, Crossfire compiles a provider-agnostic `ResolvedPolicy` and then translates it into each adapter's native controls.
 
-The shared model is intentionally asymmetric:
+The compilation pipeline:
 
-- Crossfire defines the user-facing mode vocabulary
-- each adapter maps that vocabulary to its strongest official provider primitive
-- provider-native approval extensions are still preserved where they matter, especially for Codex
+```text
+PresetInput → compilePolicy() → ResolvedPolicy → adapter translatePolicy() → ProviderTranslationResult
+```
 
-## Shared Mode Model
+- `PresetInput` carries a preset name (`research`, `guarded`, `dangerous`, `plan`), a role, and optional legacy tool overrides
+- `compilePolicy()` expands the preset, applies default role contracts, clamps capabilities to role ceilings, and merges legacy tool overrides
+- Each adapter's `translatePolicy()` is a pure function that maps `ResolvedPolicy` to provider-native options plus translation warnings
+- Adapters use the translated result when a policy is present; otherwise they fall back to legacy `mapExecutionMode*()` functions for backward compatibility
 
-Crossfire currently uses:
+## Policy Layers
 
-- role baseline modes: `research`, `guarded`, `dangerous`
-- per-turn override modes: `research`, `guarded`, `dangerous`, `plan`
+A `ResolvedPolicy` comprises:
+
+- **Role contract**: semantic constraints (exploration, fact-check scope, evidence bar, whether new proposals are allowed)
+- **Capability policy**: filesystem, network, shell, subagents levels plus optional legacy tool overrides
+- **Interaction policy**: approval mode (`always`, `on-risk`, `on-failure`, `never`) plus optional limits (maxTurns, budgetUsd, timeoutMs, maxToolCalls)
+- **Preset**: the originating preset name, preserved for diagnostics only — adapters must not branch on it
+
+## Presets
+
+Crossfire uses these presets as entry points:
+
+- `research` — read/search oriented, bounded turns, on-risk approval
+- `guarded` — read/write with on-risk approval (the default)
+- `dangerous` — full access, no approval
+- `plan` — read-only reasoning, always-approve (used for judge turns)
 
 Why `plan` is not a role baseline:
 
 - in debate workflows, `plan` is a special-case preview mode
 - most productive proposer / challenger turns still need real reads, searches, or validation
 - treating `plan` as a normal baseline would make it too easy to accidentally degrade debate quality into pure reasoning-only turns
+
+Judge turns always use the `plan` preset. When no policy is present, the legacy `executionMode: "plan"` fallback is preserved.
 
 ## Precedence
 
@@ -54,54 +72,55 @@ The resolver returns:
 - `source` (`debate-default`, `role-baseline`, or `turn-override`)
 
 The runner emits `turn.mode.changed` before each proposer / challenger turn so the TUI and event log can show which mode actually governed that turn.
+Judge turns are treated differently: Crossfire sends them in `plan` mode and judge prompts explicitly instruct the model not to start a fresh tool-driven investigation.
 
-## Provider Mapping
+## Provider Translation
+
+Each adapter has a `translatePolicy(policy: ResolvedPolicy): ProviderTranslationResult<NativeOptions>` pure function. Translation warnings are emitted as `run.warning` events so users can see where policy intent was approximated.
 
 ### Claude
 
-Claude maps directly to official permission-mode primitives:
+`translatePolicy()` maps `ResolvedPolicy` to Claude SDK query options:
 
-- `research` → `dontAsk` + read-only allowlist (`Read`, `Grep`, `Glob`, `LS`, `WebFetch`, `Task`) + `maxTurns: 12`
-- `guarded` → `default`
-- `dangerous` → `bypassPermissions` + `allowDangerouslySkipPermissions`
-- `plan` → `plan`
+- `interaction.approval` → `permissionMode`: `always` → `default`, `on-risk` → `default`, `on-failure` → `dontAsk`, `never` → `bypassPermissions`
+- `capabilities.shell === "exec"` → `allowDangerouslySkipPermissions: true`
+- `interaction.limits.maxTurns` → `maxTurns` (defaults to 12 for on-failure/dontAsk modes)
+- `capabilities.legacyToolOverrides.deny` → `disallowedTools`; `.allow` → `allowedTools`
 
-Implications:
+Intentional semantic delta: `research` preset now maps to `on-failure` approval (Claude `dontAsk`) rather than combining it with a hard-coded tool allowlist. Tool restrictions are driven by `capabilities.legacyToolOverrides` instead, making execution mode and tool policy independent knobs.
 
-- Claude is the cleanest provider for Crossfire-style orchestration modes
-- `research` is quiet by design because non-allowlisted tools are denied instead of prompting
-- `research` is also intentionally bounded: Crossfire applies a conservative Claude-side `maxTurns` cap so evidence gathering does not sprawl indefinitely in a single turn
-- session- or project-level persistence still flows through approval updates when explicit approvals are used
+Recovery path: the Claude adapter reapplies the same translated policy options when falling back to transcript recovery, so permission mode, tool restrictions, and turn limits survive partial failures.
 
 ### Codex
 
-Codex maps modes to approval and sandbox policy combinations:
+`translatePolicy()` maps `ResolvedPolicy` to Codex JSON-RPC session parameters:
 
-- `research` → `approvalPolicy: "on-request"` + `sandboxPolicy: { type: "readOnly" }`
-- `guarded` → `approvalPolicy: "on-failure"`
-- `dangerous` → `approvalPolicy: "never"` + `sandboxPolicy: { type: "danger-full-access" }`
-- `plan` → same conservative mapping as `research` for now
+- `interaction.approval` → `approvalPolicy`: `always`/`on-risk` → `on-request`, `on-failure` → `on-failure`, `never` → `never`
+- `capabilities` → `sandboxPolicy`: filesystem/shell/network levels determine `readOnly`, `workspace-write`, or `danger-full-access`
+- `capabilities.network === "off"` → `networkDisabled: true`
 
-Important nuance:
+The `sandboxPolicy` object from `translatePolicy()` is forwarded verbatim to `thread/start` and `turn/start`. Codex-native approval options (`availableDecisions`) are preserved as `nativeOptions` in approval events, not flattened to plain allow/deny.
 
-- Codex is not a single permission-mode provider
-- the real leverage comes from policy + sandbox + native approval choices such as `acceptForSession`
-- Crossfire must not flatten Codex-native approval options into plain allow / deny
+Warnings: Codex does not support per-tool allow/deny lists, per-session turn limits, maxToolCalls, timeoutMs, or budgetUsd.
 
 ### Gemini
 
-Gemini currently only gets startup / per-turn approval-profile mapping in the headless adapter:
+`translatePolicy()` maps `ResolvedPolicy` to Gemini CLI approval-mode arguments:
 
-- `research` → `--approval-mode plan`
-- `guarded` → default CLI behavior
-- `dangerous` → `--approval-mode yolo`
-- `plan` → `--approval-mode plan`
+- `interaction.approval` → `approvalMode`: `never` → `yolo`, `on-failure` → `plan`, `on-risk`/`always` → `default`
+- `capabilities.shell === "exec"` + `network === "full"` → `yolo` override
 
-Important limitation:
+Limitations: Gemini headless does not provide approval round-trips comparable to Claude or Codex; mode support is best-effort startup mapping. Tool-selection control remains provider-native / MCP-driven.
 
-- Gemini headless does not provide approval round-trips comparable to Claude or Codex
-- therefore mode support here is a best-effort startup mapping, not feature parity
-- policy-engine integration remains the future path for more useful low-interaction research behavior
+### Legacy Fallback
+
+When no `ResolvedPolicy` is present (e.g., callers that have not migrated), adapters fall back to legacy `mapExecutionMode*()` functions that map mode strings directly to provider parameters:
+
+- Claude: `research` → `dontAsk` + allowlist + `maxTurns: 12`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
+- Codex: `research` → `on-request` + `readOnly`, `guarded` → `on-failure`, `dangerous` → `never` + `danger-full-access`
+- Gemini: `research` → `plan`, `guarded` → default, `dangerous` → `yolo`, `plan` → `plan`
+
+These legacy paths are preserved for backward compatibility and will be removed once all callers pass policies.
 
 ## CLI Entry Points
 
@@ -142,14 +161,14 @@ The legacy execution-mode resolver now has a companion `resolveExecutionModeAsPo
 
 The orchestrator runner compiles a fresh policy per turn using the resolved effective mode as the preset, which allows turn-level mode overrides to produce different policies without changing the baseline.
 
-The judge special case (`executionMode: "plan"`) is now absorbed into the policy model: when a policy is present, `executionMode` is omitted from the judge turn input; when no policy exists, the legacy `"plan"` fallback is preserved for backward compatibility.
-
 ## Event and UI Implications
 
 Relevant surfaces:
 
-- adapter-core: `StartSessionInput.executionMode`, `TurnInput.executionMode`
-- orchestrator-core: `DebateConfig.executionModes`, `resolveExecutionMode()`, `turn.mode.changed`
+- adapter-core: `StartSessionInput.policy`, `TurnInput.policy` (new); `StartSessionInput.executionMode`, `TurnInput.executionMode` (deprecated, legacy fallback)
+- adapter-core: `ResolvedPolicy`, `compilePolicy()`, `translatePolicy()` per adapter
+- orchestrator-core: `DebateConfig.executionModes`, `resolveExecutionMode()`, `resolveExecutionModeAsPolicy()`, `turn.mode.changed`
 - TUI: live panels show the current effective mode in the header/status text
+- Translation warnings are emitted as `run.warning` events when policy intent is approximated during provider translation
 
 This keeps the event log explicit about mode decisions instead of forcing operators to infer them from provider-side behavior.
