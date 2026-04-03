@@ -209,6 +209,8 @@ The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sen
 
 The Codex adapter applies the same pattern in both `startSession()` (for `thread/start` policies) and `sendTurn()` (for per-turn policies), including the transcript recovery path. Legacy `mapExecutionModeToCodexPolicies()` is preserved as fallback.
 
+The Gemini adapter resolves the approval mode from `input.policy ?? session.baselinePolicy` in `attemptTurn()`, reusing the resolved mode for both the primary and fallback paths. Legacy `mapExecutionModeToGeminiApprovalMode()` is preserved as fallback.
+
 ## Session, Turn, and Recovery Types
 
 ### SessionHandle

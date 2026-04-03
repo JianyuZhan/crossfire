@@ -4,6 +4,7 @@ import {
 	GEMINI_CAPABILITIES,
 	type LocalTurnMetrics,
 	type NormalizedEvent,
+	type ResolvedPolicy,
 	type RoleExecutionMode,
 	type SessionHandle,
 	type StartSessionInput,
@@ -15,6 +16,7 @@ import {
 } from "@crossfire/adapter-core";
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { type GeminiMapContext, mapGeminiEvent } from "./event-mapper.js";
+import { translatePolicy } from "./policy-translation.js";
 import { type ProcessHandle, ProcessManager } from "./process-manager.js";
 import { type HistoryEntry, buildStatelessPrompt } from "./prompt-builder.js";
 import { ResumeManager } from "./resume-manager.js";
@@ -37,6 +39,7 @@ interface GeminiSessionContext {
 	providerSessionId: string | undefined;
 	model: string | undefined;
 	executionMode: RoleExecutionMode;
+	baselinePolicy?: ResolvedPolicy;
 	sessionStarted: boolean; // global flag: has session.started been emitted?
 	currentProcess: ProcessHandle | null;
 	history: HistoryEntry[];
@@ -93,6 +96,7 @@ export class GeminiAdapter implements AgentAdapter {
 			providerSessionId: undefined,
 			model: input.model,
 			executionMode: input.executionMode ?? "guarded",
+			baselinePolicy: input.policy,
 			sessionStarted: false,
 			currentProcess: null,
 			history: [],
@@ -179,14 +183,34 @@ export class GeminiAdapter implements AgentAdapter {
 		// Determine if this is a resume attempt (A path)
 		const isResumeAttempt = session.providerSessionId !== undefined;
 
+		// Resolve approval mode from policy or legacy path
+		const activePolicy = input.policy ?? session.baselinePolicy;
+		let approvalMode: "default" | "plan" | "yolo" | "auto_edit";
+		if (activePolicy) {
+			const { native, warnings } = translatePolicy(activePolicy);
+			for (const w of warnings) {
+				this.emit({
+					kind: "run.warning",
+					adapterId: "gemini",
+					adapterSessionId: handle.adapterSessionId,
+					turnId: input.turnId,
+					message: `[policy] ${w.field}: ${w.message}`,
+					timestamp: Date.now(),
+				});
+			}
+			approvalMode = native.approvalMode;
+		} else {
+			approvalMode = mapExecutionModeToGeminiApprovalMode(
+				input.executionMode ?? session.executionMode,
+			);
+		}
+
 		// Build args via ResumeManager
 		const args = this.resumeManager.buildArgs({
 			prompt: input.prompt,
 			sessionId: session.providerSessionId,
 			model: session.model,
-			approvalMode: mapExecutionModeToGeminiApprovalMode(
-				input.executionMode ?? session.executionMode,
-			),
+			approvalMode,
 		});
 
 		const result = await this.runProcess(
@@ -231,14 +255,12 @@ export class GeminiAdapter implements AgentAdapter {
 						})
 					: buildStatelessPrompt(input.prompt, session.history);
 
-			// Build args with forceStateless
+			// Build args with forceStateless (reuse resolved approvalMode from above)
 			const fallbackArgs = this.resumeManager.buildArgs({
 				prompt: fallbackPrompt,
 				sessionId: session.providerSessionId,
 				model: session.model,
-				approvalMode: mapExecutionModeToGeminiApprovalMode(
-					input.executionMode ?? session.executionMode,
-				),
+				approvalMode,
 				forceStateless: true,
 			});
 
