@@ -211,6 +211,10 @@ The Codex adapter applies the same pattern in both `startSession()` (for `thread
 
 The Gemini adapter resolves the approval mode from `input.policy ?? session.baselinePolicy` in `attemptTurn()`, reusing the resolved mode for both the primary and fallback paths. Legacy `mapExecutionModeToGeminiApprovalMode()` is preserved as fallback.
 
+### CLI Compilation Flow
+
+`create-adapters.ts` compiles policy at startup: CLI `--mode` flag → `PolicyPreset` → `compilePolicy({ preset, role, legacyToolPolicy })` → `ResolvedPolicy` passed via `startSession({ policy })`. Judge always gets the `plan` preset. Profile `allowed_tools`/`disallowed_tools` flow through as `legacyToolPolicy`.
+
 ## Session, Turn, and Recovery Types
 
 ### SessionHandle

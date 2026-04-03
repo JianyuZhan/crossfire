@@ -30,6 +30,8 @@ const makeProfile = (agent: string) => ({
 	agent: agent as any,
 	inherit_global_config: true,
 	mcp_servers: {},
+	allowed_tools: undefined,
+	disallowed_tools: undefined,
 	filePath: "/test.json",
 });
 
@@ -125,6 +127,138 @@ describe("createAdapters", () => {
 			expect.objectContaining({ executionMode: "dangerous" }),
 		);
 		await bundle.closeAll();
+	});
+
+	it("passes profile tool policy into startSession", async () => {
+		const proposerAdapter = mockAdapter("claude");
+		const roles: ResolvedRoles = {
+			proposer: {
+				profile: {
+					...makeProfile("claude_code"),
+					allowed_tools: ["Read", "mcp__fetch"],
+					disallowed_tools: ["WebFetch"],
+				},
+				model: undefined,
+				adapterType: "claude",
+			},
+			challenger: {
+				profile: makeProfile("codex"),
+				model: undefined,
+				adapterType: "codex",
+			},
+			judge: undefined,
+		};
+		const bundle = await createAdapters(roles, {
+			claude: () => proposerAdapter,
+			codex: () => mockAdapter("codex"),
+			gemini: () => mockAdapter("gemini"),
+		});
+
+		expect(proposerAdapter.startSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				allowedTools: ["Read", "mcp__fetch"],
+				disallowedTools: ["WebFetch"],
+			}),
+		);
+		await bundle.closeAll();
+	});
+
+	it("passes compiled policy to adapter startSession", async () => {
+		const roles: ResolvedRoles = {
+			proposer: {
+				profile: makeProfile("claude_code"),
+				model: undefined,
+				adapterType: "claude",
+			},
+			challenger: {
+				profile: makeProfile("codex"),
+				model: undefined,
+				adapterType: "codex",
+			},
+			judge: {
+				profile: makeProfile("gemini_cli"),
+				model: undefined,
+				adapterType: "gemini",
+			},
+		};
+		const mock = mockAdapter("claude");
+		await createAdapters(roles, {
+			claude: () => mock,
+			codex: () => mockAdapter("codex"),
+			gemini: () => mockAdapter("gemini"),
+		});
+		const startCall = (mock.startSession as ReturnType<typeof vi.fn>).mock
+			.calls[0][0];
+		expect(startCall.policy).toBeDefined();
+		expect(startCall.policy.preset).toBe("guarded");
+		expect(
+			startCall.policy.roleContract.semantics.mayIntroduceNewProposal,
+		).toBe(true);
+	});
+
+	it("judge gets plan preset by default", async () => {
+		const roles: ResolvedRoles = {
+			proposer: {
+				profile: makeProfile("claude_code"),
+				model: undefined,
+				adapterType: "claude",
+			},
+			challenger: {
+				profile: makeProfile("codex"),
+				model: undefined,
+				adapterType: "codex",
+			},
+			judge: {
+				profile: makeProfile("gemini_cli"),
+				model: undefined,
+				adapterType: "gemini",
+			},
+		};
+		const judgeMock = mockAdapter("gemini");
+		await createAdapters(roles, {
+			claude: () => mockAdapter("claude"),
+			codex: () => mockAdapter("codex"),
+			gemini: () => judgeMock,
+		});
+		const startCall = (judgeMock.startSession as ReturnType<typeof vi.fn>).mock
+			.calls[0][0];
+		expect(startCall.policy.preset).toBe("plan");
+		expect(startCall.policy.roleContract.semantics.exploration).toBe(
+			"forbidden",
+		);
+	});
+
+	it("profile allowed_tools flow into legacy tool overrides", async () => {
+		const profileWithTools = {
+			...makeProfile("claude_code"),
+			allowed_tools: ["Read", "Grep"],
+			disallowed_tools: ["WebFetch"],
+		};
+		const roles: ResolvedRoles = {
+			proposer: {
+				profile: profileWithTools,
+				model: undefined,
+				adapterType: "claude",
+			},
+			challenger: {
+				profile: makeProfile("codex"),
+				model: undefined,
+				adapterType: "codex",
+			},
+		};
+		const mock = mockAdapter("claude");
+		await createAdapters(roles, {
+			claude: () => mock,
+			codex: () => mockAdapter("codex"),
+			gemini: () => mockAdapter("gemini"),
+		});
+		const startCall = (mock.startSession as ReturnType<typeof vi.fn>).mock
+			.calls[0][0];
+		expect(startCall.policy.capabilities.legacyToolOverrides).toEqual({
+			allow: ["Read", "Grep"],
+			deny: ["WebFetch"],
+			source: "legacy-profile",
+		});
 	});
 
 	it("closeAll swallows individual errors", async () => {

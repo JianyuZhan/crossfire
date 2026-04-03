@@ -1,4 +1,9 @@
 import type { AgentAdapter, SessionHandle } from "@crossfire/adapter-core";
+import {
+	type LegacyToolPolicyInput,
+	type PolicyPreset,
+	compilePolicy,
+} from "@crossfire/adapter-core";
 import type { AdapterMap } from "@crossfire/orchestrator";
 import type { DebateExecutionConfig } from "@crossfire/orchestrator-core";
 import type {
@@ -33,12 +38,37 @@ export async function createAdapters(
 		roleName: "proposer" | "challenger" | "judge",
 		role: ResolvedRole,
 	) {
+		const preset: PolicyPreset =
+			roleName === "judge"
+				? "plan"
+				: ((executionModes?.roleModes?.[roleName] ??
+						executionModes?.defaultMode ??
+						"guarded") as PolicyPreset);
+
+		const legacyToolPolicyInput: LegacyToolPolicyInput | undefined =
+			role.profile.allowed_tools || role.profile.disallowed_tools
+				? {
+						allow: role.profile.allowed_tools,
+						deny: role.profile.disallowed_tools,
+					}
+				: undefined;
+
+		const policy = compilePolicy({
+			preset,
+			role: roleName,
+			legacyToolPolicy: legacyToolPolicyInput,
+		});
+
 		const adapter = factories[role.adapterType]();
 		const session = await adapter.startSession({
 			profile: role.profile.name,
 			workingDirectory: process.cwd(),
 			model: role.model,
 			mcpServers: role.profile.mcp_servers,
+			policy,
+			// Keep legacy fields for fallback during migration
+			allowedTools: role.profile.allowed_tools,
+			disallowedTools: role.profile.disallowed_tools,
 			executionMode:
 				roleName === "judge"
 					? undefined
@@ -47,7 +77,12 @@ export async function createAdapters(
 			providerOptions: { systemPrompt: role.systemPrompt },
 		});
 		started.push({ adapter, session });
-		return { adapter, session };
+		return {
+			adapter,
+			session,
+			baselinePolicy: policy,
+			legacyToolPolicyInput,
+		};
 	}
 
 	try {
