@@ -333,6 +333,7 @@ export class CodexAdapter implements AgentAdapter {
 		let policies: {
 			approvalPolicy: string;
 			sandboxPolicy?: Record<string, unknown>;
+			networkDisabled?: boolean;
 		};
 		if (input.policy) {
 			const { native, warnings } = translatePolicy(input.policy);
@@ -348,8 +349,9 @@ export class CodexAdapter implements AgentAdapter {
 			policies = {
 				approvalPolicy: native.approvalPolicy,
 				...(native.sandboxPolicy
-					? { sandboxPolicy: { type: native.sandboxPolicy } }
+					? { sandboxPolicy: native.sandboxPolicy }
 					: {}),
+				...(native.networkDisabled ? { networkDisabled: true } : {}),
 			};
 		} else {
 			policies = mapExecutionModeToCodexPolicies(executionMode);
@@ -376,6 +378,7 @@ export class CodexAdapter implements AgentAdapter {
 			...(policies.sandboxPolicy
 				? { sandboxPolicy: policies.sandboxPolicy }
 				: {}),
+			...(policies.networkDisabled ? { networkDisabled: true } : {}),
 		})) as { thread: { id: string } };
 
 		const providerSessionId = result.thread.id;
@@ -441,6 +444,7 @@ export class CodexAdapter implements AgentAdapter {
 		let policies: {
 			approvalPolicy: string;
 			sandboxPolicy?: Record<string, unknown>;
+			networkDisabled?: boolean;
 		};
 		if (activePolicy) {
 			const { native, warnings } = translatePolicy(activePolicy);
@@ -457,8 +461,9 @@ export class CodexAdapter implements AgentAdapter {
 			policies = {
 				approvalPolicy: native.approvalPolicy,
 				...(native.sandboxPolicy
-					? { sandboxPolicy: { type: native.sandboxPolicy } }
+					? { sandboxPolicy: native.sandboxPolicy }
 					: {}),
+				...(native.networkDisabled ? { networkDisabled: true } : {}),
 			};
 		} else {
 			policies = mapExecutionModeToCodexPolicies(
@@ -492,6 +497,7 @@ export class CodexAdapter implements AgentAdapter {
 		policies?: {
 			approvalPolicy: string;
 			sandboxPolicy?: Record<string, unknown>;
+			networkDisabled?: boolean;
 		},
 	): Promise<void> {
 		const result = (await this.client.request("turn/start", {
@@ -501,6 +507,7 @@ export class CodexAdapter implements AgentAdapter {
 			...(policies?.sandboxPolicy
 				? { sandboxPolicy: policies.sandboxPolicy }
 				: {}),
+			...(policies?.networkDisabled ? { networkDisabled: true } : {}),
 		})) as { turn: { id: string; status: string } };
 
 		if (session) {
@@ -539,14 +546,16 @@ export class CodexAdapter implements AgentAdapter {
 		let recoveryPolicies: {
 			approvalPolicy: string;
 			sandboxPolicy?: Record<string, unknown>;
+			networkDisabled?: boolean;
 		};
 		if (recoveryActivePolicy) {
 			const { native } = translatePolicy(recoveryActivePolicy);
 			recoveryPolicies = {
 				approvalPolicy: native.approvalPolicy,
 				...(native.sandboxPolicy
-					? { sandboxPolicy: { type: native.sandboxPolicy } }
+					? { sandboxPolicy: native.sandboxPolicy }
 					: {}),
+				...(native.networkDisabled ? { networkDisabled: true } : {}),
 			};
 		} else {
 			recoveryPolicies = mapExecutionModeToCodexPolicies(
@@ -560,6 +569,7 @@ export class CodexAdapter implements AgentAdapter {
 			...(recoveryPolicies.sandboxPolicy
 				? { sandboxPolicy: recoveryPolicies.sandboxPolicy }
 				: {}),
+			...(recoveryPolicies.networkDisabled ? { networkDisabled: true } : {}),
 		})) as { thread: { id: string } };
 
 		const newThreadId = threadResult.thread.id;

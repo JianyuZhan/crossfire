@@ -519,6 +519,32 @@ export class ClaudeAdapter implements AgentAdapter {
 					() => turnInput.turnId,
 				);
 
+				// Reapply policy constraints so recovery runs under the same
+				// permission mode, tool restrictions, and limits as the original turn
+				const sessionConfig = this.sessionConfigs.get(handle.adapterSessionId);
+				const recoveryPolicy =
+					turnInput.policy ?? sessionConfig?.baselinePolicy;
+				let recoveryOptions: Record<string, unknown> = {};
+				if (recoveryPolicy) {
+					const { native } = translatePolicy(recoveryPolicy);
+					recoveryOptions = {
+						permissionMode: native.permissionMode,
+						maxTurns: native.maxTurns,
+						allowedTools: native.allowedTools,
+						disallowedTools: native.disallowedTools,
+						allowDangerouslySkipPermissions:
+							native.allowDangerouslySkipPermissions,
+					};
+				} else if (turnInput.executionMode) {
+					recoveryOptions = mapExecutionModeToClaudeQueryOptions(
+						turnInput.executionMode,
+						{
+							allowedTools: sessionConfig?.allowedTools,
+							disallowedTools: sessionConfig?.disallowedTools,
+						},
+					);
+				}
+
 				const recoveryQuery = this.queryFn({
 					prompt: buildTranscriptRecoveryPrompt({
 						systemPrompt: handle.recoveryContext.systemPrompt,
@@ -527,8 +553,9 @@ export class ClaudeAdapter implements AgentAdapter {
 						schemaType: handle.recoveryContext.schemaType,
 					}),
 					resume: undefined,
-					model: this.sessionConfigs.get(handle.adapterSessionId)?.model,
+					model: sessionConfig?.model,
 					hooks,
+					...recoveryOptions,
 				});
 
 				this.queries.set(handle.adapterSessionId, {

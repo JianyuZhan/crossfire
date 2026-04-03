@@ -289,7 +289,7 @@ interface StartSessionInput {
 - `approve()` may pass both `updatedInput` and session-scoped `updatedPermissions`, so Claude's "allow for session" flow is now preserved instead of being flattened to plain allow
 - once Claude has emitted `turn.completed` for a turn, trailing process-exit errors are ignored instead of triggering a spurious recovery attempt for an already-finished turn
 - local prompt metrics are attached to the first `usage.updated` event observed for the turn
-- on stream failure, if `recoveryContext` and a prior `providerSessionId` exist, the adapter emits `run.warning`, clears resume state, and retries once with a transcript recovery prompt
+- on stream failure, if `recoveryContext` and a prior `providerSessionId` exist, the adapter emits `run.warning`, clears resume state, and retries once with a transcript recovery prompt; the recovery query reapplies the same policy-derived options (permission mode, tool restrictions, limits) as the original turn so policy constraints survive partial failures
 - if transcript recovery also fails, the adapter emits a terminal `run.error`
 
 ### Codex
@@ -297,7 +297,7 @@ interface StartSessionInput {
 - subprocess + bidirectional JSON-RPC over stdio
 - `startSession()` performs `initialize`, sends `initialized`, then calls `thread/start`
 - `session.started` is emitted directly from `startSession()`, so Codex knows its `providerSessionId` before the first turn
-- Crossfire execution modes map onto Codex approval and sandbox policy combinations instead of a single provider mode field
+- Crossfire execution modes map onto Codex approval and sandbox policy combinations instead of a single provider mode field; the policy path forwards `sandboxPolicy` verbatim from `translatePolicy()` and threads `networkDisabled` into `thread/start` and `turn/start` requests
 - `sendTurn()` uses `turn/start`
 - the current adapter effectively assumes one live active session per adapter instance because event routing uses one shared JSON-RPC client plus a wildcard notification handler
 - approval requests are normalized as `command`, `file-change`, or `user-input`
