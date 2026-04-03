@@ -207,6 +207,8 @@ Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslati
 
 The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sendTurn()`. When a policy is present, it calls `translatePolicy()` and emits `run.warning` events for any translation warnings. The legacy `mapExecutionModeToClaudeQueryOptions()` path is preserved as fallback when no policy is set.
 
+The Codex adapter applies the same pattern in both `startSession()` (for `thread/start` policies) and `sendTurn()` (for per-turn policies), including the transcript recovery path. Legacy `mapExecutionModeToCodexPolicies()` is preserved as fallback.
+
 ## Session, Turn, and Recovery Types
 
 ### SessionHandle

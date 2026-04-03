@@ -7,6 +7,7 @@ import {
 	CODEX_CAPABILITIES,
 	type LocalTurnMetrics,
 	type NormalizedEvent,
+	type ResolvedPolicy,
 	type RoleExecutionMode,
 	type SessionHandle,
 	type StartSessionInput,
@@ -19,6 +20,7 @@ import {
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { type MapContext, mapCodexNotification } from "./event-mapper.js";
 import { JsonRpcClient } from "./jsonrpc-client.js";
+import { translatePolicy } from "./policy-translation.js";
 
 /** Approval method types sent by the Codex server */
 const APPROVAL_METHODS: Record<
@@ -47,6 +49,7 @@ interface SessionState {
 	profile: string;
 	model: string;
 	executionMode: RoleExecutionMode;
+	baselinePolicy?: ResolvedPolicy;
 	currentTurnId?: string;
 	currentNativeTurnId?: string;
 	turnStartTime?: number;
@@ -326,7 +329,31 @@ export class CodexAdapter implements AgentAdapter {
 		const adapterSessionId = `codex-session-${sessionCounter}-${Date.now()}`;
 		const model = input.model ?? "gpt-5.4";
 		const executionMode = input.executionMode ?? "guarded";
-		const policies = mapExecutionModeToCodexPolicies(executionMode);
+
+		let policies: {
+			approvalPolicy: string;
+			sandboxPolicy?: Record<string, unknown>;
+		};
+		if (input.policy) {
+			const { native, warnings } = translatePolicy(input.policy);
+			for (const w of warnings) {
+				this.emit({
+					kind: "run.warning",
+					adapterId: "codex",
+					adapterSessionId,
+					message: `[policy] ${w.field}: ${w.message}`,
+					timestamp: Date.now(),
+				});
+			}
+			policies = {
+				approvalPolicy: native.approvalPolicy,
+				...(native.sandboxPolicy
+					? { sandboxPolicy: { type: native.sandboxPolicy } }
+					: {}),
+			};
+		} else {
+			policies = mapExecutionModeToCodexPolicies(executionMode);
+		}
 
 		// 1. Send `initialize` request
 		await this.client.request("initialize", {
@@ -366,6 +393,7 @@ export class CodexAdapter implements AgentAdapter {
 			profile: input.profile,
 			model,
 			executionMode,
+			baselinePolicy: input.policy,
 			turnCount: 0,
 		};
 		this.sessions.set(adapterSessionId, sessionState);
@@ -409,9 +437,34 @@ export class CodexAdapter implements AgentAdapter {
 		if (session) {
 			session.pendingLocalMetrics = localMetrics;
 		}
-		const policies = mapExecutionModeToCodexPolicies(
-			input.executionMode ?? session?.executionMode,
-		);
+		const activePolicy = input.policy ?? session?.baselinePolicy;
+		let policies: {
+			approvalPolicy: string;
+			sandboxPolicy?: Record<string, unknown>;
+		};
+		if (activePolicy) {
+			const { native, warnings } = translatePolicy(activePolicy);
+			for (const w of warnings) {
+				this.emit({
+					kind: "run.warning",
+					adapterId: "codex",
+					adapterSessionId: handle.adapterSessionId,
+					turnId: input.turnId,
+					message: `[policy] ${w.field}: ${w.message}`,
+					timestamp: Date.now(),
+				});
+			}
+			policies = {
+				approvalPolicy: native.approvalPolicy,
+				...(native.sandboxPolicy
+					? { sandboxPolicy: { type: native.sandboxPolicy } }
+					: {}),
+			};
+		} else {
+			policies = mapExecutionModeToCodexPolicies(
+				input.executionMode ?? session?.executionMode,
+			);
+		}
 
 		try {
 			await this.startTurnOnThread(
@@ -482,9 +535,24 @@ export class CodexAdapter implements AgentAdapter {
 		});
 
 		// Create a new thread
-		const recoveryPolicies = mapExecutionModeToCodexPolicies(
-			input.executionMode ?? session?.executionMode,
-		);
+		const recoveryActivePolicy = input.policy ?? session?.baselinePolicy;
+		let recoveryPolicies: {
+			approvalPolicy: string;
+			sandboxPolicy?: Record<string, unknown>;
+		};
+		if (recoveryActivePolicy) {
+			const { native } = translatePolicy(recoveryActivePolicy);
+			recoveryPolicies = {
+				approvalPolicy: native.approvalPolicy,
+				...(native.sandboxPolicy
+					? { sandboxPolicy: { type: native.sandboxPolicy } }
+					: {}),
+			};
+		} else {
+			recoveryPolicies = mapExecutionModeToCodexPolicies(
+				input.executionMode ?? session?.executionMode,
+			);
+		}
 		const threadResult = (await this.client.request("thread/start", {
 			model: session?.model ?? "gpt-5.4",
 			cwd: "/tmp",
