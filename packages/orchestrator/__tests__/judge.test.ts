@@ -9,6 +9,15 @@ import { runJudgeTurn } from "../src/judge.js";
 
 function makeMockAdapter(scriptedEvents: NormalizedEvent[]): AgentAdapter {
 	const listeners: Set<(e: NormalizedEvent) => void> = new Set();
+	const sendTurn = vi.fn(async (_handle, input) => {
+		// Emit scripted events asynchronously
+		setTimeout(() => {
+			for (const e of scriptedEvents) {
+				for (const l of listeners) l(e);
+			}
+		}, 0);
+		return { turnId: input.turnId, status: "running" as const };
+	});
 	return {
 		id: "claude",
 		capabilities: {} as any,
@@ -20,15 +29,7 @@ function makeMockAdapter(scriptedEvents: NormalizedEvent[]): AgentAdapter {
 				transcript: [],
 			};
 		},
-		async sendTurn(_handle, input) {
-			// Emit scripted events asynchronously
-			setTimeout(() => {
-				for (const e of scriptedEvents) {
-					for (const l of listeners) l(e);
-				}
-			}, 0);
-			return { turnId: input.turnId, status: "running" };
-		},
+		sendTurn,
 		onEvent(cb) {
 			listeners.add(cb);
 			return () => listeners.delete(cb);
@@ -196,5 +197,130 @@ describe("runJudgeTurn", () => {
 		unsub();
 		expect(result.status).toBe("completed");
 		expect(result.verdict).toBeUndefined();
+	});
+
+	it("runs judge turns in plan mode", async () => {
+		const sendTurn = vi.fn(async (_handle, input) => ({
+			turnId: input.turnId,
+			status: "running" as const,
+		}));
+		const adapter: AgentAdapter = {
+			id: "claude",
+			capabilities: {} as any,
+			async startSession() {
+				return {
+					adapterSessionId: "js1",
+					providerSessionId: "ps1",
+					adapterId: "claude",
+					transcript: [],
+				};
+			},
+			sendTurn,
+			onEvent() {
+				return () => {};
+			},
+			async close() {},
+		};
+		const handle: SessionHandle = {
+			adapterSessionId: "js1",
+			providerSessionId: "ps1",
+			adapterId: "claude",
+			transcript: [],
+		};
+		const bus = new DebateEventBus();
+		setTimeout(() => {
+			bus.push({
+				kind: "turn.completed",
+				status: "completed",
+				durationMs: 1,
+				timestamp: 1002,
+				adapterId: "claude",
+				adapterSessionId: "js1",
+				turnId: "j-1",
+			});
+		}, 0);
+
+		await runJudgeTurn(adapter, handle, bus, {
+			turnId: "j-1",
+			prompt: "Judge this debate",
+			roundNumber: 1,
+		});
+
+		expect(sendTurn).toHaveBeenCalledWith(
+			handle,
+			expect.objectContaining({
+				turnId: "j-1",
+				executionMode: "plan",
+				role: "judge",
+				roundNumber: 1,
+			}),
+		);
+	});
+
+	it("passes policy and omits executionMode when policy is provided", async () => {
+		const handle: SessionHandle = {
+			adapterSessionId: "js1",
+			providerSessionId: "ps1",
+			adapterId: "claude",
+			transcript: [],
+		};
+		const bus = new DebateEventBus();
+		const sendTurn = vi.fn(async (_handle: unknown, _input: unknown) => {
+			setTimeout(() => {
+				bus.push({
+					kind: "turn.completed",
+					status: "completed",
+					durationMs: 100,
+					timestamp: Date.now(),
+					adapterId: "claude",
+					adapterSessionId: "js1",
+					turnId: "j-1",
+				} as NormalizedEvent);
+			}, 0);
+			return { turnId: "j-1", status: "running" as const };
+		});
+		const adapter: AgentAdapter = {
+			id: "claude",
+			capabilities: {} as any,
+			async startSession() {
+				return handle;
+			},
+			sendTurn,
+			onEvent(cb) {
+				return bus.subscribe(cb);
+			},
+			async close() {},
+		};
+
+		const fakePolicy = {
+			preset: "plan" as const,
+			roleContract: {
+				semantics: {
+					exploration: "forbidden" as const,
+					factCheck: "minimal" as const,
+					mayIntroduceNewProposal: false,
+					evidenceBar: "high" as const,
+				},
+				ceilings: {},
+			},
+			capabilities: {
+				filesystem: "read" as const,
+				network: "search" as const,
+				shell: "off" as const,
+				subagents: "off" as const,
+			},
+			interaction: { approval: "always" as const },
+		};
+
+		await runJudgeTurn(adapter, handle, bus, {
+			turnId: "j-1",
+			prompt: "Judge this debate",
+			roundNumber: 1,
+			policy: fakePolicy,
+		});
+
+		const callArgs = sendTurn.mock.calls[0][1] as Record<string, unknown>;
+		expect(callArgs.policy).toBe(fakePolicy);
+		expect(callArgs.executionMode).toBeUndefined();
 	});
 });

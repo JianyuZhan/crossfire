@@ -1,6 +1,9 @@
-import type {
-	RoleExecutionMode,
-	TurnExecutionMode,
+import {
+	type CompilePolicyInput,
+	type ResolvedPolicy,
+	type RoleExecutionMode,
+	type TurnExecutionMode,
+	compilePolicy,
 } from "@crossfire/adapter-core";
 
 export type DebateExecutionRole = "proposer" | "challenger";
@@ -42,4 +45,18 @@ export function resolveExecutionMode(
 				? "role-baseline"
 				: "debate-default",
 	};
+}
+
+/** @deprecated Use compilePolicy() directly */
+export function resolveExecutionModeAsPolicy(
+	config: DebateExecutionConfig | undefined,
+	role: DebateExecutionRole,
+	turnId: string,
+): { resolved: ResolvedExecutionMode; policy: ResolvedPolicy } {
+	const resolved = resolveExecutionMode(config, role, turnId);
+	const policy = compilePolicy({
+		preset: resolved.effectiveMode as CompilePolicyInput["preset"],
+		role,
+	});
+	return { resolved, policy };
 }

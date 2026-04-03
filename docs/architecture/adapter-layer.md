@@ -215,6 +215,8 @@ The Gemini adapter resolves the approval mode from `input.policy ?? session.base
 
 `create-adapters.ts` compiles policy at startup: CLI `--mode` flag → `PolicyPreset` → `compilePolicy({ preset, role, legacyToolPolicy })` → `ResolvedPolicy` passed via `startSession({ policy })`. Judge always gets the `plan` preset. Profile `allowed_tools`/`disallowed_tools` flow through as `legacyToolPolicy`.
 
+The orchestrator runner recompiles policy per turn using the resolved effective mode as a preset, so turn-level overrides produce different policies without mutating the baseline. The judge turn absorbs the legacy `executionMode: "plan"` special case: when a policy is present, `executionMode` is omitted; when no policy exists, the legacy fallback is preserved. `resolveExecutionModeAsPolicy()` in `orchestrator-core` provides a compat wrapper for callers migrating incrementally.
+
 ## Session, Turn, and Recovery Types
 
 ### SessionHandle

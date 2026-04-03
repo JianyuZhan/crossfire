@@ -1,6 +1,7 @@
 import type {
 	AgentAdapter,
 	NormalizedEvent,
+	ResolvedPolicy,
 	SessionHandle,
 } from "@crossfire/adapter-core";
 import {
@@ -15,6 +16,7 @@ export interface JudgeTurnInput {
 	turnId: string;
 	prompt: string;
 	roundNumber: number;
+	policy?: ResolvedPolicy;
 }
 
 export interface JudgeTurnResult {
@@ -203,6 +205,11 @@ export async function runJudgeTurn(
 	await adapter.sendTurn(handle, {
 		turnId: input.turnId,
 		prompt: input.prompt,
+		policy: input.policy,
+		// Legacy fallback: only set executionMode when no policy is provided
+		...(input.policy ? {} : { executionMode: "plan" as const }),
+		role: "judge",
+		roundNumber: input.roundNumber,
 	});
 
 	// Wait for turn.completed

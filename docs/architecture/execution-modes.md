@@ -132,6 +132,18 @@ crossfire start \
   --turn-mode p-1=plan
 ```
 
+## Policy Model Integration
+
+The legacy execution-mode resolver now has a companion `resolveExecutionModeAsPolicy()` that returns both the resolved mode and a compiled `ResolvedPolicy`. This allows existing callers to migrate incrementally:
+
+- `resolveExecutionMode()` remains unchanged and returns mode strings
+- `resolveExecutionModeAsPolicy()` calls the mode resolver, then feeds the effective mode as a preset into `compilePolicy()`
+- callers that already have a `ResolvedPolicy` should use `compilePolicy()` directly instead of going through the compat wrapper
+
+The orchestrator runner compiles a fresh policy per turn using the resolved effective mode as the preset, which allows turn-level mode overrides to produce different policies without changing the baseline.
+
+The judge special case (`executionMode: "plan"`) is now absorbed into the policy model: when a policy is present, `executionMode` is omitted from the judge turn input; when no policy exists, the legacy `"plan"` fallback is preserved for backward compatibility.
+
 ## Event and UI Implications
 
 Relevant surfaces:

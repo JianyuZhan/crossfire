@@ -1,11 +1,13 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-	AgentAdapter,
-	LegacyToolPolicyInput,
-	NormalizedEvent,
-	ResolvedPolicy,
-	SessionHandle,
+import {
+	type AgentAdapter,
+	type LegacyToolPolicyInput,
+	type NormalizedEvent,
+	type PolicyPreset,
+	type ResolvedPolicy,
+	type SessionHandle,
+	compilePolicy,
 } from "@crossfire/adapter-core";
 import {
 	type AnyEvent,
@@ -381,7 +383,12 @@ export async function runDebate(
 			adapters.judge.adapter,
 			adapters.judge.session,
 			bus,
-			{ turnId, prompt, roundNumber },
+			{
+				turnId,
+				prompt,
+				roundNumber,
+				policy: adapters.judge.baselinePolicy,
+			},
 		);
 		activeTurn = undefined;
 		if (result.status === "interrupted") {
@@ -423,7 +430,12 @@ export async function runDebate(
 		consecutiveFailures: number;
 		opponentRole: "proposer" | "challenger";
 		systemPrompt?: string;
-		adapterEntry: { adapter: AgentAdapter; session: SessionHandle };
+		adapterEntry: {
+			adapter: AgentAdapter;
+			session: SessionHandle;
+			baselinePolicy?: ResolvedPolicy;
+			legacyToolPolicyInput?: LegacyToolPolicyInput;
+		};
 		operationalPreamble?: string;
 	}
 
@@ -514,7 +526,16 @@ export async function runDebate(
 			timestamp: Date.now(),
 		});
 
-		// Step 6: Set activeTurn, call sendTurn
+		// Step 6: Compile per-turn policy if baseline exists
+		const turnPolicy = adapterEntry.baselinePolicy
+			? compilePolicy({
+					preset: executionModeResult.effectiveMode as PolicyPreset,
+					role: role as "proposer" | "challenger" | "judge",
+					legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
+				})
+			: undefined;
+
+		// Step 7: Set activeTurn, call sendTurn
 		activeTurn = {
 			role,
 			turnId,
@@ -525,6 +546,7 @@ export async function runDebate(
 		await adapterEntry.adapter.sendTurn(adapterEntry.session, {
 			turnId,
 			prompt,
+			policy: turnPolicy,
 			executionMode: executionModeResult.effectiveMode,
 		});
 
