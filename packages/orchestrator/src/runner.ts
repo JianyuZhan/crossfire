@@ -2,7 +2,9 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
 	AgentAdapter,
+	LegacyToolPolicyInput,
 	NormalizedEvent,
+	ResolvedPolicy,
 	SessionHandle,
 } from "@crossfire/adapter-core";
 import {
@@ -44,9 +46,24 @@ import { PlanAccumulator } from "./plan-accumulator.js";
 import type { TranscriptWriter } from "./transcript-writer.js";
 
 export interface AdapterMap {
-	proposer: { adapter: AgentAdapter; session: SessionHandle };
-	challenger: { adapter: AgentAdapter; session: SessionHandle };
-	judge?: { adapter: AgentAdapter; session: SessionHandle };
+	proposer: {
+		adapter: AgentAdapter;
+		session: SessionHandle;
+		baselinePolicy?: ResolvedPolicy;
+		legacyToolPolicyInput?: LegacyToolPolicyInput;
+	};
+	challenger: {
+		adapter: AgentAdapter;
+		session: SessionHandle;
+		baselinePolicy?: ResolvedPolicy;
+		legacyToolPolicyInput?: LegacyToolPolicyInput;
+	};
+	judge?: {
+		adapter: AgentAdapter;
+		session: SessionHandle;
+		baselinePolicy?: ResolvedPolicy;
+		legacyToolPolicyInput?: LegacyToolPolicyInput;
+	};
 }
 
 export interface RunDebateOptions {

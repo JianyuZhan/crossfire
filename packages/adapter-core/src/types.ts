@@ -1,11 +1,14 @@
 import type { AdapterCapabilities } from "./capabilities.js";
+import type { ResolvedPolicy } from "./policy/types.js";
 
 export type AdapterId = "claude" | "codex" | "gemini";
 
 export type DebateRole = "proposer" | "challenger" | "judge";
 
+/** @deprecated Use PolicyPreset from policy/types instead */
 export type RoleExecutionMode = "research" | "guarded" | "dangerous";
 
+/** @deprecated Use PolicyPreset from policy/types instead */
 export type TurnExecutionMode = RoleExecutionMode | "plan";
 
 export type NormalizedEvent =
@@ -247,9 +250,16 @@ export interface StartSessionInput {
 	workingDirectory: string;
 	model?: string;
 	mcpServers?: Record<string, unknown>;
+	/** @deprecated Use policy.capabilities.legacyToolOverrides instead */
+	allowedTools?: string[];
+	/** @deprecated Use policy.capabilities.legacyToolOverrides instead */
+	disallowedTools?: string[];
 	permissionMode?: "auto" | "approve-all" | "deny-all";
+	/** @deprecated Use policy.preset instead */
 	executionMode?: RoleExecutionMode;
 	providerOptions?: Record<string, unknown>;
+	/** New policy path — when present, adapters should use translatePolicy() */
+	policy?: ResolvedPolicy;
 }
 
 /** Recovery context stored on the session handle for transcript-based fallback */
@@ -276,11 +286,14 @@ export interface TurnInput {
 	prompt: string;
 	turnId: string;
 	timeout?: number;
+	/** @deprecated Use policy instead */
 	executionMode?: TurnExecutionMode;
 	/** Role hint for transcript tracking -- if omitted, parsed from turnId pattern {p|c|j}-{round} */
 	role?: DebateRole;
 	/** Round number hint for transcript tracking -- if omitted, parsed from turnId pattern */
 	roundNumber?: number;
+	/** Per-turn policy override — when present, adapter re-translates for this turn */
+	policy?: ResolvedPolicy;
 }
 
 export interface TurnHandle {

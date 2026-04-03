@@ -201,6 +201,10 @@ Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslati
 - **Codex** (`adapter-codex/src/policy-translation.ts`): maps approval to `on-request | on-failure | never`, capabilities to sandbox level (`readOnly | workspace-write | danger-full-access`) via per-dimension max, network off → `networkDisabled`
 - **Gemini** (`adapter-gemini/src/policy-translation.ts`): maps approval to `default | auto_edit | plan | yolo`, with `isPlanShape()` for plan mode; filesystem/network off → `not_implemented` warnings
 
+### Policy Integration Points
+
+`StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` instead of reading the deprecated `executionMode` field. `AdapterMap` entries carry optional `baselinePolicy` and `legacyToolPolicyInput` so the orchestrator runner can thread compiled policy through to adapters.
+
 ## Session, Turn, and Recovery Types
 
 ### SessionHandle
