@@ -173,10 +173,16 @@ Relevant surfaces:
 
 This keeps the event log explicit about mode decisions instead of forcing operators to infer them from provider-side behavior.
 
-## Testing Infrastructure
+## Policy Regression Harness
 
-The policy compilation and translation pipeline is covered by a comprehensive test harness in `adapter-core/src/testing/`:
+Phase B established a three-layer regression harness for the policy compilation pipeline:
 
-- **Policy fixtures**: `makeCompileInput()`, `makeResolvedPolicy()`, `makeWarning()` provide canonical builders for test data
-- **Warning assertions**: `expectWarning()`, `expectWarningWithMessage()`, `expectNoWarnings()`, `normalizeWarnings()` enable structured validation of translation warnings across all adapters
-- **Coverage**: compiler golden matrix, per-adapter translation tests (Claude, Codex, Gemini), and wiring smoke tests ensure policy intent is preserved end-to-end
+1. **Policy core** (`adapter-core`): Golden matrix of 7 preset×role combinations with full field assertions. Verifies `ResolvedPolicy` structure, capability clamping, and legacy override behavior. No provider-native assertions allowed in this layer.
+
+2. **Adapter translation** (`adapter-{claude,codex,gemini}`): Per-adapter golden cases covering exact mappings, approximate mappings, and intentional deltas. All tests use structured `expectWarning()` assertions on `field` + `adapter` + `reason`, not message text.
+
+3. **Wiring regression** (`cli`, `orchestrator`): Baseline policy flow and turn override flow tested separately. Includes data-flow smoke that verifies the compile→translate→adapter chain without LLM mocking.
+
+Shared test fixtures and warning helpers live in `@crossfire/adapter-core/testing` (internal test-support surface, not a public API).
+
+Intentional behavior deltas (e.g., Claude `research` mapping to `default` instead of `dontAsk`) are grouped in `describe("intentional deltas")` blocks with `INTENTIONAL DELTA:` prefixed test names that assert both new and old behavior.
