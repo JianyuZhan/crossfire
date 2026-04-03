@@ -199,6 +199,7 @@ Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslati
 
 - **Claude** (`adapter-claude/src/policy-translation.ts`): maps approval to `ClaudePermissionMode`, capabilities to tool deny lists (`Bash`, `Edit`, `Write`, `WebFetch`, `Task`), with `isPlanShape()` for exact `plan` mode matching
 - **Codex** (`adapter-codex/src/policy-translation.ts`): maps approval to `on-request | on-failure | never`, capabilities to sandbox level (`readOnly | workspace-write | danger-full-access`) via per-dimension max, network off → `networkDisabled`
+- **Gemini** (`adapter-gemini/src/policy-translation.ts`): maps approval to `default | auto_edit | plan | yolo`, with `isPlanShape()` for plan mode; filesystem/network off → `not_implemented` warnings
 
 ## Session, Turn, and Recovery Types
 
