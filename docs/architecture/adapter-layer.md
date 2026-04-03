@@ -185,6 +185,18 @@ Current provider capability profiles:
 
 Contract tests enforce selected capability claims and exercise approval and interrupt behavior where those surfaces exist.
 
+## Policy Model
+
+The `adapter-core` package exports a policy compilation module (`policy/`) that replaces provider-first mode mapping with a provider-agnostic policy architecture:
+
+- **Types** (`policy/types.ts`): `ResolvedPolicy`, `CapabilityPolicy`, `RoleContract`, `InteractionPolicy`, `PolicyPreset`, `CompilePolicyInput`, `ProviderTranslationResult<T>`
+- **Level-order helpers** (`policy/level-order.ts`): `clampFilesystem`, `clampNetwork`, `clampShell`, `clampSubagents` — ordered enum comparison via index, not string
+- **Role contracts** (`policy/role-contracts.ts`): `DEFAULT_ROLE_CONTRACTS` — frozen defaults for proposer (no ceilings), challenger (no ceilings), judge (read/search/off/off)
+- **Presets** (`policy/presets.ts`): `PRESET_EXPANSIONS` — frozen table expanding `research | guarded | dangerous | plan` to capability + interaction policy
+- **Compiler** (`policy/compiler.ts`): `compilePolicy(input) → ResolvedPolicy` — preset expansion → role ceiling clamping → legacy tool override attachment
+
+Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslationResult<NativeOptions>` pure function that maps the resolved policy to provider-native parameters plus structured warnings.
+
 ## Session, Turn, and Recovery Types
 
 ### SessionHandle
