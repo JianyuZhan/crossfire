@@ -14,6 +14,8 @@ export const ProfileSchema = z.object({
 	prompt_family: z.enum(["auto", "general", "code"]).optional(),
 	inherit_global_config: z.boolean().default(true),
 	mcp_servers: z.record(McpServerSchema).default({}),
+	allowed_tools: z.array(z.string()).optional(),
+	disallowed_tools: z.array(z.string()).optional(),
 });
 
 export interface ProfileConfig extends z.infer<typeof ProfileSchema> {
