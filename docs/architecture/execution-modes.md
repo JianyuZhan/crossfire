@@ -172,3 +172,11 @@ Relevant surfaces:
 - Translation warnings are emitted as `run.warning` events when policy intent is approximated during provider translation
 
 This keeps the event log explicit about mode decisions instead of forcing operators to infer them from provider-side behavior.
+
+## Testing Infrastructure
+
+The policy compilation and translation pipeline is covered by a comprehensive test harness in `adapter-core/src/testing/`:
+
+- **Policy fixtures**: `makeCompileInput()`, `makeResolvedPolicy()`, `makeWarning()` provide canonical builders for test data
+- **Warning assertions**: `expectWarning()`, `expectWarningWithMessage()`, `expectNoWarnings()`, `normalizeWarnings()` enable structured validation of translation warnings across all adapters
+- **Coverage**: compiler golden matrix, per-adapter translation tests (Claude, Codex, Gemini), and wiring smoke tests ensure policy intent is preserved end-to-end

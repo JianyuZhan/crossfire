@@ -17,3 +17,16 @@ export {
 	assertCapabilitiesConsistent,
 	assertEventOrder,
 } from "./helpers.js";
+export {
+	makeCompileInput,
+	makeResolvedPolicy,
+	makeWarning,
+} from "./policy-fixtures.js";
+export {
+	type WarningMatch,
+	type WarningMatchWithMessage,
+	expectWarning,
+	expectWarningWithMessage,
+	expectNoWarnings,
+	normalizeWarnings,
+} from "./policy-warnings.js";

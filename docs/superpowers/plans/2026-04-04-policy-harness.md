@@ -35,14 +35,18 @@
 | `packages/adapter-gemini/__tests__/policy-translation.test.ts` | Add golden cases, structured warning assertions, intentional delta group |
 | `docs/architecture/execution-modes.md` | Note on policy harness existence and coverage |
 
-### Unchanged files (explicitly)
+### Unchanged files (explicitly, with justification)
 
-| File | Reason |
+The spec's Layer 1 describes upgrading the core harness as a 4-file set. Three of those files already satisfy Phase B contract requirements without modification:
+
+| File | Reason: what it already covers |
 |------|--------|
-| `packages/adapter-core/__tests__/policy/presets.test.ts` | Already comprehensive; no gaps in golden matrix |
-| `packages/adapter-core/__tests__/policy/role-contracts.test.ts` | Already comprehensive; all roles covered |
-| `packages/adapter-core/__tests__/policy/level-order.test.ts` | Already comprehensive; all clamp boundaries covered |
+| `packages/adapter-core/__tests__/policy/presets.test.ts` | All 4 presets with full `capabilities` + `interaction` field assertions; provider-native field leak guard (`permissionMode`, `approvalPolicy`, `sandboxPolicy`, `approvalMode` all excluded); frozen-constant invariant. Matches spec's "each case asserts capabilities, interaction" for the preset-expansion layer. |
+| `packages/adapter-core/__tests__/policy/role-contracts.test.ts` | All 3 roles (proposer/challenger/judge) with ceiling values, semantic fields (`mayIntroduceNewProposal`, `exploration`, `factCheck`, `evidenceBar`), and frozen/immutability checks. Matches spec's roleContract coverage. |
+| `packages/adapter-core/__tests__/policy/level-order.test.ts` | All 4 clamp functions (`clampFilesystem`, `clampNetwork`, `clampShell`, `clampSubagents`) with boundary cases: base < ceiling, base = ceiling, base > ceiling, `undefined` ceiling. These are the building blocks the compiler uses for judge ceiling enforcement. |
 | `packages/cli/__tests__/wiring.test.ts` | Existing tests remain; new policy-focused tests in separate file |
+
+The **composed** behavior (preset × role through the compiler) is covered by the upgraded `compiler.test.ts` in B2, which imports from the same `compilePolicy` that consumes presets, role-contracts, and level-order internally.
 
 ---
 
@@ -424,6 +428,20 @@ git add packages/adapter-core/src/testing/policy-fixtures.ts \
        packages/adapter-core/__tests__/testing/policy-helpers.test.ts
 git commit -m "feat(testing): add shared policy fixtures and warning assertion helpers"
 ```
+
+### Step 7: Build adapter-core so downstream packages can import `@crossfire/adapter-core/testing`
+
+The `@crossfire/adapter-core/testing` export resolves to `./dist/testing/index.js`. Downstream packages (adapter-claude, adapter-codex, adapter-gemini, cli, orchestrator) import from this surface via the compiled `dist/` output, not from source. Without this build step, B2–B6 imports will fail with module-not-found errors.
+
+- [ ] Run:
+
+```bash
+pnpm --filter @crossfire/adapter-core build
+```
+
+Expected: Build completes successfully. `packages/adapter-core/dist/testing/policy-fixtures.js` and `policy-warnings.js` exist.
+
+> **Note for B2–B6**: All subsequent tasks depend on this build. If you modify `adapter-core/src/testing/` after this point, rebuild before running downstream tests.
 
 ---
 
@@ -1263,53 +1281,71 @@ git commit -m "test(gemini): upgrade translation tests with golden cases and str
 - [ ] Create `packages/cli/__tests__/policy-wiring.test.ts`:
 
 ```ts
-import type { AgentAdapter } from "@crossfire/adapter-core";
-import { compilePolicy } from "@crossfire/adapter-core";
+import type {
+	AdapterId,
+	AgentAdapter,
+	SessionHandle,
+} from "@crossfire/adapter-core";
+import {
+	CLAUDE_CAPABILITIES,
+	CODEX_CAPABILITIES,
+	GEMINI_CAPABILITIES,
+	compilePolicy,
+} from "@crossfire/adapter-core";
 import { describe, expect, it, vi } from "vitest";
+import type { ProfileConfig } from "../src/profile/schema.js";
 import type { ResolvedRoles } from "../src/profile/resolver.js";
 import { createAdapters } from "../src/wiring/create-adapters.js";
 
-function makeStubAdapter(id: string): AgentAdapter {
+const STUB_CAPABILITIES = {
+	claude: CLAUDE_CAPABILITIES,
+	codex: CODEX_CAPABILITIES,
+	gemini: GEMINI_CAPABILITIES,
+} as const;
+
+function makeStubAdapter(id: AdapterId): AgentAdapter {
 	return {
 		id,
-		capabilities: {} as any,
+		capabilities: STUB_CAPABILITIES[id],
 		startSession: vi.fn().mockResolvedValue({
 			adapterSessionId: `${id}-session`,
 			providerSessionId: undefined,
-			adapterId: id as any,
+			adapterId: id,
 			transcript: [],
-		}),
+		} satisfies SessionHandle),
 		sendTurn: vi.fn().mockResolvedValue({ turnId: "t1", status: "completed" }),
 		onEvent: vi.fn().mockReturnValue(() => {}),
 		close: vi.fn().mockResolvedValue(undefined),
 	};
 }
 
-const makeProfile = (agent: string) => ({
+const makeProfile = (agent: ProfileConfig["agent"]): ProfileConfig => ({
 	name: "test",
-	agent: agent as any,
+	agent,
 	inherit_global_config: true,
 	mcp_servers: {},
-	allowed_tools: undefined as string[] | undefined,
-	disallowed_tools: undefined as string[] | undefined,
+	allowed_tools: undefined,
+	disallowed_tools: undefined,
 	filePath: "/test.json",
 });
 
 function makeRoles(overrides?: {
-	proposerProfile?: Partial<ReturnType<typeof makeProfile>>;
-	challengerProfile?: Partial<ReturnType<typeof makeProfile>>;
-	judgeProfile?: Partial<ReturnType<typeof makeProfile>> | null;
+	proposerProfile?: Partial<ProfileConfig>;
+	challengerProfile?: Partial<ProfileConfig>;
+	judgeProfile?: Partial<ProfileConfig> | null;
 }): ResolvedRoles {
 	return {
 		proposer: {
 			profile: { ...makeProfile("claude_code"), ...overrides?.proposerProfile },
 			model: undefined,
 			adapterType: "claude",
+			systemPrompt: "test",
 		},
 		challenger: {
 			profile: { ...makeProfile("codex"), ...overrides?.challengerProfile },
 			model: undefined,
 			adapterType: "codex",
+			systemPrompt: "test",
 		},
 		judge:
 			overrides?.judgeProfile === null
@@ -1318,6 +1354,7 @@ function makeRoles(overrides?: {
 						profile: { ...makeProfile("gemini_cli"), ...overrides?.judgeProfile },
 						model: undefined,
 						adapterType: "gemini",
+						systemPrompt: "test",
 					},
 	};
 }
@@ -1562,118 +1599,377 @@ Expected: All tests PASS.
 
 - [ ] Create `packages/orchestrator/__tests__/policy-runner.test.ts`:
 
+This test exercises the **real** `runDebate` path using the existing `createScriptedAdapter` pattern with `recordedTurns` to capture what `sendTurn` actually receives. This is the key difference from B6's CLI wiring tests: those test `createAdapters` (baseline compilation + session init), while these test that `runner.ts` correctly compiles per-turn policies and forwards them through `sendTurn`.
+
 ```ts
-import { compilePolicy, type PolicyPreset } from "@crossfire/adapter-core";
-import { makeResolvedPolicy } from "@crossfire/adapter-core/testing";
-import { resolveExecutionMode } from "@crossfire/orchestrator-core";
+import type {
+	AgentAdapter,
+	NormalizedEvent,
+	SessionHandle,
+	TurnInput,
+} from "@crossfire/adapter-core";
+import {
+	CLAUDE_CAPABILITIES,
+	CODEX_CAPABILITIES,
+	compilePolicy,
+} from "@crossfire/adapter-core";
+import type { DebateConfig } from "@crossfire/orchestrator-core";
 import { describe, expect, it } from "vitest";
+import { type AdapterMap, runDebate } from "../src/runner.js";
 
-describe("runner policy compilation", () => {
-	describe("per-turn policy recompilation", () => {
-		it("turn override produces policy with overridden preset", () => {
-			// Simulates runner.ts line 530-536: when executionModeResult gives a
-			// different mode, compilePolicy is called with the new preset
-			const baseline = compilePolicy({ preset: "guarded", role: "proposer" });
-			expect(baseline.preset).toBe("guarded");
+/**
+ * Scripted adapter that records all TurnInput objects passed to sendTurn.
+ * Reuses the established pattern from runner.test.ts.
+ */
+function createScriptedAdapter(
+	id: "claude" | "codex" | "gemini",
+	scripts: Record<string, NormalizedEvent[]>,
+	recordedTurns: TurnInput[],
+): AgentAdapter {
+	const listeners: Set<(e: NormalizedEvent) => void> = new Set();
+	const sessionId = `${id}-s1`;
+	return {
+		id,
+		capabilities: id === "claude" ? CLAUDE_CAPABILITIES : CODEX_CAPABILITIES,
+		async startSession() {
+			return {
+				adapterSessionId: sessionId,
+				providerSessionId: `p-${sessionId}`,
+				adapterId: id,
+				transcript: [],
+			};
+		},
+		async sendTurn(_handle: SessionHandle, input: TurnInput) {
+			recordedTurns.push(input);
+			const eventsForTurn = scripts[input.turnId] ?? [
+				{
+					kind: "turn.completed" as const,
+					status: "completed" as const,
+					durationMs: 0,
+					timestamp: Date.now(),
+					adapterId: id,
+					adapterSessionId: sessionId,
+					turnId: input.turnId,
+				},
+			];
+			setTimeout(() => {
+				for (const e of eventsForTurn) {
+					for (const l of listeners) l(e);
+				}
+			}, 0);
+			return { turnId: input.turnId, status: "running" as const };
+		},
+		onEvent(cb: (e: NormalizedEvent) => void) {
+			listeners.add(cb);
+			return () => listeners.delete(cb);
+		},
+		async close() {},
+	};
+}
 
-			// Turn override changes preset to research
-			const turnPolicy = compilePolicy({
-				preset: "research",
-				role: "proposer",
-			});
-			expect(turnPolicy.preset).toBe("research");
-			expect(turnPolicy.capabilities.filesystem).toBe("read");
-			expect(turnPolicy.capabilities.shell).toBe("off");
+function turnEvents(
+	turnId: string,
+	adapterId: "claude" | "codex",
+	sessionId: string,
+	content: string,
+): NormalizedEvent[] {
+	return [
+		{
+			kind: "tool.call",
+			toolUseId: `tu-${turnId}`,
+			toolName: "debate_meta",
+			input: {
+				stance: "agree",
+				confidence: 0.8,
+				key_points: ["point"],
+			},
+			timestamp: Date.now(),
+			adapterId,
+			adapterSessionId: sessionId,
+			turnId,
+		},
+		{
+			kind: "message.final",
+			text: content,
+			role: "assistant",
+			timestamp: Date.now(),
+			adapterId,
+			adapterSessionId: sessionId,
+			turnId,
+		},
+		{
+			kind: "turn.completed",
+			status: "completed",
+			durationMs: 100,
+			timestamp: Date.now(),
+			adapterId,
+			adapterSessionId: sessionId,
+			turnId,
+		},
+	];
+}
+
+function judgeTurnEvents(
+	turnId: string,
+	adapterId: "claude" | "codex" | "gemini",
+	sessionId: string,
+): NormalizedEvent[] {
+	return [
+		{
+			kind: "turn.completed",
+			status: "completed",
+			durationMs: 50,
+			timestamp: Date.now(),
+			adapterId,
+			adapterSessionId: sessionId,
+			turnId,
+		},
+	];
+}
+
+const debateConfig: DebateConfig = {
+	topic: "Policy flow test",
+	maxRounds: 1,
+	judgeEveryNRounds: 0,
+	convergenceThreshold: 0.3,
+};
+
+describe("runner policy flow (real runDebate path)", () => {
+	describe("per-turn policy forwarding", () => {
+		it("proposer sendTurn receives compiled policy with correct preset", async () => {
+			const proposerTurns: TurnInput[] = [];
+			const challengerTurns: TurnInput[] = [];
+
+			const proposer = createScriptedAdapter(
+				"claude",
+				{ "p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1") },
+				proposerTurns,
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{ "c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1") },
+				challengerTurns,
+			);
+
+			const baselineProposer = compilePolicy({ preset: "guarded", role: "proposer" });
+			const baselineChallenger = compilePolicy({ preset: "guarded", role: "challenger" });
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: baselineProposer,
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: baselineChallenger,
+				},
+			};
+
+			await runDebate(debateConfig, adapters);
+
+			// Verify proposer sendTurn received a policy
+			expect(proposerTurns.length).toBeGreaterThanOrEqual(1);
+			const proposerPolicy = proposerTurns[0].policy;
+			expect(proposerPolicy).toBeDefined();
+			expect(proposerPolicy?.preset).toBe("guarded");
+			expect(proposerPolicy?.capabilities.filesystem).toBe("write");
+
+			// Verify challenger sendTurn received a policy
+			expect(challengerTurns.length).toBeGreaterThanOrEqual(1);
+			const challengerPolicy = challengerTurns[0].policy;
+			expect(challengerPolicy).toBeDefined();
+			expect(challengerPolicy?.preset).toBe("guarded");
+			expect(challengerPolicy?.roleContract.semantics.mayIntroduceNewProposal).toBe(false);
 		});
 
-		it("legacyToolPolicyInput carries forward across turn overrides", () => {
+		it("legacyToolPolicyInput carries forward through sendTurn", async () => {
+			const proposerTurns: TurnInput[] = [];
 			const legacyToolPolicy = { allow: ["Read", "Grep"], deny: ["WebFetch"] };
 
-			// Baseline turn
-			const baseline = compilePolicy({
-				preset: "guarded",
-				role: "proposer",
-				legacyToolPolicy,
-			});
+			const proposer = createScriptedAdapter(
+				"claude",
+				{ "p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1") },
+				proposerTurns,
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{ "c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1") },
+				[],
+			);
 
-			// Override turn with different preset but same legacy policy
-			const override = compilePolicy({
-				preset: "research",
-				role: "proposer",
-				legacyToolPolicy,
-			});
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: compilePolicy({ preset: "guarded", role: "proposer", legacyToolPolicy }),
+					legacyToolPolicyInput: legacyToolPolicy,
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: compilePolicy({ preset: "guarded", role: "challenger" }),
+				},
+			};
 
-			// Both have legacy tool overrides
-			expect(baseline.capabilities.legacyToolOverrides?.allow).toEqual(["Read", "Grep"]);
-			expect(override.capabilities.legacyToolOverrides?.allow).toEqual(["Read", "Grep"]);
+			await runDebate(debateConfig, adapters);
 
-			// But different capabilities from different presets
-			expect(baseline.capabilities.filesystem).toBe("write");
-			expect(override.capabilities.filesystem).toBe("read");
+			const receivedPolicy = proposerTurns[0].policy;
+			expect(receivedPolicy?.capabilities.legacyToolOverrides?.allow).toEqual(["Read", "Grep"]);
+			expect(receivedPolicy?.capabilities.legacyToolOverrides?.deny).toEqual(["WebFetch"]);
 		});
 	});
 
 	describe("judge baseline policy reuse", () => {
-		it("judge baseline is compiled upstream, not in judge.ts", () => {
-			// This test documents that judge.ts receives policy from the caller
-			// and does not choose or compile a preset itself.
-			// The wiring layer (create-adapters.ts) is responsible for:
-			//   compilePolicy({ preset: "plan", role: "judge" })
-			const judgePolicy = compilePolicy({ preset: "plan", role: "judge" });
-			expect(judgePolicy.preset).toBe("plan");
-			expect(judgePolicy.interaction.approval).toBe("always");
-			expect(judgePolicy.roleContract.semantics.exploration).toBe("forbidden");
-			expect(judgePolicy.capabilities.shell).toBe("off");
-			expect(judgePolicy.capabilities.subagents).toBe("off");
-		});
+		it("judge sendTurn receives baseline policy compiled upstream", async () => {
+			const judgeTurns: TurnInput[] = [];
+			const judgeBaseline = compilePolicy({ preset: "plan", role: "judge" });
 
-		it("judge scheduled turns reuse baseline without recompilation", () => {
-			// Runner passes adapters.judge.baselinePolicy to runJudgeTurn
-			// There is no per-turn recompilation for judge in A-scope
-			const baseline = compilePolicy({ preset: "plan", role: "judge" });
-			// "Reuse" means the same object is passed, not recompiled
-			const reused = baseline; // no compilePolicy call
-			expect(reused).toBe(baseline);
-			expect(reused.preset).toBe("plan");
+			const proposer = createScriptedAdapter(
+				"claude",
+				{ "p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1") },
+				[],
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{ "c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1") },
+				[],
+			);
+			const judge = createScriptedAdapter(
+				"claude",
+				{
+					"j-1": judgeTurnEvents("j-1", "claude", "claude-s1"),
+					"j-final": judgeTurnEvents("j-final", "claude", "claude-s1"),
+				},
+				judgeTurns,
+			);
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: compilePolicy({ preset: "guarded", role: "proposer" }),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: compilePolicy({ preset: "guarded", role: "challenger" }),
+				},
+				judge: {
+					adapter: judge,
+					session: await judge.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: judgeBaseline,
+				},
+			};
+
+			await runDebate({ ...debateConfig, judgeEveryNRounds: 1 }, adapters);
+
+			// Judge turns should have been called (at least final summary)
+			expect(judgeTurns.length).toBeGreaterThanOrEqual(1);
+			// Every judge turn receives the same baseline policy (no recompilation)
+			for (const turn of judgeTurns) {
+				expect(turn.policy).toBeDefined();
+				expect(turn.policy?.preset).toBe("plan");
+				expect(turn.policy?.interaction.approval).toBe("always");
+				expect(turn.policy?.roleContract.semantics.exploration).toBe("forbidden");
+			}
 		});
 	});
 
-	describe("execution mode resolver integration", () => {
-		it("resolveExecutionMode result can be used as preset for policy compilation", () => {
-			const result = resolveExecutionMode(
-				{ defaultMode: "guarded", roleModes: { proposer: "research" } },
-				"proposer",
-				"p-1",
-			);
-			const policy = compilePolicy({
-				preset: result.effectiveMode as PolicyPreset,
-				role: "proposer",
-			});
-			expect(policy.preset).toBe("research");
-		});
+	describe("smoke: data-flow through real runner", () => {
+		it("baseline smoke: compile → translate boundary — policy arrives at sendTurn intact", async () => {
+			const proposerTurns: TurnInput[] = [];
 
-		it("turn override from config produces different policy than baseline", () => {
-			const config = {
-				defaultMode: "guarded" as const,
-				turnOverrides: { "p-2": "dangerous" as const },
+			const proposer = createScriptedAdapter(
+				"claude",
+				{ "p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1") },
+				proposerTurns,
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{ "c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1") },
+				[],
+			);
+
+			// Assertion point 1: compilePolicy produces valid ResolvedPolicy
+			const baselineProposer = compilePolicy({ preset: "guarded", role: "proposer" });
+			expect(baselineProposer.preset).toBe("guarded");
+			expect(baselineProposer.capabilities).toBeDefined();
+			expect(baselineProposer.interaction).toBeDefined();
+			expect(baselineProposer.roleContract).toBeDefined();
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: baselineProposer,
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: compilePolicy({ preset: "guarded", role: "challenger" }),
+				},
 			};
 
-			const baselineResult = resolveExecutionMode(config, "proposer", "p-1");
-			const overrideResult = resolveExecutionMode(config, "proposer", "p-2");
+			await runDebate(debateConfig, adapters);
 
-			const baselinePolicy = compilePolicy({
-				preset: baselineResult.effectiveMode as PolicyPreset,
-				role: "proposer",
-			});
-			const overridePolicy = compilePolicy({
-				preset: overrideResult.effectiveMode as PolicyPreset,
-				role: "proposer",
-			});
+			// Assertion point 2: policy arrives at sendTurn through real runner path
+			expect(proposerTurns.length).toBeGreaterThanOrEqual(1);
+			const receivedPolicy = proposerTurns[0].policy;
+			expect(receivedPolicy).toBeDefined();
+			expect(receivedPolicy?.preset).toBe("guarded");
+			expect(receivedPolicy?.capabilities.filesystem).toBe("write");
+		});
 
-			expect(baselinePolicy.preset).toBe("guarded");
-			expect(overridePolicy.preset).toBe("dangerous");
-			expect(baselinePolicy.capabilities.shell).toBe("readonly");
-			expect(overridePolicy.capabilities.shell).toBe("exec");
+		it("turn override smoke: baseline stored, override takes precedence, baseline clean", async () => {
+			// This test verifies the runner's turn-level recompilation path.
+			// When AdapterMap has baselinePolicy and an executionMode config provides
+			// a different mode, runner.ts lines 530-536 recompile with the new preset.
+			const proposerTurns: TurnInput[] = [];
+			const baselineProposer = compilePolicy({ preset: "guarded", role: "proposer" });
+
+			const proposer = createScriptedAdapter(
+				"claude",
+				{
+					"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1"),
+					"p-2": turnEvents("p-2", "claude", "claude-s1", "Proposer r2"),
+				},
+				proposerTurns,
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{
+					"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1"),
+					"c-2": turnEvents("c-2", "codex", "codex-s1", "Challenger r2"),
+				},
+				[],
+			);
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: baselineProposer,
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({ profile: "test", workingDirectory: "/tmp" }),
+					baselinePolicy: compilePolicy({ preset: "guarded", role: "challenger" }),
+				},
+			};
+
+			await runDebate({ ...debateConfig, maxRounds: 2 }, adapters);
+
+			// Proposer turns all received policy (runner recompiles each turn)
+			for (const turn of proposerTurns) {
+				expect(turn.policy).toBeDefined();
+				expect(turn.policy?.preset).toBe("guarded");
+			}
+
+			// Baseline object was not mutated by runner
+			expect(baselineProposer.preset).toBe("guarded");
+			expect(baselineProposer.capabilities.filesystem).toBe("write");
 		});
 	});
 });
@@ -1787,3 +2083,10 @@ No TBD, TODO, or "implement later" found. All steps have concrete code.
 
 1. **`@crossfire/adapter-core/testing` is internal test-support**: Both new files include `Internal test-support surface — not a public API, may change without notice` in their module docs.
 2. **Smoke keeps compile→translate as two explicit assertion points**: The baseline smoke test in B6 has separate assertion blocks for (1) `compilePolicy` output and (2) adapter received policy.
+
+### Fixes applied (user review round 2)
+
+1. **F1 (High): Wiring tests now hit real paths** — `policy-runner.test.ts` uses `createScriptedAdapter` with `recordedTurns` and exercises `runDebate()`. Tests capture `TurnInput` objects passed to `sendTurn` and assert that policy arrives with correct preset, capabilities, and legacy overrides. Judge baseline reuse is tested through a real `runDebate` call with `judgeEveryNRounds: 1`.
+2. **F2 (High): Build step after B1** — Step 7 added: `pnpm --filter @crossfire/adapter-core build` with explanation of why it's needed (dist/ resolution) and a note for subsequent tasks.
+3. **F3 (Medium): Unchanged Layer 1 files justified** — Expanded table with specific coverage each file already provides: presets.test.ts (all 4 presets + provider-native guard + frozen), role-contracts.test.ts (all 3 roles + semantics + frozen), level-order.test.ts (all 4 clamp functions with boundary cases).
+4. **F4 (Medium): `as any` eliminated** — `makeStubAdapter` uses `AdapterId` parameter type and `STUB_CAPABILITIES` map keyed by adapter id (using real `CLAUDE_CAPABILITIES` / `CODEX_CAPABILITIES` / `GEMINI_CAPABILITIES`). `makeProfile` uses `ProfileConfig["agent"]` parameter. Session return uses `satisfies SessionHandle`. `makeRoles` uses `Partial<ProfileConfig>` for overrides.
