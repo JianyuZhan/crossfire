@@ -205,6 +205,8 @@ Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslati
 
 `StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` instead of reading the deprecated `executionMode` field. `AdapterMap` entries carry optional `baselinePolicy` and `legacyToolPolicyInput` so the orchestrator runner can thread compiled policy through to adapters.
 
+The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sendTurn()`. When a policy is present, it calls `translatePolicy()` and emits `run.warning` events for any translation warnings. The legacy `mapExecutionModeToClaudeQueryOptions()` path is preserved as fallback when no policy is set.
+
 ## Session, Turn, and Recovery Types
 
 ### SessionHandle

@@ -6,6 +6,7 @@ import type {
 	ApprovalOption,
 	LocalTurnMetrics,
 	NormalizedEvent,
+	ResolvedPolicy,
 	SessionHandle,
 	StartSessionInput,
 	TurnExecutionMode,
@@ -20,6 +21,7 @@ import {
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { mapSdkMessage } from "./event-mapper.js";
 import { buildHooks } from "./hooks.js";
+import { translatePolicy } from "./policy-translation.js";
 import type {
 	ClaudeCanUseToolOptions,
 	ClaudePermissionMode,
@@ -33,6 +35,13 @@ import type {
 /** Options for constructing a ClaudeAdapter */
 export interface ClaudeAdapterOptions {
 	queryFn: QueryFn;
+}
+
+interface ClaudeSessionConfig {
+	model?: string;
+	allowedTools?: string[];
+	disallowedTools?: string[];
+	baselinePolicy?: ResolvedPolicy;
 }
 
 /** Internal state for a running query within a session */
@@ -69,29 +78,45 @@ const CLAUDE_RESEARCH_MAX_TURNS = 12;
 
 function mapExecutionModeToClaudeQueryOptions(
 	mode: TurnExecutionMode | undefined,
+	toolConfig: {
+		allowedTools?: string[];
+		disallowedTools?: string[];
+	},
 ): {
 	permissionMode?: ClaudePermissionMode;
 	allowDangerouslySkipPermissions?: boolean;
 	maxTurns?: number;
 	allowedTools?: string[];
+	disallowedTools?: string[];
 } {
 	switch (mode) {
 		case "research":
 			return {
 				permissionMode: "dontAsk",
 				maxTurns: CLAUDE_RESEARCH_MAX_TURNS,
-				allowedTools: CLAUDE_RESEARCH_ALLOWED_TOOLS,
+				allowedTools: toolConfig.allowedTools ?? CLAUDE_RESEARCH_ALLOWED_TOOLS,
+				disallowedTools: toolConfig.disallowedTools,
 			};
 		case "dangerous":
 			return {
 				permissionMode: "bypassPermissions",
 				allowDangerouslySkipPermissions: true,
+				allowedTools: toolConfig.allowedTools,
+				disallowedTools: toolConfig.disallowedTools,
 			};
 		case "plan":
-			return { permissionMode: "plan" };
+			return {
+				permissionMode: "plan",
+				allowedTools: toolConfig.allowedTools,
+				disallowedTools: toolConfig.disallowedTools,
+			};
 		case "guarded":
 		case undefined:
-			return { permissionMode: "default" };
+			return {
+				permissionMode: "default",
+				allowedTools: toolConfig.allowedTools,
+				disallowedTools: toolConfig.disallowedTools,
+			};
 	}
 }
 
@@ -183,7 +208,7 @@ export class ClaudeAdapter implements AgentAdapter {
 	private readonly listeners: Set<(e: NormalizedEvent) => void> = new Set();
 	private readonly queries: Map<string, QueryContext> = new Map();
 	private readonly pendingApprovals: Map<string, PendingApproval> = new Map();
-	private readonly sessionModels: Map<string, string> = new Map();
+	private readonly sessionConfigs: Map<string, ClaudeSessionConfig> = new Map();
 
 	constructor(options: ClaudeAdapterOptions) {
 		this.queryFn = options.queryFn;
@@ -192,9 +217,12 @@ export class ClaudeAdapter implements AgentAdapter {
 	async startSession(input: StartSessionInput): Promise<SessionHandle> {
 		sessionCounter++;
 		const adapterSessionId = `claude-session-${sessionCounter}-${Date.now()}`;
-		if (input.model) {
-			this.sessionModels.set(adapterSessionId, input.model);
-		}
+		this.sessionConfigs.set(adapterSessionId, {
+			model: input.model,
+			allowedTools: input.allowedTools,
+			disallowedTools: input.disallowedTools,
+			baselinePolicy: input.policy,
+		});
 		return {
 			adapterSessionId,
 			providerSessionId: undefined,
@@ -264,11 +292,41 @@ export class ClaudeAdapter implements AgentAdapter {
 			});
 		};
 
+		const sessionConfig = this.sessionConfigs.get(handle.adapterSessionId);
+		const activePolicy = input.policy ?? sessionConfig?.baselinePolicy;
+
+		let queryOptions: Record<string, unknown>;
+		if (activePolicy) {
+			const { native, warnings } = translatePolicy(activePolicy);
+			for (const w of warnings) {
+				this.emit({
+					kind: "run.warning",
+					adapterId: "claude",
+					adapterSessionId: handle.adapterSessionId,
+					turnId: input.turnId,
+					message: `[policy] ${w.field}: ${w.message}`,
+					timestamp: Date.now(),
+				});
+			}
+			queryOptions = {
+				permissionMode: native.permissionMode,
+				maxTurns: native.maxTurns,
+				allowedTools: native.allowedTools,
+				disallowedTools: native.disallowedTools,
+				allowDangerouslySkipPermissions: native.allowDangerouslySkipPermissions,
+			};
+		} else {
+			queryOptions = mapExecutionModeToClaudeQueryOptions(input.executionMode, {
+				allowedTools: sessionConfig?.allowedTools,
+				disallowedTools: sessionConfig?.disallowedTools,
+			});
+		}
+
 		const query = this.queryFn({
 			prompt: input.prompt,
 			resume: handle.providerSessionId ?? undefined,
-			model: this.sessionModels.get(handle.adapterSessionId),
-			...mapExecutionModeToClaudeQueryOptions(input.executionMode),
+			model: sessionConfig?.model,
+			...queryOptions,
 			canUseTool,
 			hooks,
 		});
@@ -350,7 +408,7 @@ export class ClaudeAdapter implements AgentAdapter {
 
 	async close(handle: SessionHandle): Promise<void> {
 		this.queries.delete(handle.adapterSessionId);
-		this.sessionModels.delete(handle.adapterSessionId);
+		this.sessionConfigs.delete(handle.adapterSessionId);
 		// Clean up any pending approvals for this session
 		for (const [id, pending] of this.pendingApprovals) {
 			if (pending.adapterSessionId === handle.adapterSessionId) {
@@ -469,7 +527,7 @@ export class ClaudeAdapter implements AgentAdapter {
 						schemaType: handle.recoveryContext.schemaType,
 					}),
 					resume: undefined,
-					model: this.sessionModels.get(handle.adapterSessionId),
+					model: this.sessionConfigs.get(handle.adapterSessionId)?.model,
 					hooks,
 				});
 
