@@ -4,6 +4,10 @@ import {
 	clampShell,
 	clampSubagents,
 } from "./level-order.js";
+import type {
+	CompilePolicyDiagnostics,
+	PolicyClampNote,
+} from "./observation-types.js";
 import { PRESET_EXPANSIONS } from "./presets.js";
 import { DEFAULT_ROLE_CONTRACTS } from "./role-contracts.js";
 import type {
@@ -22,16 +26,56 @@ function copyRoleContract(rc: RoleContract): RoleContract {
 	};
 }
 
-function clampCapabilities(
+function clampCapabilitiesWithNotes(
 	base: Omit<CapabilityPolicy, "legacyToolOverrides">,
 	ceilings: CapabilityCeilings,
-): Omit<CapabilityPolicy, "legacyToolOverrides"> {
-	return {
-		filesystem: clampFilesystem(base.filesystem, ceilings.filesystem),
-		network: clampNetwork(base.network, ceilings.network),
-		shell: clampShell(base.shell, ceilings.shell),
-		subagents: clampSubagents(base.subagents, ceilings.subagents),
-	};
+): {
+	capabilities: Omit<CapabilityPolicy, "legacyToolOverrides">;
+	clamps: PolicyClampNote[];
+} {
+	const clamps: PolicyClampNote[] = [];
+
+	const filesystem = clampFilesystem(base.filesystem, ceilings.filesystem);
+	if (filesystem !== base.filesystem) {
+		clamps.push({
+			field: "capabilities.filesystem",
+			before: base.filesystem,
+			after: filesystem,
+			reason: "role_ceiling",
+		});
+	}
+
+	const network = clampNetwork(base.network, ceilings.network);
+	if (network !== base.network) {
+		clamps.push({
+			field: "capabilities.network",
+			before: base.network,
+			after: network,
+			reason: "role_ceiling",
+		});
+	}
+
+	const shell = clampShell(base.shell, ceilings.shell);
+	if (shell !== base.shell) {
+		clamps.push({
+			field: "capabilities.shell",
+			before: base.shell,
+			after: shell,
+			reason: "role_ceiling",
+		});
+	}
+
+	const subagents = clampSubagents(base.subagents, ceilings.subagents);
+	if (subagents !== base.subagents) {
+		clamps.push({
+			field: "capabilities.subagents",
+			before: base.subagents,
+			after: subagents,
+			reason: "role_ceiling",
+		});
+	}
+
+	return { capabilities: { filesystem, network, shell, subagents }, clamps };
 }
 
 function applyLegacyToolOverrides(
@@ -57,16 +101,19 @@ function applyLegacyToolOverrides(
 	};
 }
 
-export function compilePolicy(input: CompilePolicyInput): ResolvedPolicy {
+function compilePolicyInternal(
+	input: CompilePolicyInput,
+): CompilePolicyDiagnostics {
 	const { preset, role, legacyToolPolicy } = input;
 
 	const presetExpansion = PRESET_EXPANSIONS[preset];
 	const roleContract = copyRoleContract(DEFAULT_ROLE_CONTRACTS[role]);
 
-	const clampedCapabilities = clampCapabilities(
-		presetExpansion.capabilities,
-		roleContract.ceilings,
-	);
+	const { capabilities: clampedCapabilities, clamps } =
+		clampCapabilitiesWithNotes(
+			presetExpansion.capabilities,
+			roleContract.ceilings,
+		);
 
 	const capabilities = applyLegacyToolOverrides(
 		clampedCapabilities,
@@ -74,9 +121,22 @@ export function compilePolicy(input: CompilePolicyInput): ResolvedPolicy {
 	);
 
 	return {
-		preset,
-		roleContract,
-		capabilities,
-		interaction: presetExpansion.interaction,
+		policy: {
+			preset,
+			roleContract,
+			capabilities,
+			interaction: presetExpansion.interaction,
+		},
+		clamps,
 	};
+}
+
+export function compilePolicy(input: CompilePolicyInput): ResolvedPolicy {
+	return compilePolicyInternal(input).policy;
+}
+
+export function compilePolicyWithDiagnostics(
+	input: CompilePolicyInput,
+): CompilePolicyDiagnostics {
+	return compilePolicyInternal(input);
 }
