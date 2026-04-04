@@ -173,7 +173,9 @@ describe("translatePolicy (Gemini)", () => {
 				preset: "guarded",
 				role: "proposer",
 			});
-			const { warnings } = translatePolicy(policy);
+			const { native, warnings } = translatePolicy(policy);
+			expect(native.approvalMode).toBe("default");
+			expect(native.approvalMode).not.toBe("auto_edit");
 			const approvalWarnings = warnings.filter(
 				(w) => w.field === "interaction.approval",
 			);
@@ -188,7 +190,12 @@ describe("translatePolicy (Gemini)", () => {
 				preset: "dangerous",
 				role: "proposer",
 			});
-			const { warnings } = translatePolicy(policy);
+			const { native, warnings } = translatePolicy(policy);
+			expect(native.approvalMode).toBe("yolo");
+			const approvalWarnings = warnings.filter(
+				(w) => w.field === "interaction.approval",
+			);
+			expect(approvalWarnings).not.toHaveLength(0);
 			expectWarning(warnings, {
 				field: "interaction.approval",
 				adapter: "gemini",

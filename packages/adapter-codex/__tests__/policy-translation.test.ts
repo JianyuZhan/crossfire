@@ -169,6 +169,7 @@ describe("translatePolicy (Codex)", () => {
 			const { native, warnings } = translatePolicy(policy);
 			// New behavior holds
 			expect(native.approvalPolicy).toBe("on-request");
+			expect(native.approvalPolicy).not.toBe("on-failure");
 			// Mapping is marked approximate (not exact)
 			expectWarning(warnings, {
 				field: "interaction.approval",

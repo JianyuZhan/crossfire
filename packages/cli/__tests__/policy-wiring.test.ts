@@ -1,7 +1,10 @@
 import type {
 	AdapterId,
 	AgentAdapter,
+	PolicyTranslationWarning,
+	ResolvedPolicy,
 	SessionHandle,
+	TurnInput,
 } from "@crossfire/adapter-core";
 import {
 	CLAUDE_CAPABILITIES,
@@ -10,6 +13,8 @@ import {
 	compilePolicy,
 } from "@crossfire/adapter-core";
 import { describe, expect, it, vi } from "vitest";
+import type { ClaudeNativeOptions } from "../../adapter-claude/src/policy-translation.js";
+import { translatePolicy as translateClaudePolicy } from "../../adapter-claude/src/policy-translation.js";
 import type { ResolvedRoles } from "../src/profile/resolver.js";
 import type { ProfileConfig } from "../src/profile/schema.js";
 import { createAdapters } from "../src/wiring/create-adapters.js";
@@ -19,6 +24,12 @@ const STUB_CAPABILITIES = {
 	codex: CODEX_CAPABILITIES,
 	gemini: GEMINI_CAPABILITIES,
 } as const;
+
+type ClaudeTranslationRecord = {
+	policy: ResolvedPolicy;
+	native: ClaudeNativeOptions;
+	warnings: readonly PolicyTranslationWarning[];
+};
 
 function makeStubAdapter(id: AdapterId): AgentAdapter {
 	return {
@@ -33,6 +44,58 @@ function makeStubAdapter(id: AdapterId): AgentAdapter {
 		sendTurn: vi.fn().mockResolvedValue({ turnId: "t1", status: "completed" }),
 		onEvent: vi.fn().mockReturnValue(() => {}),
 		close: vi.fn().mockResolvedValue(undefined),
+	};
+}
+
+function makeClaudeTranslatingStubAdapter(): {
+	adapter: AgentAdapter;
+	startTranslations: ClaudeTranslationRecord[];
+	turnTranslations: ClaudeTranslationRecord[];
+	turnCalls: TurnInput[];
+} {
+	const startTranslations: ClaudeTranslationRecord[] = [];
+	const turnTranslations: ClaudeTranslationRecord[] = [];
+	const turnCalls: TurnInput[] = [];
+	const startSession: AgentAdapter["startSession"] = async (input) => {
+		if (input.policy) {
+			const translation = translateClaudePolicy(input.policy);
+			startTranslations.push({
+				policy: input.policy,
+				native: translation.native,
+				warnings: translation.warnings,
+			});
+		}
+		return {
+			adapterSessionId: "claude-session",
+			providerSessionId: undefined,
+			adapterId: "claude",
+			transcript: [],
+		};
+	};
+	const sendTurn: AgentAdapter["sendTurn"] = async (_handle, input) => {
+		turnCalls.push(input);
+		if (input.policy) {
+			const translation = translateClaudePolicy(input.policy);
+			turnTranslations.push({
+				policy: input.policy,
+				native: translation.native,
+				warnings: translation.warnings,
+			});
+		}
+		return { turnId: input.turnId, status: "completed" };
+	};
+	return {
+		adapter: {
+			id: "claude",
+			capabilities: CLAUDE_CAPABILITIES,
+			startSession: vi.fn(startSession),
+			sendTurn: vi.fn(sendTurn),
+			onEvent: vi.fn().mockReturnValue(() => {}),
+			close: vi.fn().mockResolvedValue(undefined),
+		},
+		startTranslations,
+		turnTranslations,
+		turnCalls,
 	};
 }
 
@@ -203,96 +266,98 @@ describe("policy wiring", () => {
 	});
 
 	describe("turn override flow", () => {
-		it("compiling with different preset produces different policy", () => {
-			const baseline = compilePolicy({ preset: "guarded", role: "proposer" });
-			const turnOverride = compilePolicy({
-				preset: "research",
-				role: "proposer",
+		it("adapter entry keeps baseline policy and legacy tool input for downstream override compilation", async () => {
+			const bundle = await createAdapters(
+				makeRoles({
+					proposerProfile: {
+						allowed_tools: ["Read"],
+						disallowed_tools: ["WebFetch"],
+					},
+				}),
+				{
+					claude: () => makeStubAdapter("claude"),
+					codex: () => makeStubAdapter("codex"),
+					gemini: () => makeStubAdapter("gemini"),
+				},
+			);
+			expect(bundle.adapters.proposer.baselinePolicy?.preset).toBe("guarded");
+			expect(bundle.adapters.proposer.legacyToolPolicyInput).toEqual({
+				allow: ["Read"],
+				deny: ["WebFetch"],
 			});
-			expect(baseline.preset).toBe("guarded");
-			expect(turnOverride.preset).toBe("research");
-			expect(baseline.capabilities.filesystem).toBe("write");
-			expect(turnOverride.capabilities.filesystem).toBe("read");
-		});
-
-		it("turn override preserves legacy tool policy from baseline", () => {
-			const legacyToolPolicy = { allow: ["Read"], deny: ["WebFetch"] };
-			const baseline = compilePolicy({
-				preset: "guarded",
-				role: "proposer",
-				legacyToolPolicy,
-			});
-			const turnOverride = compilePolicy({
-				preset: "research",
-				role: "proposer",
-				legacyToolPolicy,
-			});
-			expect(baseline.capabilities.legacyToolOverrides?.allow).toEqual([
-				"Read",
-			]);
-			expect(turnOverride.capabilities.legacyToolOverrides?.allow).toEqual([
-				"Read",
-			]);
-			expect(turnOverride.preset).toBe("research");
-		});
-
-		it("turn override does not pollute baseline", () => {
-			const legacyToolPolicy = { allow: ["Read"] };
-			const baseline = compilePolicy({
-				preset: "guarded",
-				role: "proposer",
-				legacyToolPolicy,
-			});
-			const _turnOverride = compilePolicy({
-				preset: "research",
-				role: "proposer",
-				legacyToolPolicy,
-			});
-			expect(baseline.preset).toBe("guarded");
-			expect(baseline.capabilities.filesystem).toBe("write");
+			await bundle.closeAll();
 		});
 	});
 
 	describe("smoke", () => {
-		it("baseline smoke: compile -> translate -> adapter receives policy", async () => {
-			const policy = compilePolicy({ preset: "guarded", role: "proposer" });
-			expect(policy.preset).toBe("guarded");
-			expect(policy.capabilities).toBeDefined();
-			expect(policy.interaction).toBeDefined();
-			expect(policy.roleContract).toBeDefined();
-
-			const adapter = makeStubAdapter("claude");
+		it("baseline smoke: compile -> translate -> adapter startSession receives translated policy", async () => {
+			const proposer = makeClaudeTranslatingStubAdapter();
 			const bundle = await createAdapters(makeRoles(), {
-				claude: () => adapter,
+				claude: () => proposer.adapter,
 				codex: () => makeStubAdapter("codex"),
 				gemini: () => makeStubAdapter("gemini"),
 			});
-			const receivedPolicy = getStartSessionPolicy(adapter);
+			const receivedPolicy = getStartSessionPolicy(proposer.adapter);
 			expect(receivedPolicy).toBeDefined();
 			expect(receivedPolicy.preset).toBe("guarded");
 			expect(receivedPolicy.capabilities.filesystem).toBe("write");
+			expect(proposer.startTranslations).toHaveLength(1);
+			expect(proposer.startTranslations[0]?.policy.preset).toBe("guarded");
+			expect(proposer.startTranslations[0]?.native.permissionMode).toBe(
+				"default",
+			);
 			await bundle.closeAll();
 		});
 
-		it("turn override smoke: baseline stored, override takes precedence, baseline clean", async () => {
-			const bundle = await createAdapters(makeRoles(), {
-				claude: () => makeStubAdapter("claude"),
-				codex: () => makeStubAdapter("codex"),
-				gemini: () => makeStubAdapter("gemini"),
-			});
+		it("turn override smoke: compile -> translate -> adapter sendTurn uses override while baseline stays clean", async () => {
+			const proposer = makeClaudeTranslatingStubAdapter();
+			const bundle = await createAdapters(
+				makeRoles({
+					proposerProfile: {
+						allowed_tools: ["Read"],
+						disallowed_tools: ["WebFetch"],
+					},
+				}),
+				{
+					claude: () => proposer.adapter,
+					codex: () => makeStubAdapter("codex"),
+					gemini: () => makeStubAdapter("gemini"),
+				},
+			);
 
 			const baseline = bundle.adapters.proposer.baselinePolicy;
 			expect(baseline).toBeDefined();
 			expect(baseline?.preset).toBe("guarded");
+			expect(baseline?.capabilities.filesystem).toBe("write");
 
 			const turnPolicy = compilePolicy({
 				preset: "research",
 				role: "proposer",
 				legacyToolPolicy: bundle.adapters.proposer.legacyToolPolicyInput,
 			});
-			expect(turnPolicy.preset).toBe("research");
-			expect(turnPolicy.capabilities.filesystem).toBe("read");
 
+			await bundle.adapters.proposer.adapter.sendTurn(
+				bundle.sessions.proposer,
+				{
+					turnId: "p-override",
+					prompt: "test prompt",
+					policy: turnPolicy,
+				},
+			);
+
+			expect(proposer.turnCalls).toHaveLength(1);
+			expect(proposer.turnCalls[0]?.policy?.preset).toBe("research");
+			expect(proposer.turnTranslations).toHaveLength(1);
+			expect(proposer.turnTranslations[0]?.policy.preset).toBe("research");
+			expect(proposer.turnTranslations[0]?.native.permissionMode).toBe(
+				"default",
+			);
+			expect(proposer.turnTranslations[0]?.native.allowedTools).toEqual([
+				"Read",
+			]);
+			expect(proposer.turnTranslations[0]?.native.disallowedTools).toContain(
+				"WebFetch",
+			);
 			expect(baseline?.preset).toBe("guarded");
 			expect(baseline?.capabilities.filesystem).toBe("write");
 

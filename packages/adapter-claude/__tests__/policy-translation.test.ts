@@ -213,7 +213,9 @@ describe("translatePolicy (Claude)", () => {
 				preset: "research",
 				role: "proposer",
 			});
-			const { warnings } = translatePolicy(policy);
+			const { native, warnings } = translatePolicy(policy);
+			expect(native.permissionMode).toBe("default");
+			expect(native.permissionMode).not.toBe("bypassPermissions");
 			const approvalWarnings = warnings.filter(
 				(w) => w.field === "interaction.approval",
 			);
