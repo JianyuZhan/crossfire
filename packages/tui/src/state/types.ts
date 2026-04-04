@@ -3,7 +3,11 @@ import type {
 	ApprovalOption,
 	ProviderUsageSemantics,
 } from "@crossfire/adapter-core";
-import type { DebateState, JudgeVerdict } from "@crossfire/orchestrator-core";
+import type {
+	DebateState,
+	JudgeVerdict,
+	RuntimePolicyState,
+} from "@crossfire/orchestrator-core";
 
 export interface LiveToolEntry {
 	toolUseId: string;
@@ -175,6 +179,12 @@ export interface DebateSummaryView {
 	outputDir?: string;
 }
 
+/** Session-scoped policy state, keyed by debateId then role. */
+export interface PolicySessionState {
+	debateId: string;
+	roles: Record<string, RuntimePolicyState>;
+}
+
 export interface TuiState {
 	proposer: LiveAgentPanelState;
 	challenger: LiveAgentPanelState;
@@ -186,6 +196,7 @@ export interface TuiState {
 	debateState: DebateState;
 	summaryGenerating?: boolean;
 	summary?: DebateSummaryView;
+	policySession?: PolicySessionState;
 }
 
 // ── Viewport Scrolling Types ──

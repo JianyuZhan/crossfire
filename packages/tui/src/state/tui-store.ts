@@ -5,6 +5,9 @@ import type {
 import {
 	type AnyEvent,
 	type DebateState,
+	type PolicyBaselineEvent,
+	type PolicyTurnOverrideClearEvent,
+	type PolicyTurnOverrideEvent,
 	projectState,
 	stripInternalBlocks,
 } from "@crossfire/orchestrator-core";
@@ -19,6 +22,7 @@ import type {
 	JudgeStripState,
 	LiveAgentPanelState,
 	MetricsState,
+	PolicySessionState,
 	RenderSnapshot,
 	ScreenLine,
 	TuiRound,
@@ -707,10 +711,10 @@ export class TuiStore {
 				};
 				this.state.metrics.maxRounds = e.config.maxRounds;
 				this.state.command.livePaused = false;
-				if ((event as { debateId?: string }).debateId) {
-					this.state.metrics.debateId = (
-						event as { debateId: string }
-					).debateId;
+				const debateId = (event as { debateId?: string }).debateId;
+				if (debateId) {
+					this.state.metrics.debateId = debateId;
+					this.state.policySession = { debateId, roles: {} };
 				}
 				if (e.roles?.proposer) {
 					this.state.proposer.agentType = e.roles.proposer.agentType;
@@ -777,18 +781,56 @@ export class TuiStore {
 				this.activeSpeaker = undefined;
 				break;
 			}
-			case "policy.turn.override": {
-				const e = event as {
-					role: "proposer" | "challenger";
-					preset: string;
+			case "policy.baseline": {
+				const e = event as PolicyBaselineEvent;
+				if (!this.state.policySession) break;
+				this.state.policySession.roles[e.role] = {
+					baseline: {
+						policy: e.policy,
+						clamps: [...e.clamps],
+						preset: { ...e.preset },
+						translationSummary: e.translationSummary,
+						warnings: [...e.warnings],
+						observation: e.observation,
+					},
 				};
-				this.state[e.role].executionMode = e.preset;
+				if (e.role === "proposer" || e.role === "challenger") {
+					this.state[e.role].executionMode = e.preset.value;
+				}
 				break;
 			}
-			case "policy.turn.override.clear":
+			case "policy.turn.override": {
+				const e = event as PolicyTurnOverrideEvent;
+				if (!this.state.policySession) break;
+				const existing = this.state.policySession.roles[e.role];
+				if (existing) {
+					existing.currentTurnOverride = {
+						turnId: e.turnId,
+						policy: e.policy,
+						preset: e.preset,
+						translationSummary: e.translationSummary,
+						warnings: [...e.warnings],
+						observation: e.observation,
+					};
+				}
+				if (e.role === "proposer" || e.role === "challenger") {
+					this.state[e.role].executionMode = e.preset;
+				}
 				break;
-			case "policy.baseline":
+			}
+			case "policy.turn.override.clear": {
+				const e = event as PolicyTurnOverrideClearEvent;
+				if (!this.state.policySession) break;
+				for (const [role, rps] of Object.entries(this.state.policySession.roles)) {
+					if (rps.currentTurnOverride?.turnId === e.turnId) {
+						rps.currentTurnOverride = undefined;
+						if (role === "proposer" || role === "challenger") {
+							this.state[role].executionMode = rps.baseline.preset.value;
+						}
+					}
+				}
 				break;
+			}
 			case "thinking.delta": {
 				const p = this.panel();
 				if (!p) break;

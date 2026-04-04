@@ -1,3 +1,4 @@
+import type { ProviderObservationResult } from "@crossfire/adapter-core";
 import type { AnyEvent } from "@crossfire/orchestrator-core";
 import { describe, expect, it, vi } from "vitest";
 import { TuiStore } from "../src/state/tui-store.js";
@@ -11,6 +12,27 @@ const BASE = {
 function ev(kind: string, extra: Record<string, unknown> = {}): AnyEvent {
 	return { ...BASE, kind, ...extra } as AnyEvent;
 }
+
+const minimalConfig = {
+	topic: "T",
+	maxRounds: 3,
+	judgeEveryNRounds: 0,
+	convergenceThreshold: 0.3,
+};
+
+const stubObservation: ProviderObservationResult = {
+	translation: {
+		adapter: "claude",
+		nativeSummary: {},
+		exactFields: [],
+		approximateFields: [],
+		unsupportedFields: [],
+	},
+	toolView: [],
+	capabilityEffects: [],
+	warnings: [],
+	completeness: "partial",
+};
 
 interface SnapshotWithThinking {
 	thinkingText?: string;
@@ -310,6 +332,28 @@ describe("TuiStore", () => {
 	it("tracks the effective execution mode for the active role", () => {
 		const store = new TuiStore();
 		store.handleEvent(
+			ev("debate.started", {
+				debateId: "deb-1",
+				config: minimalConfig,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.baseline", {
+				role: "proposer",
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+		store.handleEvent(
 			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
 		);
 		store.handleEvent(
@@ -317,9 +361,15 @@ describe("TuiStore", () => {
 				role: "proposer",
 				turnId: "p-1",
 				preset: "plan",
-				policy: {},
-				translationSummary: {},
+				policy: {
+					preset: "plan",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				translationSummary: stubObservation.translation,
 				warnings: [],
+				observation: stubObservation,
 			}),
 		);
 		expect(store.getState().proposer.executionMode).toBe("plan");
@@ -1073,5 +1123,206 @@ describe("TuiStore", () => {
 		expect(s.metrics.proposerUsage.cacheReadTokens).toBe(3000);
 		expect(s.metrics.proposerUsage.observedInputPlusCacheRead).toBe(3500);
 		expect(s.metrics.proposerUsage.tokens).toBe(700); // 500 input + 200 output
+	});
+
+	it("tracks RuntimePolicyState scoped to active session", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				debateId: "deb-1",
+				config: minimalConfig,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.baseline", {
+				role: "proposer",
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.policySession).toBeDefined();
+		expect(s.policySession?.debateId).toBe("deb-1");
+		expect(s.policySession?.roles.proposer).toBeDefined();
+		expect(s.policySession?.roles.proposer.baseline.preset.value).toBe(
+			"research",
+		);
+		expect(s.policySession?.roles.proposer.baseline.observation).toBe(
+			stubObservation,
+		);
+	});
+
+	it("resets policySession on new debate.started", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				debateId: "deb-1",
+				config: minimalConfig,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.baseline", {
+				role: "proposer",
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+
+		// New debate starts
+		store.handleEvent(
+			ev("debate.started", {
+				debateId: "deb-2",
+				config: minimalConfig,
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.policySession?.debateId).toBe("deb-2");
+		expect(s.policySession?.roles.proposer).toBeUndefined();
+	});
+
+	it("tracks policy.turn.override in session-scoped RuntimePolicyState", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				debateId: "deb-1",
+				config: minimalConfig,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.baseline", {
+				role: "proposer",
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.turn.override", {
+				role: "proposer",
+				turnId: "turn-1",
+				policy: {
+					preset: "balanced",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				preset: "balanced",
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.policySession?.roles.proposer.currentTurnOverride).toBeDefined();
+		expect(s.policySession?.roles.proposer.currentTurnOverride?.turnId).toBe(
+			"turn-1",
+		);
+		expect(s.policySession?.roles.proposer.currentTurnOverride?.preset).toBe(
+			"balanced",
+		);
+	});
+
+	it("clears policy.turn.override on clear event", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				debateId: "deb-1",
+				config: minimalConfig,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.baseline", {
+				role: "proposer",
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.turn.override", {
+				role: "proposer",
+				turnId: "turn-1",
+				policy: {
+					preset: "balanced",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				preset: "balanced",
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.turn.override.clear", {
+				turnId: "turn-1",
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.policySession?.roles.proposer.currentTurnOverride).toBeUndefined();
+		// executionMode must revert to baseline preset after override clear
+		expect(store.getState().proposer.executionMode).toBe("research");
+	});
+
+	it("ignores policy events before debate.started", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("policy.baseline", {
+				role: "proposer",
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+
+		const s = store.getState();
+		expect(s.policySession).toBeUndefined();
 	});
 });

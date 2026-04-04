@@ -36,9 +36,12 @@ It tracks:
 - command state
 - projected `DebateState`
 - synthesis summary state
+- session-scoped per-role `RuntimePolicyState` (event-derived from `policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`)
 
 Important implementation notes:
 
+- the TUI store now tracks `PolicySessionState` keyed by `debateId` (from `debate.started`), containing per-role `RuntimePolicyState` entries initialized from policy events
+- policy events are no-ops before `debate.started` establishes a session; a new `debate.started` resets the policy session to prevent cross-session contamination
 - it does not re-project full debate state on every delta event
 - usage accounting is provider-aware, including normalization for providers that report cumulative usage
 - the metrics bar labels token semantics such as `session delta`, `per turn`, and `thread cumulative`, because provider usage numbers are not directly comparable unless their reporting basis is visible
