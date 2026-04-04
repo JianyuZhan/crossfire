@@ -93,6 +93,7 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 			status: state.status,
 			statusLabel: buildLiveStatusLabel(state),
 			duration: state.turnDurationMs,
+			warningCount: state.warningCount,
 		},
 	];
 	if (state.thinkingText) {

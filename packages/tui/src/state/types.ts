@@ -98,6 +98,7 @@ export interface LiveAgentPanelState {
 	error?: string;
 	turnDurationMs?: number;
 	turnStatus?: "completed" | "interrupted" | "failed" | "timeout";
+	warningCount?: number;
 }
 
 export interface JudgeStripState {
@@ -234,6 +235,7 @@ export type RenderBlock =
 			status: "idle" | "thinking" | "tool" | "speaking" | "done" | "error";
 			statusLabel?: string;
 			duration?: number;
+			warningCount?: number;
 	  }
 	| {
 			kind: "thinking";

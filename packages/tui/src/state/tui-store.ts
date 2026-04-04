@@ -801,6 +801,7 @@ export class TuiStore {
 				};
 				if (e.role === "proposer" || e.role === "challenger") {
 					this.state[e.role].preset = e.preset.value;
+					this.state[e.role].warningCount = e.warnings.length;
 				}
 				break;
 			}
@@ -820,6 +821,7 @@ export class TuiStore {
 				}
 				if (e.role === "proposer" || e.role === "challenger") {
 					this.state[e.role].preset = e.preset;
+					this.state[e.role].warningCount = e.warnings.length;
 				}
 				break;
 			}
@@ -833,6 +835,7 @@ export class TuiStore {
 						rps.currentTurnOverride = undefined;
 						if (role === "proposer" || role === "challenger") {
 							this.state[role].preset = rps.baseline.preset.value;
+							this.state[role].warningCount = rps.baseline.warnings.length;
 						}
 					}
 				}

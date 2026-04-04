@@ -12,6 +12,7 @@ import type {
 	ScreenLine,
 	StyledSegment,
 } from "../state/types.js";
+import { formatWarningBadge } from "../status/warning-badge.js";
 
 const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
 	granularity: "grapheme",
@@ -216,10 +217,11 @@ export function buildPanelLines(
 				const label = roleLabel(block.role);
 				const agent = block.agentType ? ` [${block.agentType}]` : "";
 				const presetLabel = block.preset ? ` [${block.preset}]` : "";
+				const badge = formatWarningBadge(block.warningCount ?? 0);
 				result.push(
 					screenLine([
 						{
-							text: `${icon} ${label}${agent}${presetLabel}`,
+							text: `${icon} ${label}${agent}${presetLabel}${badge}`,
 							style: { bold: true, color },
 						},
 					]),

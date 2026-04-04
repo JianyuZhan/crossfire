@@ -125,4 +125,34 @@ describe("buildPanelLines", () => {
 		expect(text).toContain("Inspect files");
 		expect(text).toContain("Research the failing path");
 	});
+
+	it("renders warning badge on agent-header when warningCount > 0", () => {
+		const blocks: RenderBlock[] = [
+			{
+				kind: "agent-header",
+				role: "proposer",
+				status: "thinking",
+				preset: "research",
+				warningCount: 3,
+			},
+		];
+		const lines = buildPanelLines(blocks, 80);
+		const text = lines.map((l) => l.segments.map((s) => s.text).join("")).join("\n");
+		expect(text).toContain("⚠3");
+	});
+
+	it("does not render warning badge when warningCount is 0", () => {
+		const blocks: RenderBlock[] = [
+			{
+				kind: "agent-header",
+				role: "proposer",
+				status: "thinking",
+				preset: "research",
+				warningCount: 0,
+			},
+		];
+		const lines = buildPanelLines(blocks, 80);
+		const text = lines.map((l) => l.segments.map((s) => s.text).join("")).join("\n");
+		expect(text).not.toContain("⚠");
+	});
 });

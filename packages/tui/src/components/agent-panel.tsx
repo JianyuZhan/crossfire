@@ -21,6 +21,7 @@ import type {
 	PlanStep,
 	SubagentEntry,
 } from "../state/types.js";
+import { formatWarningBadge } from "../status/warning-badge.js";
 
 type AgentRole = "proposer" | "challenger";
 
@@ -257,6 +258,9 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 					{STATUS_ICONS[state.status] ?? "○"} {label}
 					<Text dimColor>{agent}</Text>
 					<Text dimColor>{presetSuffix(state.preset)}</Text>
+					{state.warningCount ? (
+						<Text color="yellow">{formatWarningBadge(state.warningCount)}</Text>
+					) : null}
 				</Text>
 				<Text> </Text>
 				<Text color={state.status === "error" ? "red" : "cyan"}>
