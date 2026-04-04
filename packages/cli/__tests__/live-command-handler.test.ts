@@ -1,5 +1,10 @@
-import type { AgentAdapter, SessionHandle } from "@crossfire/adapter-core";
+import type {
+	AgentAdapter,
+	ProviderObservationResult,
+	SessionHandle,
+} from "@crossfire/adapter-core";
 import type { AdapterMap, DebateEventBus } from "@crossfire/orchestrator";
+import type { RuntimePolicyState } from "@crossfire/orchestrator-core";
 import type { TuiStore } from "@crossfire/tui";
 import { describe, expect, it, vi } from "vitest";
 import { createLiveCommandHandler } from "../src/wiring/live-command-handler.js";
@@ -27,6 +32,55 @@ function createSession(
 		transcript: [],
 	};
 }
+
+const stubObservation: ProviderObservationResult = {
+	translation: {
+		adapter: "claude",
+		nativeSummary: {},
+		exactFields: [],
+		approximateFields: [],
+		unsupportedFields: [],
+	},
+	toolView: [
+		{
+			name: "Bash",
+			source: "builtin",
+			status: "allowed",
+			reason: "adapter_default",
+		},
+	],
+	capabilityEffects: [],
+	warnings: [
+		{
+			field: "limits",
+			adapter: "claude",
+			reason: "approximate",
+			message: "approx",
+		},
+	],
+	completeness: "partial",
+};
+
+const stubPolicySession = {
+	debateId: "d-test",
+	roles: {
+		proposer: {
+			baseline: {
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [...stubObservation.warnings],
+				observation: stubObservation,
+			},
+		} as RuntimePolicyState,
+	},
+};
 
 describe("createLiveCommandHandler", () => {
 	it("routes approval by adapterSessionId instead of adapterId", () => {
@@ -440,5 +494,122 @@ describe("createLiveCommandHandler", () => {
 				target: "judge",
 			}),
 		);
+	});
+
+	it("/status policy dispatches through session-scoped store and pushes rendered output", () => {
+		let captured: string | undefined;
+		const proposerAdapter = createMockAdapter("claude");
+		const challengerAdapter = createMockAdapter("codex");
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposerAdapter,
+				session: { ...createSession("claude", "claude-proposer"), model: "claude-sonnet-4" },
+			},
+			challenger: {
+				adapter: challengerAdapter,
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+		const bus = { push: vi.fn() } as unknown as DebateEventBus;
+		const store = {
+			getState: () => ({
+				command: { mode: "normal", pendingApprovals: [] },
+				debateState: { config: { maxRounds: 10 } },
+				policySession: stubPolicySession,
+			}),
+			pushCommandOutput: (text: string) => {
+				captured = text;
+			},
+		} as unknown as TuiStore;
+
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+		handler({ type: "status", target: "policy" });
+
+		expect(captured).toBeDefined();
+		expect(captured).toContain("proposer");
+		expect(captured).toContain("research");
+		expect(captured).toContain("cli-role");
+	});
+
+	it("/status tools dispatches through session-scoped store and pushes rendered output", () => {
+		let captured: string | undefined;
+		const proposerAdapter = createMockAdapter("claude");
+		const challengerAdapter = createMockAdapter("codex");
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposerAdapter,
+				session: createSession("claude", "claude-proposer"),
+			},
+			challenger: {
+				adapter: challengerAdapter,
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+		const bus = { push: vi.fn() } as unknown as DebateEventBus;
+		const store = {
+			getState: () => ({
+				command: { mode: "normal", pendingApprovals: [] },
+				debateState: { config: { maxRounds: 10 } },
+				policySession: stubPolicySession,
+			}),
+			pushCommandOutput: (text: string) => {
+				captured = text;
+			},
+		} as unknown as TuiStore;
+
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+		handler({ type: "status", target: "tools" });
+
+		expect(captured).toBeDefined();
+		expect(captured).toContain("proposer");
+		expect(captured).toContain("Bash");
+	});
+
+	it("/status before session returns early warning message", () => {
+		let captured: string | undefined;
+		const proposerAdapter = createMockAdapter("claude");
+		const challengerAdapter = createMockAdapter("codex");
+		const adapters: AdapterMap = {
+			proposer: {
+				adapter: proposerAdapter,
+				session: createSession("claude", "claude-proposer"),
+			},
+			challenger: {
+				adapter: challengerAdapter,
+				session: createSession("codex", "codex-challenger"),
+			},
+		};
+		const bus = { push: vi.fn() } as unknown as DebateEventBus;
+		const store = {
+			getState: () => ({
+				command: { mode: "normal", pendingApprovals: [] },
+				debateState: { config: { maxRounds: 10 } },
+				policySession: undefined,
+			}),
+			pushCommandOutput: (text: string) => {
+				captured = text;
+			},
+		} as unknown as TuiStore;
+
+		const handler = createLiveCommandHandler({
+			adapters,
+			bus,
+			store,
+			triggerShutdown: vi.fn(),
+		});
+		handler({ type: "status", target: "policy" });
+
+		expect(captured).toBeDefined();
+		expect(captured).toContain("not yet available");
 	});
 });

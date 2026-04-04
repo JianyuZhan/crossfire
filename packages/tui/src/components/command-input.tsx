@@ -32,6 +32,7 @@ export type ParsedCommand =
 	| { type: "collapse"; roundNumber: number }
 	| { type: "top" }
 	| { type: "bottom" }
+	| { type: "status"; target: "policy" | "tools" }
 	| { type: "unknown"; raw: string };
 
 function parseApprovalSelector(raw?: string): ApprovalSelector | undefined {
@@ -152,6 +153,13 @@ export function parseCommand(input: string, mode: string): ParsedCommand {
 			return { type: "top" };
 		case "/bottom":
 			return { type: "bottom" };
+		case "/status": {
+			const target = parts[1];
+			if (target === "policy" || target === "tools") {
+				return { type: "status", target };
+			}
+			return { type: "unknown", raw: input };
+		}
 		default:
 			return { type: "unknown", raw: input };
 	}

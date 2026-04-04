@@ -439,6 +439,11 @@ export class TuiStore {
 		for (const cb of this.listeners) cb();
 	}
 
+	pushCommandOutput(text: string): void {
+		this.state.command.lastOutput = text;
+		for (const cb of this.listeners) cb();
+	}
+
 	dispose(): void {
 		if (this.pendingFlush) {
 			clearTimeout(this.pendingFlush);
@@ -821,7 +826,9 @@ export class TuiStore {
 			case "policy.turn.override.clear": {
 				const e = event as PolicyTurnOverrideClearEvent;
 				if (!this.state.policySession) break;
-				for (const [role, rps] of Object.entries(this.state.policySession.roles)) {
+				for (const [role, rps] of Object.entries(
+					this.state.policySession.roles,
+				)) {
 					if (rps.currentTurnOverride?.turnId === e.turnId) {
 						rps.currentTurnOverride = undefined;
 						if (role === "proposer" || role === "challenger") {

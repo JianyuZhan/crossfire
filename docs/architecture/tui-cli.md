@@ -109,7 +109,11 @@ Runner-wired commands in `crossfire start`:
 - `/pause`
 - `/resume`
 - `/extend <N>`
+- `/status policy`
+- `/status tools`
 - approval commands (`/approve`, `/deny`, `/approve <index>`, `/deny <index>`, `/approve <index> <option>`, `/deny <index> <option>`, `/approve all`, `/deny all`)
+
+`/status` commands capture a snapshot of the current policy and tool state at invocation time, rendering it through view models defined in `packages/tui/src/status/`. The output reflects the effective policy configuration (baseline and any active turn override), clamps, translation warnings, and the best-effort tool view from provider observation.
 
 Runner-wired commands in `crossfire resume`:
 
@@ -121,6 +125,8 @@ Runner-wired commands in `crossfire resume`:
 - `/pause`
 - `/resume`
 - `/extend <N>`
+- `/status policy`
+- `/status tools`
 - approval commands (`/approve`, `/deny`, `/approve <index>`, `/deny <index>`, `/approve <index> <option>`, `/deny <index> <option>`, `/approve all`, `/deny all`)
 
 Parsed but not currently wired:

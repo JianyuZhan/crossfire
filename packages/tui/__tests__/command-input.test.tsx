@@ -99,4 +99,16 @@ describe("parseCommand", () => {
 			raw: "/invalid",
 		});
 	});
+	it("parses /status policy", () => {
+		const result = parseCommand("/status policy", "live");
+		expect(result).toEqual({ type: "status", target: "policy" });
+	});
+	it("parses /status tools", () => {
+		const result = parseCommand("/status tools", "live");
+		expect(result).toEqual({ type: "status", target: "tools" });
+	});
+	it("returns unknown for /status without target", () => {
+		const result = parseCommand("/status", "live");
+		expect(result).toEqual({ type: "unknown", raw: "/status" });
+	});
 });

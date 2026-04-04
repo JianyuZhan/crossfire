@@ -367,6 +367,8 @@ crossfire inspect-tools --config crossfire.json --role proposer
 | `/pause`                    | 在当前回合结束后暂停辩论       | ✅       |
 | `/resume`                   | 恢复已暂停的实时辩论           | ✅       |
 | `/extend <n>`               | 增加 N 轮最大轮数              | ✅       |
+| `/status policy`            | 显示每个角色的有效策略状态（预设、能力、约束、警告） | ✅ |
+| `/status tools`             | 显示每个角色的有效工具表面（工具视图、能力效果；尽力而为） | ✅ |
 
 **审批模式**（有审批请求时自动激活）：`/approve`、`/deny`、`/approve <序号>`、`/deny <序号>`、`/approve <序号> <选项序号>`、`/deny <序号> <选项序号>`、`/approve all`、`/deny all` ✅  
 TUI 会把待处理审批展开成高亮区块，显示 provider、审批类型、请求摘要、逐条序号快捷命令、provider-aware 的选项行，以及批量 approve / reject 指令。如果当前所有待审批请求都共享同一个 session 级 allow 选项，还会直接提示类似 `/approve all 2` 的批量快捷命令。Claude 的工具审批现在会通过 Crossfire 的统一审批能力稳定暴露 session 级 allow 选项；Codex 在 provider 发送原生决策列表时也会直接展示。

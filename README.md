@@ -367,6 +367,8 @@ During a live debate started with `crossfire start`, type commands in the TUI in
 | `/pause`                    | Pause the debate after the current turn          | ✅       |
 | `/resume`                   | Resume a paused live debate                      | ✅       |
 | `/extend <n>`               | Increase max rounds by N                         | ✅       |
+| `/status policy`            | Show effective policy state per role (preset, capabilities, clamps, warnings) | ✅ |
+| `/status tools`             | Show effective tool surface per role (tool view, capability effects; best-effort) | ✅ |
 
 **Approval mode** (auto-activates on approval requests): `/approve`, `/deny`, `/approve <index>`, `/deny <index>`, `/approve <index> <option>`, `/deny <index> <option>`, `/approve all`, `/deny all` ✅  
 The TUI expands pending approvals into a dedicated highlighted block with the provider, approval type, request summary, per-row index shortcuts, provider-aware option rows, and batch approve / reject commands. When every pending approval shares the same session-level allow option, the block now surfaces a direct shortcut such as `/approve all 2`. Claude tool approvals always expose a session-level allow option through Crossfire's normalized approval capabilities, while Codex approvals can surface native decision variants when the provider sends them.

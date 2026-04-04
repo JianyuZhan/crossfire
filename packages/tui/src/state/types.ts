@@ -165,6 +165,7 @@ export interface CommandState {
 	livePaused?: boolean;
 	replaySpeed?: number;
 	replayPaused?: boolean;
+	lastOutput?: string;
 }
 
 export interface DebateSummaryView {

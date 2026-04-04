@@ -29,3 +29,10 @@ export {
 	CommandStatusLine,
 	commandStatusLineHeight,
 } from "./components/command-status-line.js";
+export {
+	buildStatusPolicyView,
+	buildStatusToolsView,
+	renderStatusPolicy,
+	renderStatusTools,
+} from "./status/index.js";
+export type { StatusPolicyView, StatusToolsView } from "./status/index.js";

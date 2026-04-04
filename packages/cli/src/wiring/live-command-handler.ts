@@ -1,6 +1,12 @@
 import type { ApprovalOption } from "@crossfire/adapter-core";
 import type { AdapterMap, DebateEventBus } from "@crossfire/orchestrator";
 import type { ParsedCommand, TuiStore } from "@crossfire/tui";
+import {
+	buildStatusPolicyView,
+	buildStatusToolsView,
+	renderStatusPolicy,
+	renderStatusTools,
+} from "@crossfire/tui";
 
 type LiveCommand = ParsedCommand | { type: "quit" };
 
@@ -215,6 +221,41 @@ export function createLiveCommandHandler({
 					timestamp: Date.now(),
 				});
 			}
+		}
+
+		if (cmd.type === "status") {
+			const session = store.getState().policySession;
+			if (!session) {
+				store.pushCommandOutput(
+					"Policy state not yet available (no active session).",
+				);
+				return;
+			}
+			const roleEntries = Object.entries(session.roles);
+			const tuiState = store.getState();
+
+			if (cmd.target === "policy") {
+				const views = roleEntries.map(([role, state]) => {
+					const adapterEntry = adapters[role as keyof typeof adapters];
+					const adapterId = adapterEntry?.session?.adapterId ?? "unknown";
+					const panelState =
+						role === "proposer" || role === "challenger"
+							? tuiState[role]
+							: undefined;
+					const model = panelState?.model ?? "unknown";
+					return buildStatusPolicyView(role, adapterId, model, state);
+				});
+				store.pushCommandOutput(renderStatusPolicy(views));
+			} else {
+				const views = roleEntries.map(([role, state]) => {
+					const adapterId =
+						adapters[role as keyof typeof adapters]?.session?.adapterId ??
+						"unknown";
+					return buildStatusToolsView(role, adapterId, state);
+				});
+				store.pushCommandOutput(renderStatusTools(views));
+			}
+			return;
 		}
 	};
 }
