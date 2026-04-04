@@ -57,7 +57,7 @@
 | `packages/cli/src/index.ts` | Register `inspect-policy` and `inspect-tools` commands |
 | `packages/cli/src/commands/start.ts` | Switch from profile/mode-first to config/preset-first |
 | `packages/cli/src/wiring/create-adapters.ts` | Use new config resolution instead of profile/mode resolution |
-| `packages/orchestrator-core/src/orchestrator-events.ts` | Add policy event types, rename `turn.mode.changed` |
+| `packages/orchestrator-core/src/orchestrator-events.ts` | Remove `TurnModeChangedEvent`, add `policy.baseline` / `policy.turn.override` / `policy.turn.override.clear` events |
 | `packages/orchestrator/src/runner.ts` | Emit policy events, use preset-first turn overrides |
 
 ### Deleted Files
