@@ -335,20 +335,20 @@ Configuration:
   Convergence Threshold: 0.3
 ```
 
-### `crossfire inspect-policy <config-path>`
+### `crossfire inspect-policy --config <path>`
 
 检查给定配置文件的策略编译。显示每个角色的已解析 preset、策略层和 provider 转换。
 
 ```bash
-crossfire inspect-policy crossfire.json
+crossfire inspect-policy --config crossfire.json
 ```
 
-### `crossfire inspect-tools <config-path> <role>`
+### `crossfire inspect-tools --config <path> [--role <role>]`
 
 检查配置文件中特定角色的工具/MCP 服务器接线。显示可用工具及其来源。
 
 ```bash
-crossfire inspect-tools crossfire.json proposer
+crossfire inspect-tools --config crossfire.json --role proposer
 ```
 
 ## 运行时命令
@@ -397,39 +397,37 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 
 ```json
 {
-  "roles": {
-    "proposer": {
-      "agent": "claude_code",
-      "model": "us.anthropic.claude-opus-4-6-v1",
-      "preset": "research",
-      "promptFamily": "auto"
-    },
-    "challenger": {
-      "agent": "codex",
-      "model": "gpt-5.4",
-      "preset": "guarded",
-      "promptFamily": "auto"
-    },
-    "judge": {
-      "agent": "claude_code",
-      "model": "us.anthropic.claude-opus-4-6-v1",
-      "preset": "plan",
-      "promptFamily": "auto"
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
     }
   },
-  "providerBindings": {
-    "claude_code": {
-      "inheritGlobalConfig": true,
-      "mcpServers": {
-        "filesystem": {
-          "command": "npx",
-          "args": ["-y", "@anthropic-ai/mcp-filesystem"]
-        }
-      }
+  "providerBindings": [
+    {
+      "name": "claude-main",
+      "adapter": "claude",
+      "model": "claude-sonnet",
+      "mcpServers": ["github"]
     },
-    "codex": {
-      "inheritGlobalConfig": true,
-      "mcpServers": {}
+    {
+      "name": "codex-main",
+      "adapter": "codex",
+      "model": "gpt-5.4"
+    }
+  ],
+  "roles": {
+    "proposer": {
+      "binding": "claude-main",
+      "preset": "research"
+    },
+    "challenger": {
+      "binding": "codex-main",
+      "preset": "guarded"
+    },
+    "judge": {
+      "binding": "claude-main",
+      "preset": "plan"
     }
   }
 }
@@ -437,26 +435,30 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 
 | 字段 | 说明 | 必填 |
 | ---- | ---- | ---- |
+| `mcpServers` | 共享 MCP 服务器定义注册表 | 否 |
+| `providerBindings` | Provider 绑定列表 | 是 |
 | `roles.proposer` | 提议者角色配置 | 是 |
 | `roles.challenger` | 挑战者角色配置 | 是 |
-| `roles.judge` | 裁判角色配置（可选，省略时自动推断） | 否 |
-| `providerBindings.<agent>` | 按 provider 的 MCP 服务器绑定 | 否 |
+| `roles.judge` | 裁判角色配置（可选） | 否 |
 
 **角色配置字段：**
 
 | 字段 | 说明 | 必填 | 默认值 |
 | ---- | ---- | ---- | ------ |
-| `agent` | Agent 类型（`claude_code`、`codex`、`gemini_cli`） | 是 | — |
-| `model` | 模型标识符 | 否 | provider 默认 |
+| `binding` | Provider 绑定名 | 是 | — |
+| `model` | 当前角色的模型覆盖 | 否 | binding 默认 |
 | `preset` | 策略预设（`research`、`guarded`、`dangerous`、`plan`） | 否 | 角色默认（proposer/challenger 为 `guarded`，judge 为 `plan`） |
-| `promptFamily` | 提示词模板族（`auto`、`general`、`code`） | 否 | `auto` |
+| `systemPrompt` | 角色级 system prompt 覆盖 | 否 | binding / 内置默认值 |
 
 **Provider 绑定字段：**
 
 | 字段 | 说明 | 必填 | 默认值 |
 | ---- | ---- | ---- | ------ |
-| `inheritGlobalConfig` | 合并用户全局 MCP 配置 | 否 | `true` |
-| `mcpServers` | Provider 专属 MCP 服务器 | 否 | `{}` |
+| `name` | 被角色引用的 binding 标识 | 是 | — |
+| `adapter` | Adapter 类型（`claude`、`codex`、`gemini`） | 是 | — |
+| `model` | Binding 级默认模型 | 否 | adapter 默认 |
+| `providerOptions` | Provider 原生 escape hatch（不是 policy 语义） | 否 | — |
+| `mcpServers` | 来自顶层注册表的已附着 MCP 服务器名称 | 否 | `[]` |
 
 ## 配置文件（旧版）
 

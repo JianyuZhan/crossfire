@@ -18,6 +18,7 @@ import {
 	type PresetConfig,
 	buildPresetConfig,
 	collectOptionValues,
+	toCliPresetOverrides,
 } from "./preset-options.js";
 
 function requirePositiveInt(value: string, label: string): number {
@@ -159,20 +160,8 @@ export const startCommand = new Command("start")
 
 			// Load and resolve config
 			const crossfireConfig = loadConfig(options.config);
-			const cliOverrides: CliPresetOverrides = {
-				...(presetConfig?.globalPreset
-					? { cliGlobalPreset: presetConfig.globalPreset }
-					: {}),
-				...(presetConfig?.rolePresets?.proposer
-					? { cliProposerPreset: presetConfig.rolePresets.proposer }
-					: {}),
-				...(presetConfig?.rolePresets?.challenger
-					? { cliChallengerPreset: presetConfig.rolePresets.challenger }
-					: {}),
-				...(presetConfig?.rolePresets?.judge
-					? { cliJudgePreset: presetConfig.rolePresets.judge }
-					: {}),
-			};
+			const cliOverrides: CliPresetOverrides =
+				toCliPresetOverrides(presetConfig);
 			const resolvedAllRoles = resolveAllRoles(crossfireConfig, cliOverrides);
 
 			const config: DebateConfig = {

@@ -1,9 +1,11 @@
 // packages/cli/__tests__/commands/preset-options.test.ts
 import { describe, expect, it } from "vitest";
 import {
+	buildInspectionCliOverrides,
 	buildPresetConfig,
 	parsePresetValue,
 	parseTurnPresets,
+	toCliPresetOverrides,
 } from "../../src/commands/preset-options.js";
 
 describe("parsePresetValue", () => {
@@ -49,5 +51,40 @@ describe("buildPresetConfig", () => {
 		});
 		expect(result?.rolePresets?.proposer).toBe("research");
 		expect(result?.rolePresets?.challenger).toBe("guarded");
+	});
+});
+
+describe("toCliPresetOverrides", () => {
+	it("maps preset config into shared CLI override shape", () => {
+		const presetConfig = buildPresetConfig({
+			preset: "dangerous",
+			proposerPreset: "research",
+		});
+		expect(toCliPresetOverrides(presetConfig)).toEqual({
+			cliGlobalPreset: "dangerous",
+			cliProposerPreset: "research",
+		});
+	});
+});
+
+describe("buildInspectionCliOverrides", () => {
+	it("reuses preset parsing for inspection commands", () => {
+		expect(
+			buildInspectionCliOverrides({
+				preset: "research",
+				challengerPreset: "guarded",
+			}),
+		).toEqual({
+			cliGlobalPreset: "research",
+			cliChallengerPreset: "guarded",
+		});
+	});
+
+	it("rejects turn presets for inspection commands", () => {
+		expect(() =>
+			buildInspectionCliOverrides({
+				turnPreset: ["p-1=plan"],
+			}),
+		).toThrow(/--turn-preset is not supported/);
 	});
 });

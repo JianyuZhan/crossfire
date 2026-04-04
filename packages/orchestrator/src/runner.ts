@@ -4,7 +4,12 @@ import {
 	type AgentAdapter,
 	type LegacyToolPolicyInput,
 	type NormalizedEvent,
+	type PolicyClampNote,
 	type PolicyPreset,
+	type PolicyTranslationSummary,
+	type PolicyTranslationWarning,
+	type PresetSource,
+	type ProviderObservationResult,
 	type ResolvedPolicy,
 	type SessionHandle,
 	compilePolicy,
@@ -51,19 +56,40 @@ export interface AdapterMap {
 		adapter: AgentAdapter;
 		session: SessionHandle;
 		baselinePolicy?: ResolvedPolicy;
+		baselineClamps?: readonly PolicyClampNote[];
+		baselinePreset?: {
+			value: PolicyPreset;
+			source: PresetSource;
+		};
+		baselineObservation?: ProviderObservationResult;
 		legacyToolPolicyInput?: LegacyToolPolicyInput;
+		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
 	};
 	challenger: {
 		adapter: AgentAdapter;
 		session: SessionHandle;
 		baselinePolicy?: ResolvedPolicy;
+		baselineClamps?: readonly PolicyClampNote[];
+		baselinePreset?: {
+			value: PolicyPreset;
+			source: PresetSource;
+		};
+		baselineObservation?: ProviderObservationResult;
 		legacyToolPolicyInput?: LegacyToolPolicyInput;
+		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
 	};
 	judge?: {
 		adapter: AgentAdapter;
 		session: SessionHandle;
 		baselinePolicy?: ResolvedPolicy;
+		baselineClamps?: readonly PolicyClampNote[];
+		baselinePreset?: {
+			value: PolicyPreset;
+			source: PresetSource;
+		};
+		baselineObservation?: ProviderObservationResult;
 		legacyToolPolicyInput?: LegacyToolPolicyInput;
+		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
 	};
 }
 
@@ -94,6 +120,51 @@ export function getSchemaRefreshMode(
 function appendOperationalGuidance(prompt: string, guidance?: string): string {
 	if (!guidance) return prompt;
 	return `${prompt}\n\n[ADDITIONAL GUIDANCE]\n${guidance}`;
+}
+
+function getObservationForPolicy(
+	entry: {
+		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
+		baselineObservation?: ProviderObservationResult;
+		baselinePolicy?: ResolvedPolicy;
+	},
+	policy: ResolvedPolicy,
+): ProviderObservationResult | undefined {
+	if (
+		entry.baselineObservation &&
+		entry.baselinePolicy &&
+		entry.baselinePolicy === policy
+	) {
+		return entry.baselineObservation;
+	}
+	return entry.observePolicy?.(policy);
+}
+
+function emitBaselinePolicyEvents(
+	bus: DebateEventBus,
+	adapters: AdapterMap,
+): void {
+	for (const role of ["proposer", "challenger", "judge"] as const) {
+		const entry = adapters[role];
+		if (!entry?.baselinePolicy || !entry.baselinePreset) continue;
+		const observation = getObservationForPolicy(entry, entry.baselinePolicy);
+		bus.push({
+			kind: "policy.baseline",
+			role,
+			policy: entry.baselinePolicy,
+			clamps: [...(entry.baselineClamps ?? [])],
+			preset: entry.baselinePreset,
+			translationSummary: observation?.translation ?? {
+				adapter: entry.session.adapterId ?? "unknown",
+				nativeSummary: {},
+				exactFields: [],
+				approximateFields: [],
+				unsupportedFields: [],
+			},
+			warnings: [...(observation?.warnings ?? [])],
+			timestamp: Date.now(),
+		});
+	}
 }
 
 function createPauseGate(bus: DebateEventBus) {
@@ -189,6 +260,7 @@ export async function runDebate(
 			},
 			timestamp: Date.now(),
 		});
+		emitBaselinePolicyEvents(bus, adapters);
 	} else {
 		bus.push({
 			kind: "debate.resumed",
@@ -518,20 +590,21 @@ export async function runDebate(
 				role: role as "proposer" | "challenger",
 				legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
 			});
+			const observation = getObservationForPolicy(adapterEntry, overridePolicy);
 			bus.push({
 				kind: "policy.turn.override",
 				role: role as "proposer" | "challenger",
 				turnId,
 				policy: overridePolicy,
 				preset: turnOverridePreset,
-				translationSummary: {
+				translationSummary: observation?.translation ?? {
 					adapter: adapterEntry.session.adapterId ?? "unknown",
 					nativeSummary: {},
 					exactFields: [],
 					approximateFields: [],
 					unsupportedFields: [],
 				},
-				warnings: [],
+				warnings: [...(observation?.warnings ?? [])],
 				timestamp: Date.now(),
 			});
 		}

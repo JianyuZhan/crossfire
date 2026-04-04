@@ -200,6 +200,33 @@ describe("policy wiring", () => {
 			await bundle.closeAll();
 		});
 
+		it("passes full MCP server definitions into startSession", async () => {
+			const proposer = makeStubAdapter("claude");
+			const roles = makeRoles();
+			roles.proposer.mcpServers = {
+				github: {
+					command: "npx",
+					args: ["-y", "@modelcontextprotocol/server-github"],
+				},
+			};
+
+			const bundle = await createAdapters(roles, {
+				claude: () => proposer,
+				codex: () => makeStubAdapter("codex"),
+				gemini: () => makeStubAdapter("gemini"),
+			});
+
+			const calls = (proposer.startSession as ReturnType<typeof vi.fn>).mock
+				.calls;
+			expect(calls[0]?.[0]?.mcpServers).toEqual({
+				github: {
+					command: "npx",
+					args: ["-y", "@modelcontextprotocol/server-github"],
+				},
+			});
+			await bundle.closeAll();
+		});
+
 		it("baseline policy is stored on adapter entry", async () => {
 			const bundle = await createAdapters(makeRoles(), {
 				claude: () => makeStubAdapter("claude"),

@@ -3,7 +3,11 @@ import { Command } from "commander";
 import { loadConfig } from "../config/loader.js";
 import { buildInspectionContext } from "./inspection-context.js";
 import { renderToolsText } from "./inspection-renderers.js";
-import { collectOptionValues } from "./preset-options.js";
+import { buildToolInspectionReport } from "./inspection-reports.js";
+import {
+	buildInspectionCliOverrides,
+	collectOptionValues,
+} from "./preset-options.js";
 
 export const inspectToolsCommand = new Command("inspect-tools")
 	.description("Inspect effective tool view for each role before execution")
@@ -21,54 +25,32 @@ export const inspectToolsCommand = new Command("inspect-tools")
 		[],
 	)
 	.action((options) => {
-		if (options.turnPreset?.length > 0) {
+		try {
+			const config = loadConfig(options.config);
+			const cliOverrides = buildInspectionCliOverrides({
+				preset: options.preset,
+				proposerPreset: options.proposerPreset,
+				challengerPreset: options.challengerPreset,
+				judgePreset: options.judgePreset,
+				turnPreset: options.turnPreset,
+			});
+			const contexts = buildInspectionContext(config, cliOverrides);
+
+			const filtered = options.role
+				? contexts.filter((c) => c.role === options.role)
+				: contexts;
+
+			if (options.format === "json") {
+				console.log(
+					JSON.stringify(buildToolInspectionReport(filtered), null, 2),
+				);
+			} else {
+				console.log(renderToolsText(filtered));
+			}
+		} catch (error) {
 			console.error(
-				"Error: --turn-preset is not supported by inspect-tools. " +
-					"Inspection shows baseline role-level policy, not per-turn views.",
+				error instanceof Error ? `Error: ${error.message}` : String(error),
 			);
 			process.exit(1);
-		}
-
-		const config = loadConfig(options.config);
-		const contexts = buildInspectionContext(config, {
-			cliGlobalPreset: options.preset,
-			cliProposerPreset: options.proposerPreset,
-			cliChallengerPreset: options.challengerPreset,
-			cliJudgePreset: options.judgePreset,
-		});
-
-		const filtered = options.role
-			? contexts.filter((c) => c.role === options.role)
-			: contexts;
-
-		if (options.format === "json") {
-			const report = {
-				roles: filtered.map((ctx) => {
-					if (ctx.error) {
-						return {
-							role: ctx.role,
-							adapter: ctx.adapter,
-							preset: ctx.preset,
-							tools: [],
-							capabilityEffects: [],
-							completeness: "minimal" as const,
-							warnings: [],
-							error: ctx.error,
-						};
-					}
-					return {
-						role: ctx.role,
-						adapter: ctx.adapter,
-						preset: ctx.preset,
-						tools: ctx.observation.toolView,
-						capabilityEffects: ctx.observation.capabilityEffects,
-						completeness: ctx.observation.completeness,
-						warnings: ctx.observation.warnings,
-					};
-				}),
-			};
-			console.log(JSON.stringify(report, null, 2));
-		} else {
-			console.log(renderToolsText(filtered));
 		}
 	});

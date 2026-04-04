@@ -184,40 +184,22 @@ The CLI is a thin assembly layer. It is responsible for:
 - creating TUI when not headless
 - starting, resuming, replaying, or inspecting debates
 
-## Profile System
+## Config System
 
-> **Note:** Phase C is introducing a new unified config system (`@crossfire/cli/config`) that will eventually replace the profile-based approach. The new system uses `crossfire.json` for declarative configuration with policy presets, provider bindings, and role-level settings. During the transition, both systems coexist.
+Crossfire now uses a unified `crossfire.json` config file.
 
-Crossfire separates provider/runtime config from reusable role prompting.
+High-level structure:
 
-Key fields:
-
-- `name`
-- `description?`
-- `agent`
-- `model?`
-- `prompt_family?`
-- `inherit_global_config`
-- `mcp_servers`
-
-Search paths:
-
-- provider profiles: `./profiles/providers` then `~/.config/crossfire/profiles/providers`
-- prompt templates: `./prompts` then `~/.config/crossfire/prompts`
-
-Built-in prompt resolution is two-layered:
-
-- provider profiles choose the adapter, default model, and runtime wiring
-- prompt templates define the built-in `proposer`, `challenger`, and `judge` role contract
-- built-in provider profiles typically set `prompt_family: auto` and rely on template resolution
-- reusable built-in templates live under `prompts/general/{proposer,challenger,judge}.md` and `prompts/code/{proposer,challenger,judge}.md`
+- top-level `mcpServers` registry for MCP server definitions
+- `providerBindings[]` for adapter/model/runtime attachment data
+- fixed-key `roles` object for proposer/challenger/judge role intent
 
 Resolution rules:
 
-- Crossfire resolves the template family from `--template`, per-role `--*-template` overrides, or a lightweight classifier call
-- when `auto` is still in effect, CLI runs one classifier turn with the resolved judge profile, asks for strict JSON, and falls back to the local heuristic only on timeout or invalid output
-- the selected family then loads `prompts/<family>/<role>.md`
-- this split is symmetric across Claude, Codex, and Gemini; built-in role prompting no longer lives only inside one provider's profile files
+- CLI preset overrides are resolved in one shared parser path used by `start`, `inspect-policy`, and `inspect-tools`
+- role defaults are applied in shared config resolution, not inside the policy compiler
+- each role resolves to a runtime config containing adapter, binding name, model, preset provenance, provider options, and full attached MCP server definitions
+- `create-adapters.ts` compiles baseline policy from that resolved runtime config and passes the same MCP attachment map to both `startSession()` and inspection/observation helpers
 
 ## Commands
 
@@ -261,6 +243,13 @@ Reads `index.json` and prints summary information. Current special-casing for tr
 
 ### `crossfire inspect-policy`
 
+Current surface:
+
+- requires `--config <path>`
+- accepts the same preset override flags as `start`
+- rejects `--turn-preset` because inspection is baseline role-level preview only
+- renders either text or JSON policy inspection output
+
 Inspects the effective policy for each role before execution. This command compiles policy from presets, applies role ceilings, and shows provider-translated native parameters.
 
 Key behavior:
@@ -280,6 +269,14 @@ Output includes:
 - native translation summary
 
 ### `crossfire inspect-tools`
+
+Current surface:
+
+- requires `--config <path>`
+- accepts `--role <proposer|challenger|judge>` filtering
+- accepts the same preset override flags as `start`
+- rejects `--turn-preset`
+- renders a best-effort tool/capability view rather than a guaranteed provider inventory
 
 Inspects the effective tool view for each role before execution. This command shows which tools are allowed/blocked, capability effects, and completeness level.
 

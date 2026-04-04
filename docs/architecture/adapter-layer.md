@@ -205,7 +205,7 @@ Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslati
 
 ### Policy Integration Points
 
-`StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` to derive provider-native parameters. `AdapterMap` entries carry `baselinePolicy` and optional `legacyToolPolicyInput` so the orchestrator runner can thread compiled policy through to adapters.
+`StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` to derive provider-native parameters. `AdapterMap` entries carry `baselinePolicy` plus baseline clamp notes, preset provenance, baseline observation output, and optional `legacyToolPolicyInput` so the orchestrator runner can emit reconstructible runtime policy events without recompiling from scratch.
 
 The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sendTurn()`. When a policy is present, it calls `translatePolicy()` and emits `run.warning` events for any translation warnings. When no policy is set, it falls back to empty query options.
 
@@ -215,9 +215,18 @@ The Gemini adapter resolves the approval mode from `input.policy ?? session.base
 
 ### CLI Compilation Flow
 
-`create-adapters.ts` compiles policy at startup using `compilePolicy({ preset, role, legacyToolPolicy })` and stores the result as `baselinePolicy` on each adapter entry. The baseline policy is passed via `startSession({ policy })`. Judge always gets the `plan` preset. Config-file `allowed_tools`/`disallowed_tools` flow through as `legacyToolPolicy`.
+`create-adapters.ts` resolves each role to a full runtime config, including attached MCP server definitions, then calls `compilePolicyWithDiagnostics({ preset, role, legacyToolPolicy })`. It stores:
 
-The orchestrator runner recompiles policy per turn when a `turnPresets` override is active, using the override preset with the same role and legacy tool policy. When no override is active, the runner uses the adapter entry's baseline policy directly. The baseline is never mutated.
+- `baselinePolicy`
+- `baselineClamps`
+- `baselinePreset`
+- `baselineObservation`
+- `observePolicy(policy)`
+- optional `legacyToolPolicyInput`
+
+The same resolved MCP attachment map is passed to `startSession({ mcpServers })` and to the CLI-side observation helper so execution and inspection see the same attached MCP surface. Judge still defaults to the `plan` preset via shared config resolution.
+
+The orchestrator runner emits `policy.baseline` from the adapter entry's stored baseline metadata when the debate starts. When a `turnPresets` override is active, the runner recompiles policy with the override preset while preserving any `legacyToolPolicyInput`, then emits `policy.turn.override` with the real translation summary and warnings from `observePolicy(policy)`. When no override is active, the runner uses the adapter entry's baseline policy directly. The baseline is never mutated.
 
 ## Session, Turn, and Recovery Types
 

@@ -1,5 +1,3 @@
-import { inspectClaudePolicy } from "@crossfire/adapter-claude";
-import { inspectCodexPolicy } from "@crossfire/adapter-codex";
 // packages/cli/src/commands/inspection-context.ts
 import {
 	type PolicyClampNote,
@@ -8,13 +6,13 @@ import {
 	type ResolvedPolicy,
 	compilePolicyWithDiagnostics,
 } from "@crossfire/adapter-core";
-import { inspectGeminiPolicy } from "@crossfire/adapter-gemini";
 import type { PresetSource } from "../config/policy-resolution.js";
 import {
 	type CliPresetOverrides,
 	resolveAllRoles,
 } from "../config/resolver.js";
 import type { CrossfireConfig } from "../config/schema.js";
+import { observePolicyForAdapter } from "../wiring/policy-observation.js";
 
 interface RoleInspectionBase {
 	role: "proposer" | "challenger" | "judge";
@@ -44,12 +42,6 @@ export type RoleInspectionContext =
 	| RoleInspectionSuccess
 	| RoleInspectionFailure;
 
-const adapterInspectors = {
-	claude: inspectClaudePolicy,
-	codex: inspectCodexPolicy,
-	gemini: inspectGeminiPolicy,
-} as const;
-
 export function buildInspectionContext(
 	config: CrossfireConfig,
 	cliOverrides: CliPresetOverrides,
@@ -67,8 +59,11 @@ export function buildInspectionContext(
 				role: roleName,
 			});
 
-			const inspect = adapterInspectors[resolved.adapter];
-			const observation = inspect(diagnostics.policy);
+			const observation = observePolicyForAdapter(
+				resolved.adapter,
+				diagnostics.policy,
+				resolved.mcpServers,
+			);
 
 			results.push({
 				role: roleName,

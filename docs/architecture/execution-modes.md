@@ -75,12 +75,12 @@ Effective turn policy is resolved with this priority:
 role baseline < turn override
 ```
 
-- Role baseline is compiled via `compilePolicy({ preset, role })` during adapter wiring and stored as `baselinePolicy` on each adapter entry
+- Role baseline is compiled via `compilePolicyWithDiagnostics({ preset, role })` during adapter wiring and stored as `baselinePolicy` plus baseline clamp/provenance/observation metadata on each adapter entry
 - Per-turn overrides are specified via `DebateConfig.turnPresets` (a `Record<string, PolicyPreset>` mapping turnId to preset name)
 
 When a turn override is active, the runner compiles a fresh policy with the override preset while preserving any `legacyToolPolicyInput` from the adapter entry. The baseline policy is never mutated.
 
-The runner emits `policy.turn.override` before a proposer / challenger turn when a turn-level override is active, and `policy.turn.override.clear` after the turn completes. When no override is active, no policy event is emitted for that turn.
+The runner emits `policy.baseline` once per role after `debate.started`, then emits `policy.turn.override` before a proposer / challenger turn when a turn-level override is active and `policy.turn.override.clear` after the turn completes. Override events carry the full effective override policy plus real translation summary and warnings from the same observation rule path used by inspection.
 
 Judge turns always receive the judge adapter entry's baseline policy (compiled with `plan` preset).
 

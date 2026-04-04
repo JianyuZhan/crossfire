@@ -7,6 +7,7 @@ import {
 	renderPolicyText,
 	renderToolsText,
 } from "../../src/commands/inspection-renderers.js";
+import { buildToolInspectionReport } from "../../src/commands/inspection-reports.js";
 import type { CrossfireConfig } from "../../src/config/schema.js";
 
 const testConfig: CrossfireConfig = {
@@ -25,10 +26,21 @@ function assertSuccess(ctx: RoleInspectionContext) {
 	return ctx;
 }
 
+function findContext(
+	contexts: ReturnType<typeof buildInspectionContext>,
+	role: "proposer" | "challenger" | "judge",
+) {
+	const context = contexts.find((entry) => entry.role === role);
+	if (!context) {
+		throw new Error(`Missing inspection context for ${role}`);
+	}
+	return context;
+}
+
 describe("inspect-tools output contract", () => {
 	it("toolView contains expected fields per ToolInspectionRecord", () => {
 		const context = buildInspectionContext(testConfig, {});
-		const proposer = assertSuccess(context.find((c) => c.role === "proposer")!);
+		const proposer = assertSuccess(findContext(context, "proposer"));
 		for (const tool of proposer.observation.toolView) {
 			expect(tool).toHaveProperty("name");
 			expect(tool).toHaveProperty("source");
@@ -39,7 +51,7 @@ describe("inspect-tools output contract", () => {
 
 	it("capabilityEffects present for each modeled dimension", () => {
 		const context = buildInspectionContext(testConfig, {});
-		const proposer = assertSuccess(context.find((c) => c.role === "proposer")!);
+		const proposer = assertSuccess(findContext(context, "proposer"));
 		const fields = proposer.observation.capabilityEffects.map((e) => e.field);
 		expect(fields).toContain("capabilities.filesystem");
 		expect(fields).toContain("capabilities.shell");
@@ -57,13 +69,50 @@ describe("inspect-tools output contract", () => {
 
 	it("research preset blocks Bash but allows Read", () => {
 		const context = buildInspectionContext(testConfig, {});
-		const challenger = assertSuccess(
-			context.find((c) => c.role === "challenger")!,
-		);
+		const challenger = assertSuccess(findContext(context, "challenger"));
 		const bash = challenger.observation.toolView.find((t) => t.name === "Bash");
 		const read = challenger.observation.toolView.find((t) => t.name === "Read");
 		expect(bash?.status).toBe("blocked");
 		expect(read?.status).toBe("allowed");
+	});
+
+	it("configured MCP attachments appear as unknown MCP tool records", () => {
+		const config: CrossfireConfig = {
+			mcpServers: {
+				github: {
+					command: "npx",
+					args: ["-y", "@modelcontextprotocol/server-github"],
+				},
+			},
+			providerBindings: [
+				{
+					name: "claude-test",
+					adapter: "claude",
+					model: "claude-sonnet",
+					mcpServers: ["github"],
+				},
+			],
+			roles: {
+				proposer: { binding: "claude-test", preset: "guarded" },
+				challenger: { binding: "claude-test", preset: "research" },
+			},
+		};
+		const context = buildInspectionContext(config, {});
+		const report = buildToolInspectionReport(context);
+		const proposer = report.roles.find((r) => r.role === "proposer");
+		const github = proposer?.tools.find((t) => t.name === "github");
+		expect(github?.source).toBe("mcp");
+		expect(github?.status).toBe("unknown");
+	});
+
+	it("builds tool JSON report without leaking internal observation objects", () => {
+		const context = buildInspectionContext(testConfig, {});
+		const report = buildToolInspectionReport(context);
+		const proposer = report.roles.find((r) => r.role === "proposer");
+		expect(proposer).toBeDefined();
+		expect(proposer).toHaveProperty("tools");
+		expect(proposer).toHaveProperty("capabilityEffects");
+		expect(proposer).not.toHaveProperty("observation");
 	});
 });
 

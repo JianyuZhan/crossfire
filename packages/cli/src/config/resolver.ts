@@ -2,7 +2,7 @@
 import type { PolicyPreset } from "@crossfire/adapter-core";
 import type { PresetSource } from "./policy-resolution.js";
 import { resolveRolePreset } from "./policy-resolution.js";
-import type { CrossfireConfig } from "./schema.js";
+import type { CrossfireConfig, McpServerConfig } from "./schema.js";
 
 export type AdapterType = "claude" | "codex" | "gemini";
 
@@ -17,7 +17,7 @@ export interface ResolvedRoleRuntimeConfig {
 	};
 	systemPrompt?: string;
 	providerOptions?: Record<string, unknown>;
-	mcpServers?: string[];
+	mcpServers?: Record<string, McpServerConfig>;
 }
 
 export interface ResolvedAllRoles {
@@ -67,6 +67,20 @@ export function resolveAllRoles(
 			cliGlobalPreset: cliOverrides.cliGlobalPreset,
 		});
 
+		const resolvedMcpServers = binding.mcpServers
+			? Object.fromEntries(
+					binding.mcpServers.map((name) => {
+						const server = config.mcpServers?.[name];
+						if (!server) {
+							throw new Error(
+								`Provider binding "${binding.name}" references MCP server "${name}" which does not exist.`,
+							);
+						}
+						return [name, server];
+					}),
+				)
+			: undefined;
+
 		return {
 			role: roleName,
 			adapter: binding.adapter,
@@ -75,7 +89,7 @@ export function resolveAllRoles(
 			preset: { value: preset.preset, source: preset.source },
 			systemPrompt: roleConfig.systemPrompt,
 			providerOptions: binding.providerOptions,
-			mcpServers: binding.mcpServers,
+			mcpServers: resolvedMcpServers,
 		};
 	}
 

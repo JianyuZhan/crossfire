@@ -3,8 +3,19 @@ import { resolveAllRoles } from "../../src/config/resolver.js";
 import type { CrossfireConfig } from "../../src/config/schema.js";
 
 const baseConfig: CrossfireConfig = {
+	mcpServers: {
+		github: {
+			command: "npx",
+			args: ["-y", "@modelcontextprotocol/server-github"],
+		},
+	},
 	providerBindings: [
-		{ name: "claude-main", adapter: "claude", model: "claude-sonnet" },
+		{
+			name: "claude-main",
+			adapter: "claude",
+			model: "claude-sonnet",
+			mcpServers: ["github"],
+		},
 		{ name: "codex-main", adapter: "codex", model: "gpt-5-codex" },
 	],
 	roles: {
@@ -22,6 +33,12 @@ describe("resolveAllRoles", () => {
 		expect(roles.proposer.preset).toEqual({
 			value: "guarded",
 			source: "config",
+		});
+		expect(roles.proposer.mcpServers).toEqual({
+			github: {
+				command: "npx",
+				args: ["-y", "@modelcontextprotocol/server-github"],
+			},
 		});
 		expect(roles.challenger.adapter).toBe("codex");
 		expect(roles.challenger.preset).toEqual({

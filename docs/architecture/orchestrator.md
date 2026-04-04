@@ -185,7 +185,9 @@ Important notes:
 - it waits for `turn.completed` on the bus
 - it resolves effective turn mode before each proposer / challenger turn using `debate default < role baseline < turn override`
 - system prompt resolution is handled at the CLI layer: the runner receives pre-resolved system prompts from `config.proposerSystemPrompt` / `config.challengerSystemPrompt` / `config.judgeSystemPrompt`, falling back to `defaultSystemPrompt(role)` inside `buildInitialPrompt()`
+- it emits `policy.baseline` for each started role immediately after `debate.started`, carrying the full baseline `ResolvedPolicy`, clamp notes, preset provenance, translation summary, and warnings
 - it emits `policy.turn.override` before sending the turn (only when a turn-level override is active) and `policy.turn.override.clear` after the turn completes
+- baseline and override policy state is intentionally reconstructed from those events rather than from hidden mutable runner state
 - it blocks on projected pause state between turns and before judge invocations
 - it can now route `/interrupt` requests to the active provider turn and terminates the debate with `debate.completed(reason="interrupted")` when the adapter reports `turn.completed(status="interrupted")`
 - it tracks schema refresh cadence for incremental prompts

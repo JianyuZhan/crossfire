@@ -3,7 +3,11 @@ import { Command } from "commander";
 import { loadConfig } from "../config/loader.js";
 import { buildInspectionContext } from "./inspection-context.js";
 import { renderPolicyText } from "./inspection-renderers.js";
-import { collectOptionValues } from "./preset-options.js";
+import { buildPolicyInspectionReport } from "./inspection-reports.js";
+import {
+	buildInspectionCliOverrides,
+	collectOptionValues,
+} from "./preset-options.js";
 
 export const inspectPolicyCommand = new Command("inspect-policy")
 	.description("Inspect effective policy for each role before execution")
@@ -21,29 +25,32 @@ export const inspectPolicyCommand = new Command("inspect-policy")
 		[],
 	)
 	.action((options) => {
-		if (options.turnPreset?.length > 0) {
+		try {
+			const config = loadConfig(options.config);
+			const cliOverrides = buildInspectionCliOverrides({
+				preset: options.preset,
+				proposerPreset: options.proposerPreset,
+				challengerPreset: options.challengerPreset,
+				judgePreset: options.judgePreset,
+				turnPreset: options.turnPreset,
+			});
+			const contexts = buildInspectionContext(config, cliOverrides);
+
+			const filtered = options.role
+				? contexts.filter((c) => c.role === options.role)
+				: contexts;
+
+			if (options.format === "json") {
+				console.log(
+					JSON.stringify(buildPolicyInspectionReport(filtered), null, 2),
+				);
+			} else {
+				console.log(renderPolicyText(filtered));
+			}
+		} catch (error) {
 			console.error(
-				"Error: --turn-preset is not supported by inspect-policy. " +
-					"Inspection shows baseline role-level policy, not per-turn views.",
+				error instanceof Error ? `Error: ${error.message}` : String(error),
 			);
 			process.exit(1);
-		}
-
-		const config = loadConfig(options.config);
-		const contexts = buildInspectionContext(config, {
-			cliGlobalPreset: options.preset,
-			cliProposerPreset: options.proposerPreset,
-			cliChallengerPreset: options.challengerPreset,
-			cliJudgePreset: options.judgePreset,
-		});
-
-		const filtered = options.role
-			? contexts.filter((c) => c.role === options.role)
-			: contexts;
-
-		if (options.format === "json") {
-			console.log(JSON.stringify({ roles: filtered }, null, 2));
-		} else {
-			console.log(renderPolicyText(filtered));
 		}
 	});

@@ -1,6 +1,7 @@
 import type {
 	AgentAdapter,
 	NormalizedEvent,
+	ProviderObservationResult,
 	SessionHandle,
 	TurnInput,
 } from "@crossfire/adapter-core";
@@ -11,6 +12,7 @@ import {
 } from "@crossfire/adapter-core";
 import type { DebateConfig } from "@crossfire/orchestrator-core";
 import { describe, expect, it } from "vitest";
+import { DebateEventBus } from "../src/event-bus.js";
 import { type AdapterMap, runDebate } from "../src/runner.js";
 
 function createScriptedAdapter(
@@ -135,6 +137,131 @@ const defaultMeta = {
 };
 
 describe("runner policy flow (real runDebate path)", () => {
+	describe("policy runtime events", () => {
+		it("emits reconstructible baseline and override events with real summaries", async () => {
+			const proposerTurns: TurnInput[] = [];
+			const challengerTurns: TurnInput[] = [];
+			const proposer = createScriptedAdapter(
+				"claude",
+				{
+					"p-1": turnEvents(
+						"p-1",
+						"claude",
+						"claude-s1",
+						"Proposer r1",
+						defaultMeta,
+					),
+				},
+				proposerTurns,
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{
+					"c-1": turnEvents(
+						"c-1",
+						"codex",
+						"codex-s1",
+						"Challenger r1",
+						defaultMeta,
+					),
+				},
+				challengerTurns,
+			);
+
+			const proposerBaseline = compilePolicy({
+				preset: "guarded",
+				role: "proposer",
+			});
+			const challengerBaseline = compilePolicy({
+				preset: "guarded",
+				role: "challenger",
+			});
+
+			const makeObservation = (
+				adapter: "claude" | "codex",
+				policy: ReturnType<typeof compilePolicy>,
+			): ProviderObservationResult => ({
+				translation: {
+					adapter,
+					nativeSummary: { preset: policy.preset },
+					exactFields: ["interaction.approval"],
+					approximateFields: [],
+					unsupportedFields: [],
+				},
+				toolView: [],
+				capabilityEffects: [],
+				warnings:
+					policy.preset === "research"
+						? [
+								{
+									field: "interaction.approval",
+									adapter,
+									reason: "approximate",
+									message: "approximate test warning",
+								},
+							]
+						: [],
+				completeness: "minimal",
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: proposerBaseline,
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineObservation: makeObservation("claude", proposerBaseline),
+					observePolicy: (policy) => makeObservation("claude", policy),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: challengerBaseline,
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineObservation: makeObservation("codex", challengerBaseline),
+					observePolicy: (policy) => makeObservation("codex", policy),
+				},
+			};
+
+			const bus = new DebateEventBus();
+			await runDebate(
+				{
+					...debateConfig,
+					turnPresets: { "p-1": "research" },
+				},
+				adapters,
+				{ bus },
+			);
+
+			const baselineEvents = bus
+				.getEvents()
+				.filter((event) => event.kind === "policy.baseline");
+			expect(baselineEvents).toHaveLength(2);
+
+			const overrideEvent = bus
+				.getEvents()
+				.find(
+					(event) =>
+						event.kind === "policy.turn.override" && event.turnId === "p-1",
+				);
+			expect(overrideEvent).toBeDefined();
+			if (overrideEvent?.kind === "policy.turn.override") {
+				expect(overrideEvent.translationSummary.nativeSummary).toEqual({
+					preset: "research",
+				});
+				expect(overrideEvent.warnings.length).toBeGreaterThan(0);
+			}
+		});
+	});
+
 	describe("per-turn policy forwarding", () => {
 		it("proposer sendTurn receives compiled policy with correct preset", async () => {
 			const proposerTurns: TurnInput[] = [];

@@ -48,6 +48,32 @@ describe("Claude inspectPolicy", () => {
 		expect(fields).toContain("capabilities.subagents");
 	});
 
+	it("legacy allow list never overstates access versus translation", () => {
+		const policy = makeResolvedPolicy({
+			preset: "dangerous",
+			role: "proposer",
+			legacyToolPolicy: {
+				allow: ["Read"],
+				deny: ["WebFetch"],
+			},
+		});
+		const observation = inspectPolicy(policy);
+		const translation = translatePolicy(policy);
+		const read = observation.toolView.find((tool) => tool.name === "Read");
+		const bash = observation.toolView.find((tool) => tool.name === "Bash");
+		const webFetch = observation.toolView.find(
+			(tool) => tool.name === "WebFetch",
+		);
+		expect(read?.status).toBe("allowed");
+		expect(read?.reason).toBe("legacy_override");
+		expect(bash?.status).toBe("blocked");
+		expect(bash?.reason).toBe("legacy_override");
+		expect(webFetch?.status).toBe("blocked");
+		expect(webFetch?.reason).toBe("legacy_override");
+		expect(translation.native.allowedTools).toEqual(["Read"]);
+		expect(translation.native.disallowedTools).toContain("WebFetch");
+	});
+
 	describe("consistency with translatePolicy", () => {
 		it("warnings are consistent under same policy", () => {
 			const policy = makeResolvedPolicy({

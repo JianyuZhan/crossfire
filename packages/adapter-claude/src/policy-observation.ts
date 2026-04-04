@@ -97,6 +97,47 @@ export function computeBaseDenyList(capabilities: CapabilityPolicy): string[] {
 	return deny;
 }
 
+export interface ClaudeToolPolicyResolution {
+	allowedTools?: string[];
+	disallowedTools?: string[];
+	warnings: PolicyTranslationWarning[];
+}
+
+export function resolveToolPolicy(
+	capabilities: CapabilityPolicy,
+): ClaudeToolPolicyResolution {
+	const baseDeny = computeBaseDenyList(capabilities);
+	if (!capabilities.legacyToolOverrides) {
+		return {
+			...(baseDeny.length > 0 ? { disallowedTools: baseDeny } : {}),
+			warnings: [],
+		};
+	}
+
+	const warnings: PolicyTranslationWarning[] = [];
+	const { allow, deny } = capabilities.legacyToolOverrides;
+	const explicitDeny = new Set(deny ?? []);
+	const conflicting = allow?.filter((tool) => baseDeny.includes(tool));
+	if (conflicting?.length) {
+		warnings.push({
+			field: "capabilities.legacyToolOverrides.allow",
+			adapter: "claude",
+			reason: "approximate",
+			message: `Tools [${conflicting.join(", ")}] blocked by capability enum, legacy allow ignored`,
+		});
+	}
+	const effectiveAllow = allow?.filter(
+		(tool) => !baseDeny.includes(tool) && !explicitDeny.has(tool),
+	);
+	const effectiveDeny = [...baseDeny, ...explicitDeny];
+
+	return {
+		...(effectiveAllow?.length ? { allowedTools: effectiveAllow } : {}),
+		...(effectiveDeny.length ? { disallowedTools: effectiveDeny } : {}),
+		warnings,
+	};
+}
+
 export function resolveCapabilityEffects(
 	policy: ResolvedPolicy,
 ): CapabilityEffectRecord[] {
@@ -124,20 +165,55 @@ export function resolveCapabilityEffects(
 	return effects;
 }
 
-export function resolveToolView(
-	policy: ResolvedPolicy,
-): ToolInspectionRecord[] {
-	const denyList = new Set(computeBaseDenyList(policy.capabilities));
-	return CLAUDE_ALL_KNOWN_TOOLS.map((name): ToolInspectionRecord => {
-		const blocked = denyList.has(name);
-		return {
-			name,
-			source: "builtin",
-			status: blocked ? "blocked" : "allowed",
-			reason: blocked ? "capability_policy" : "adapter_default",
-			...(blocked ? { capabilityField: inferCapabilityField(name) } : {}),
-		};
-	});
+export function resolveToolView(policy: ResolvedPolicy): {
+	toolView: ToolInspectionRecord[];
+	warnings: PolicyTranslationWarning[];
+} {
+	const toolPolicy = resolveToolPolicy(policy.capabilities);
+	const denyList = new Set(toolPolicy.disallowedTools ?? []);
+	const allowList = toolPolicy.allowedTools
+		? new Set(toolPolicy.allowedTools)
+		: undefined;
+	const legacyDeny = new Set(
+		policy.capabilities.legacyToolOverrides?.deny ?? [],
+	);
+
+	return {
+		toolView: CLAUDE_ALL_KNOWN_TOOLS.map((name): ToolInspectionRecord => {
+			const blockedByCapability = denyList.has(name) && !legacyDeny.has(name);
+			const blockedByLegacyDeny = legacyDeny.has(name);
+			const blockedByLegacyAllow =
+				allowList !== undefined && !allowList.has(name) && !blockedByCapability;
+			const blocked =
+				blockedByCapability || blockedByLegacyDeny || blockedByLegacyAllow;
+			return {
+				name,
+				source: "builtin",
+				status: blocked ? "blocked" : "allowed",
+				reason: blocked
+					? blockedByCapability
+						? "capability_policy"
+						: "legacy_override"
+					: allowList?.has(name)
+						? "legacy_override"
+						: "adapter_default",
+				...(blockedByCapability
+					? { capabilityField: inferCapabilityField(name) }
+					: {}),
+				...(blockedByLegacyAllow
+					? {
+							details:
+								"Blocked because it is not included in the legacy allow list",
+						}
+					: blockedByLegacyDeny
+						? { details: "Blocked by legacy deny list" }
+						: allowList?.has(name)
+							? { details: "Explicitly allowed by legacy allow list" }
+							: {}),
+			};
+		}),
+		warnings: toolPolicy.warnings,
+	};
 }
 
 function inferCapabilityField(toolName: string): string {
@@ -192,10 +268,14 @@ export function inspectPolicy(
 ): ProviderObservationResult {
 	const approval = resolveApproval(policy);
 	const capabilityEffects = resolveCapabilityEffects(policy);
-	const toolView = resolveToolView(policy);
+	const toolResolution = resolveToolView(policy);
 	const limitsWarnings = buildLimitsWarnings(policy.interaction.limits);
 
-	const allWarnings = [...approval.warnings, ...limitsWarnings];
+	const allWarnings = [
+		...approval.warnings,
+		...toolResolution.warnings,
+		...limitsWarnings,
+	];
 
 	const translation: PolicyTranslationSummary = {
 		adapter: "claude",
@@ -203,16 +283,18 @@ export function inspectPolicy(
 			permissionMode: approval.permissionMode,
 			maxTurns: policy.interaction.limits?.maxTurns,
 		},
-		exactFields: approval.warnings.length === 0 ? ["interaction.approval"] : [],
-		approximateFields: approval.warnings
+		exactFields: allWarnings.length === 0 ? ["interaction.approval"] : [],
+		approximateFields: allWarnings
 			.filter((w) => w.reason === "approximate")
 			.map((w) => w.field),
-		unsupportedFields: limitsWarnings.map((w) => w.field),
+		unsupportedFields: allWarnings
+			.filter((w) => w.reason === "not_implemented")
+			.map((w) => w.field),
 	};
 
 	return {
 		translation,
-		toolView,
+		toolView: toolResolution.toolView,
 		capabilityEffects,
 		warnings: allWarnings,
 		completeness: classifyCompleteness(),

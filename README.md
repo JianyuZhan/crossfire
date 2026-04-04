@@ -335,20 +335,20 @@ Configuration:
   Convergence Threshold: 0.3
 ```
 
-### `crossfire inspect-policy <config-path>`
+### `crossfire inspect-policy --config <path>`
 
 Inspect policy compilation for a given config file. Shows the resolved preset, policy layers, and provider translation for each role.
 
 ```bash
-crossfire inspect-policy crossfire.json
+crossfire inspect-policy --config crossfire.json
 ```
 
-### `crossfire inspect-tools <config-path> <role>`
+### `crossfire inspect-tools --config <path> [--role <role>]`
 
 Inspect tool/MCP server wiring for a specific role in a config file. Shows available tools and their sources.
 
 ```bash
-crossfire inspect-tools crossfire.json proposer
+crossfire inspect-tools --config crossfire.json --role proposer
 ```
 
 ## Runtime Commands
@@ -397,39 +397,37 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
 
 ```json
 {
-  "roles": {
-    "proposer": {
-      "agent": "claude_code",
-      "model": "us.anthropic.claude-opus-4-6-v1",
-      "preset": "research",
-      "promptFamily": "auto"
-    },
-    "challenger": {
-      "agent": "codex",
-      "model": "gpt-5.4",
-      "preset": "guarded",
-      "promptFamily": "auto"
-    },
-    "judge": {
-      "agent": "claude_code",
-      "model": "us.anthropic.claude-opus-4-6-v1",
-      "preset": "plan",
-      "promptFamily": "auto"
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
     }
   },
-  "providerBindings": {
-    "claude_code": {
-      "inheritGlobalConfig": true,
-      "mcpServers": {
-        "filesystem": {
-          "command": "npx",
-          "args": ["-y", "@anthropic-ai/mcp-filesystem"]
-        }
-      }
+  "providerBindings": [
+    {
+      "name": "claude-main",
+      "adapter": "claude",
+      "model": "claude-sonnet",
+      "mcpServers": ["github"]
     },
-    "codex": {
-      "inheritGlobalConfig": true,
-      "mcpServers": {}
+    {
+      "name": "codex-main",
+      "adapter": "codex",
+      "model": "gpt-5.4"
+    }
+  ],
+  "roles": {
+    "proposer": {
+      "binding": "claude-main",
+      "preset": "research"
+    },
+    "challenger": {
+      "binding": "codex-main",
+      "preset": "guarded"
+    },
+    "judge": {
+      "binding": "claude-main",
+      "preset": "plan"
     }
   }
 }
@@ -437,26 +435,30 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
 
 | Field | Description | Required |
 | ----- | ----------- | -------- |
+| `mcpServers` | Shared MCP server definition registry | no |
+| `providerBindings` | Provider binding list | yes |
 | `roles.proposer` | Proposer role config | yes |
 | `roles.challenger` | Challenger role config | yes |
-| `roles.judge` | Judge role config (optional, auto-inferred if omitted) | no |
-| `providerBindings.<agent>` | Per-provider MCP server bindings | no |
+| `roles.judge` | Judge role config (optional) | no |
 
 **Role config fields:**
 
 | Field | Description | Required | Default |
 | ----- | ----------- | -------- | ------- |
-| `agent` | Agent type (`claude_code`, `codex`, `gemini_cli`) | yes | — |
-| `model` | Model identifier | no | provider default |
+| `binding` | Provider binding name | yes | — |
+| `model` | Model override for this role | no | binding default |
 | `preset` | Policy preset (`research`, `guarded`, `dangerous`, `plan`) | no | role default (`guarded` for proposer/challenger, `plan` for judge) |
-| `promptFamily` | Prompt template family (`auto`, `general`, `code`) | no | `auto` |
+| `systemPrompt` | Role-specific system prompt override | no | binding / built-in default |
 
 **Provider binding fields:**
 
 | Field | Description | Required | Default |
 | ----- | ----------- | -------- | ------- |
-| `inheritGlobalConfig` | Merge user's global MCP config | no | `true` |
-| `mcpServers` | Provider-specific MCP servers | no | `{}` |
+| `name` | Binding identifier referenced by roles | yes | — |
+| `adapter` | Adapter type (`claude`, `codex`, `gemini`) | yes | — |
+| `model` | Binding-level default model | no | adapter default |
+| `providerOptions` | Provider-native escape hatch (not policy semantics) | no | — |
+| `mcpServers` | Attached MCP server names from the top-level registry | no | `[]` |
 
 ## Profiles (Legacy)
 

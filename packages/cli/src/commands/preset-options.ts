@@ -1,5 +1,6 @@
 // packages/cli/src/commands/preset-options.ts
 import type { PolicyPreset } from "@crossfire/adapter-core";
+import type { CliPresetOverrides } from "../config/resolver.js";
 
 const VALID_PRESETS = new Set<PolicyPreset>([
 	"research",
@@ -39,6 +40,25 @@ export interface PresetConfig {
 		Record<"proposer" | "challenger" | "judge", PolicyPreset>
 	>;
 	turnPresets?: Record<string, PolicyPreset>;
+}
+
+export function toCliPresetOverrides(
+	presetConfig?: PresetConfig,
+): CliPresetOverrides {
+	return {
+		...(presetConfig?.globalPreset
+			? { cliGlobalPreset: presetConfig.globalPreset }
+			: {}),
+		...(presetConfig?.rolePresets?.proposer
+			? { cliProposerPreset: presetConfig.rolePresets.proposer }
+			: {}),
+		...(presetConfig?.rolePresets?.challenger
+			? { cliChallengerPreset: presetConfig.rolePresets.challenger }
+			: {}),
+		...(presetConfig?.rolePresets?.judge
+			? { cliJudgePreset: presetConfig.rolePresets.judge }
+			: {}),
+	};
 }
 
 export function buildPresetConfig(options: {
@@ -87,6 +107,22 @@ export function buildPresetConfig(options: {
 			: {}),
 		...(turnPresets ? { turnPresets } : {}),
 	};
+}
+
+export function buildInspectionCliOverrides(options: {
+	preset?: string;
+	proposerPreset?: string;
+	challengerPreset?: string;
+	judgePreset?: string;
+	turnPreset?: string[];
+}): CliPresetOverrides {
+	const presetConfig = buildPresetConfig(options);
+	if (presetConfig?.turnPresets) {
+		throw new Error(
+			"--turn-preset is not supported by inspection commands. Inspection shows baseline role-level policy, not per-turn views.",
+		);
+	}
+	return toCliPresetOverrides(presetConfig);
 }
 
 export function collectOptionValues(
