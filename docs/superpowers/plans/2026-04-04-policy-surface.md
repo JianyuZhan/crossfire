@@ -309,7 +309,10 @@ Expected: FAIL — module not found
 
 ```ts
 // packages/cli/src/config/policy-resolution.ts
-import type { PolicyPreset } from "@crossfire/adapter-core";
+import type { PolicyPreset, PresetSource } from "@crossfire/adapter-core";
+
+// Re-export so that cli consumers don't need to import adapter-core directly
+export type { PresetSource } from "@crossfire/adapter-core";
 
 export const DEFAULT_ROLE_PRESETS: Record<
   "proposer" | "challenger" | "judge",
@@ -319,8 +322,6 @@ export const DEFAULT_ROLE_PRESETS: Record<
   challenger: "guarded",
   judge: "plan",
 } as const;
-
-export type PresetSource = "cli-role" | "cli-global" | "config" | "role-default";
 
 export interface ResolvedPreset {
   preset: PolicyPreset;
@@ -818,6 +819,12 @@ export interface ProviderObservationResult {
   readonly warnings: readonly PolicyTranslationWarning[];
   readonly completeness: ObservationCompleteness;
 }
+
+/**
+ * Preset source provenance — lives here in adapter-core so that both
+ * cli and orchestrator-core can import it without dependency inversion.
+ */
+export type PresetSource = "cli-role" | "cli-global" | "config" | "role-default";
 ```
 
 - [ ] **Step 4: Implement compilePolicyWithDiagnostics**
@@ -2120,8 +2127,9 @@ git commit -m "feat(cli): add preset-first CLI option parser"
 - Create: `packages/cli/src/commands/inspect-tools.ts`
 - Modify: `packages/cli/src/index.ts`
 - Test: `packages/cli/__tests__/commands/inspect-policy.test.ts`
+- Test: `packages/cli/__tests__/commands/inspect-tools.test.ts`
 
-This task implements the shared `buildInspectionContext()` pipeline and both inspection commands. Due to the size, tests focus on JSON output structure.
+This task implements the shared `buildInspectionContext()` pipeline and both inspection commands. Tests cover JSON output structure, text output contract, and per-role failure isolation.
 
 - [ ] **Step 1: Write failing tests for inspect-policy JSON output**
 
@@ -2180,12 +2188,109 @@ describe("buildInspectionContext", () => {
     expect(proposer.observation).toBeDefined();
     expect(proposer.observation.completeness).toBe("partial");
   });
+
+  it("per-role failure isolation: one adapter error does not block others", () => {
+    const badConfig: CrossfireConfig = {
+      providerBindings: [
+        { name: "claude-test", adapter: "claude", model: "claude-sonnet" },
+        { name: "bad-adapter", adapter: "codex" as any, model: "bad" },
+      ],
+      roles: {
+        proposer: { binding: "claude-test", preset: "guarded" },
+        challenger: { binding: "bad-adapter" },
+        judge: { binding: "claude-test", preset: "plan" },
+      },
+    };
+    // Even if challenger observation throws, proposer and judge should still resolve
+    const context = buildInspectionContext(badConfig, {});
+    const proposer = context.find((c) => c.role === "proposer");
+    expect(proposer).toBeDefined();
+    expect(proposer!.error).toBeUndefined();
+  });
+});
+```
+
+- [ ] **Step 1b: Write failing tests for inspect-tools output**
+
+```ts
+// packages/cli/__tests__/commands/inspect-tools.test.ts
+import { describe, expect, it } from "vitest";
+import { buildInspectionContext } from "../../src/commands/inspection-context.js";
+import type { CrossfireConfig } from "../../src/config/schema.js";
+
+const testConfig: CrossfireConfig = {
+  providerBindings: [
+    { name: "claude-test", adapter: "claude", model: "claude-sonnet" },
+  ],
+  roles: {
+    proposer: { binding: "claude-test", preset: "guarded" },
+    challenger: { binding: "claude-test", preset: "research" },
+  },
+};
+
+describe("inspect-tools output contract", () => {
+  it("toolView contains expected fields per ToolInspectionRecord", () => {
+    const context = buildInspectionContext(testConfig, {});
+    const proposer = context.find((c) => c.role === "proposer")!;
+    for (const tool of proposer.observation.toolView) {
+      expect(tool).toHaveProperty("name");
+      expect(tool).toHaveProperty("source");
+      expect(tool).toHaveProperty("status");
+      expect(tool).toHaveProperty("reason");
+    }
+  });
+
+  it("capabilityEffects present for each modeled dimension", () => {
+    const context = buildInspectionContext(testConfig, {});
+    const proposer = context.find((c) => c.role === "proposer")!;
+    const fields = proposer.observation.capabilityEffects.map((e) => e.field);
+    expect(fields).toContain("capabilities.filesystem");
+    expect(fields).toContain("capabilities.shell");
+  });
+
+  it("completeness is reported per role", () => {
+    const context = buildInspectionContext(testConfig, {});
+    for (const ctx of context) {
+      expect(["full", "partial", "minimal"]).toContain(
+        ctx.observation.completeness,
+      );
+    }
+  });
+
+  it("research preset blocks Bash but allows Read", () => {
+    const context = buildInspectionContext(testConfig, {});
+    const challenger = context.find((c) => c.role === "challenger")!;
+    const bash = challenger.observation.toolView.find((t) => t.name === "Bash");
+    const read = challenger.observation.toolView.find((t) => t.name === "Read");
+    expect(bash?.status).toBe("blocked");
+    expect(read?.status).toBe("allowed");
+  });
+});
+
+describe("text output contract", () => {
+  it("text renderer does not throw for any valid context", () => {
+    const context = buildInspectionContext(testConfig, {});
+    // Text rendering must not throw — validates no undefined access in renderer
+    expect(() => {
+      for (const ctx of context) {
+        // Simulate text output access patterns
+        const _ = `${ctx.role} (${ctx.adapter}) — ${ctx.preset.value} (${ctx.preset.source})`;
+        for (const c of ctx.clamps) {
+          const __ = `${c.field}: ${c.before} → ${c.after} (${c.reason})`;
+        }
+        for (const w of ctx.observation.warnings) {
+          const __ = `[${w.reason}] ${w.field}: ${w.message}`;
+        }
+        const __ = JSON.stringify(ctx.observation.translation.nativeSummary);
+      }
+    }).not.toThrow();
+  });
 });
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd packages/cli && npx vitest run __tests__/commands/inspect-policy.test.ts`
+Run: `cd packages/cli && npx vitest run __tests__/commands/inspect-policy.test.ts __tests__/commands/inspect-tools.test.ts`
 Expected: FAIL
 
 - [ ] **Step 3: Implement buildInspectionContext**
@@ -2207,7 +2312,7 @@ import { resolveAllRoles, type CliPresetOverrides } from "../config/resolver.js"
 import type { CrossfireConfig } from "../config/schema.js";
 import type { PolicyPreset } from "@crossfire/adapter-core";
 
-export interface RoleInspectionContext {
+interface RoleInspectionBase {
   role: "proposer" | "challenger" | "judge";
   adapter: string;
   model?: string;
@@ -2215,11 +2320,23 @@ export interface RoleInspectionContext {
     value: PolicyPreset;
     source: PresetSource;
   };
+}
+
+export interface RoleInspectionSuccess extends RoleInspectionBase {
   resolvedPolicy: ResolvedPolicy;
   clamps: readonly PolicyClampNote[];
   observation: ProviderObservationResult;
-  error?: { message: string };
+  error?: undefined;
 }
+
+export interface RoleInspectionFailure extends RoleInspectionBase {
+  resolvedPolicy?: undefined;
+  clamps?: undefined;
+  observation?: undefined;
+  error: { message: string };
+}
+
+export type RoleInspectionContext = RoleInspectionSuccess | RoleInspectionFailure;
 
 const adapterInspectors = {
   claude: claudeInspect,
@@ -2262,9 +2379,6 @@ export function buildInspectionContext(
         adapter: resolved.adapter,
         model: resolved.model,
         preset: resolved.preset,
-        resolvedPolicy: undefined as unknown as ResolvedPolicy,
-        clamps: [],
-        observation: undefined as unknown as ProviderObservationResult,
         error: {
           message: err instanceof Error ? err.message : String(err),
         },
@@ -2437,16 +2551,29 @@ export const inspectToolsCommand = new Command("inspect-tools")
 
     if (options.format === "json") {
       const report = {
-        roles: filtered.map((ctx) => ({
-          role: ctx.role,
-          adapter: ctx.adapter,
-          preset: ctx.preset,
-          tools: ctx.observation?.toolView ?? [],
-          capabilityEffects: ctx.observation?.capabilityEffects ?? [],
-          completeness: ctx.observation?.completeness ?? "minimal",
-          warnings: ctx.observation?.warnings ?? [],
-          ...(ctx.error ? { error: ctx.error } : {}),
-        })),
+        roles: filtered.map((ctx) => {
+          if (ctx.error) {
+            return {
+              role: ctx.role,
+              adapter: ctx.adapter,
+              preset: ctx.preset,
+              tools: [],
+              capabilityEffects: [],
+              completeness: "minimal" as const,
+              warnings: [],
+              error: ctx.error,
+            };
+          }
+          return {
+            role: ctx.role,
+            adapter: ctx.adapter,
+            preset: ctx.preset,
+            tools: ctx.observation.toolView,
+            capabilityEffects: ctx.observation.capabilityEffects,
+            completeness: ctx.observation.completeness,
+            warnings: ctx.observation.warnings,
+          };
+        }),
       };
       console.log(JSON.stringify(report, null, 2));
     } else {
@@ -2486,7 +2613,7 @@ program.parse();
 
 - [ ] **Step 7: Run tests**
 
-Run: `cd packages/cli && npx vitest run __tests__/commands/inspect-policy.test.ts`
+Run: `cd packages/cli && npx vitest run __tests__/commands/inspect-policy.test.ts __tests__/commands/inspect-tools.test.ts`
 Expected: All PASS
 
 - [ ] **Step 8: Commit**
@@ -2497,6 +2624,7 @@ git add packages/cli/src/commands/inspect-policy.ts
 git add packages/cli/src/commands/inspect-tools.ts
 git add packages/cli/src/index.ts
 git add packages/cli/__tests__/commands/inspect-policy.test.ts
+git add packages/cli/__tests__/commands/inspect-tools.test.ts
 git commit -m "feat(cli): add inspect-policy and inspect-tools commands"
 ```
 
@@ -2534,17 +2662,27 @@ Refactor `packages/cli/src/wiring/create-adapters.ts` to accept `ResolvedAllRole
 git rm packages/cli/src/commands/execution-mode-options.ts
 ```
 
-- [ ] **Step 4: Run full test suite**
+- [ ] **Step 4: Update documentation for CLI flag changes**
+
+Update `README.md` and `README.zh-CN.md`:
+- Replace all `--mode` / `--proposer-mode` / `--challenger-mode` / `--turn-mode` references with `--preset` / `--proposer-preset` / `--challenger-preset` / `--judge-preset` / `--turn-preset`
+- Add `inspect-policy` and `inspect-tools` to the command reference section
+- Update the configuration section to describe the new config file format with role profiles and provider bindings
+
+Update any `docs/architecture/*` files that reference execution mode CLI flags to use preset/policy terminology.
+
+- [ ] **Step 5: Run full test suite**
 
 Run: `pnpm test`
 Expected: All tests PASS (some existing tests that reference old mode flags may need updating)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add packages/cli/src/commands/start.ts
 git add packages/cli/src/wiring/create-adapters.ts
 git rm packages/cli/src/commands/execution-mode-options.ts
+git add README.md README.zh-CN.md docs/
 git commit -m "feat(cli): switch start command to preset-first surface"
 ```
 
@@ -2565,9 +2703,9 @@ import type {
   PolicyPreset,
   PolicyTranslationSummary,
   PolicyTranslationWarning,
+  PresetSource,
   ResolvedPolicy,
 } from "@crossfire/adapter-core";
-import type { PresetSource } from "@crossfire/cli/config";
 
 export interface PolicyBaselineEvent {
   kind: "policy.baseline";
@@ -2824,12 +2962,20 @@ describe("event-derived RuntimePolicyState", () => {
 Run: `pnpm test`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Update architecture docs for event changes**
+
+Update relevant `docs/architecture/*` files:
+- Document the new policy event types (`policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`)
+- Document `RuntimePolicyState` and the event-derived state model
+- Remove or update any references to the old `turn.mode.changed` event
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add packages/orchestrator-core/src/orchestrator-events.ts
 git add packages/orchestrator-core/__tests__/policy-events.test.ts
 git add packages/orchestrator/src/runner.ts
+git add docs/
 git commit -m "feat(runtime): add event-derived policy state recording"
 ```
 
@@ -2869,12 +3015,20 @@ Update all files that import removed types/functions. Key files:
 - `packages/cli/src/wiring/create-adapters.ts` — remove old type imports
 - All adapter files — remove `executionMode` handling from `startSession` / `sendTurn`
 
-- [ ] **Step 5: Run full test suite**
+- [ ] **Step 5: Remove mode-first references from docs**
+
+Update `README.md`, `README.zh-CN.md`, and `docs/architecture/*`:
+- Remove any remaining execution-mode-first references
+- Remove `RoleExecutionMode` / `TurnExecutionMode` / `DebateExecutionConfig` from architecture docs
+- Remove old profile schema references
+- Verify no stale mode-first naming remains in documentation
+
+- [ ] **Step 6: Run full test suite**
 
 Run: `pnpm build && pnpm test`
 Expected: Build succeeds, all tests PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -2883,31 +3037,41 @@ git commit -m "refactor: remove legacy execution mode types and old profile sche
 
 ---
 
-## Task 12: Documentation Updates
+## Task 12: Documentation Verification Sweep
+
+Doc updates were folded into Tasks 9, 10, and 11 alongside their behavior changes. This task is a final sweep to catch any remaining stale references.
 
 **Files:**
-- Modify: `README.md`
-- Modify: `README.zh-CN.md`
-- Modify: relevant `docs/architecture/*` files
+- Verify: `README.md`, `README.zh-CN.md`, `docs/architecture/*`
 
-- [ ] **Step 1: Update READMEs**
+- [ ] **Step 1: Grep for stale mode-first references**
 
-Replace all `--mode` / `--proposer-mode` / `--challenger-mode` / `--turn-mode` references with `--preset` / `--proposer-preset` / `--challenger-preset` / `--judge-preset` / `--turn-preset`.
+```bash
+grep -rn "execution.mode\|--mode\|proposer-mode\|challenger-mode\|turn-mode\|RoleExecutionMode\|TurnExecutionMode\|DebateExecutionConfig\|turn\.mode\.changed" README.md README.zh-CN.md docs/
+```
 
-Add `inspect-policy` and `inspect-tools` to the command reference section.
+Expected: No matches. If any found, fix them.
 
-Update the configuration section to describe the new config file format with role profiles and provider bindings.
+- [ ] **Step 2: Verify preset-first content is present**
 
-- [ ] **Step 2: Update architecture docs**
+Verify that READMEs contain:
+- `--preset` / `--proposer-preset` / `--challenger-preset` / `--judge-preset` / `--turn-preset` flag documentation
+- `inspect-policy` and `inspect-tools` command reference
+- New config file format description (roles + providerBindings)
 
-Update any docs/architecture files that reference execution modes to use preset/policy terminology.
+Verify that `docs/architecture/*` contains:
+- Policy event types (`policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`)
+- `RuntimePolicyState` event-derived model
+- Preset-first CLI surface description
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Commit fixes if any**
 
 ```bash
 git add README.md README.zh-CN.md docs/
-git commit -m "docs: update CLI reference for preset-first surface and inspection commands"
+git commit -m "docs: final sweep for stale mode-first references"
 ```
+
+Skip this commit if no changes needed.
 
 ---
 
