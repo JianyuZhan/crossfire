@@ -7,6 +7,10 @@ import {
 import type { AdapterMap } from "@crossfire/orchestrator";
 import type { DebateExecutionConfig } from "@crossfire/orchestrator-core";
 import type {
+	ResolvedAllRoles,
+	ResolvedRoleRuntimeConfig,
+} from "../config/resolver.js";
+import type {
 	AdapterType,
 	ResolvedRole,
 	ResolvedRoles,
@@ -90,6 +94,79 @@ export async function createAdapters(
 			startRole("proposer", roles.proposer),
 			startRole("challenger", roles.challenger),
 			roles.judge ? startRole("judge", roles.judge) : undefined,
+		]);
+
+		const adapters: AdapterMap = {
+			proposer,
+			challenger,
+			judge,
+		};
+
+		const sessions: SessionMap = {
+			proposer: proposer.session,
+			challenger: challenger.session,
+			judge: judge?.session,
+		};
+
+		const closeAll = async () => {
+			await Promise.allSettled(
+				started.map(({ adapter, session }) => adapter.close(session)),
+			);
+		};
+
+		return { adapters, sessions, closeAll };
+	} catch (error) {
+		await Promise.allSettled(
+			started.map(({ adapter, session }) => adapter.close(session)),
+		);
+		throw error;
+	}
+}
+
+/**
+ * Create adapters from ResolvedAllRoles (new config-file path).
+ * Each role already has its preset resolved; no DebateExecutionConfig needed.
+ */
+export async function createAdaptersFromResolved(
+	resolvedRoles: ResolvedAllRoles,
+	factories: AdapterFactoryMap,
+): Promise<AdapterBundle> {
+	const started: Array<{ adapter: AgentAdapter; session: SessionHandle }> = [];
+
+	async function startResolvedRole(resolved: ResolvedRoleRuntimeConfig) {
+		const policy = compilePolicy({
+			preset: resolved.preset.value,
+			role: resolved.role,
+		});
+
+		const adapter = factories[resolved.adapter]();
+		const session = await adapter.startSession({
+			profile: resolved.bindingName,
+			workingDirectory: process.cwd(),
+			model: resolved.model,
+			mcpServers: resolved.mcpServers
+				? Object.fromEntries(resolved.mcpServers.map((s) => [s, {}]))
+				: undefined,
+			policy,
+			providerOptions: {
+				systemPrompt: resolved.systemPrompt,
+				...resolved.providerOptions,
+			},
+		});
+		started.push({ adapter, session });
+		return {
+			adapter,
+			session,
+			baselinePolicy: policy,
+			legacyToolPolicyInput: undefined,
+		};
+	}
+
+	try {
+		const [proposer, challenger, judge] = await Promise.all([
+			startResolvedRole(resolvedRoles.proposer),
+			startResolvedRole(resolvedRoles.challenger),
+			resolvedRoles.judge ? startResolvedRole(resolvedRoles.judge) : undefined,
 		]);
 
 		const adapters: AdapterMap = {

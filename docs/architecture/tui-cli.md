@@ -232,11 +232,12 @@ Key behavior:
 - writes the initial `index.json`
 - passes `transcriptWriter` through to the runner
 
-Execution-mode CLI entry points:
+Policy preset CLI entry points:
 
-- `--mode <research|guarded|dangerous>` sets the debate default
-- `--proposer-mode <research|guarded|dangerous>` and `--challenger-mode <...>` set role baselines
-- repeatable `--turn-mode <turnId=mode>` applies a static per-turn override; `mode` may also be `plan`
+- `--preset <research|guarded|dangerous|plan>` sets the debate default
+- `--proposer-preset`, `--challenger-preset`, `--judge-preset` set per-role presets
+- repeatable `--turn-preset <turnId=preset>` applies a static per-turn override
+- `--config <path>` loads a `crossfire.json` config file (new config-file path)
 - `--template <auto|general|code>` sets the default prompt-template family
 - `--proposer-template`, `--challenger-template`, and `--judge-template` override the family per role
 

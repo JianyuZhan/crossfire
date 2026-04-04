@@ -141,12 +141,14 @@ These legacy paths are preserved for backward compatibility and will be removed 
 
 ## CLI Entry Points
 
-`crossfire start` now accepts:
+`crossfire start` now accepts preset-first flags (replacing the old `--mode` flags):
 
-- `--mode <research|guarded|dangerous>`
-- `--proposer-mode <research|guarded|dangerous>`
-- `--challenger-mode <research|guarded|dangerous>`
-- repeatable `--turn-mode <turnId=mode>` where mode can also be `plan`
+- `--preset <research|guarded|dangerous|plan>` sets the debate default
+- `--proposer-preset <research|guarded|dangerous|plan>` per-role preset
+- `--challenger-preset <research|guarded|dangerous|plan>` per-role preset
+- `--judge-preset <research|guarded|dangerous|plan>` per-role preset
+- repeatable `--turn-preset <turnId=preset>` applies a static per-turn override
+- `--config <path>` loads a `crossfire.json` config file (new config-file path)
 
 Examples:
 
@@ -155,8 +157,8 @@ crossfire start \
   --topic "Should we migrate to Rust?" \
   --proposer claude/proposer \
   --challenger codex/challenger \
-  --proposer-mode research \
-  --challenger-mode guarded
+  --proposer-preset research \
+  --challenger-preset guarded
 ```
 
 ```bash
@@ -164,8 +166,18 @@ crossfire start \
   --topic "Should we adopt feature flags?" \
   --proposer claude/proposer \
   --challenger claude/challenger \
-  --proposer-mode research \
-  --turn-mode p-1=plan
+  --proposer-preset research \
+  --turn-preset p-1=plan
+```
+
+```bash
+# Config-file path (new):
+crossfire start \
+  --topic "Should we adopt feature flags?" \
+  --proposer claude/proposer \
+  --challenger codex/challenger \
+  --config crossfire.json \
+  --proposer-preset research
 ```
 
 ## Policy Model Integration

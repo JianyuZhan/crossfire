@@ -1,11 +1,17 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runDebate } from "@crossfire/orchestrator";
-import type { DebateConfig } from "@crossfire/orchestrator-core";
+import type {
+	DebateConfig,
+	DebateExecutionConfig,
+} from "@crossfire/orchestrator-core";
 import { App } from "@crossfire/tui";
 import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
+import { loadConfig } from "../config/loader.js";
+import type { CliPresetOverrides } from "../config/resolver.js";
+import { resolveAllRoles } from "../config/resolver.js";
 import { loadProfile } from "../profile/loader.js";
 import {
 	parsePromptTemplateSelection,
@@ -15,15 +21,19 @@ import {
 } from "../profile/prompt-template.js";
 import { resolveAdapterType, resolveRoles } from "../profile/resolver.js";
 import { classifyPromptTemplateFamily } from "../profile/topic-template-classifier.js";
-import { createAdapters } from "../wiring/create-adapters.js";
+import {
+	createAdapters,
+	createAdaptersFromResolved,
+} from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
 import { createLiveCommandHandler } from "../wiring/live-command-handler.js";
 import {
-	buildExecutionModeConfig,
+	type PresetConfig,
+	buildPresetConfig,
 	collectOptionValues,
-} from "./execution-mode-options.js";
+} from "./preset-options.js";
 
 function requirePositiveInt(value: string, label: string): number {
 	const n = Number.parseInt(value, 10);
@@ -47,6 +57,40 @@ function generateDebateId(): string {
 		String(now.getSeconds()).padStart(2, "0"),
 	].join("");
 	return `d-${date}-${time}`;
+}
+
+/**
+ * Convert PresetConfig (new surface) to DebateExecutionConfig (runner compat).
+ * Preset values (research, guarded, dangerous, plan) are a superset of the
+ * old RoleExecutionMode values, so we can cast them through for the runner.
+ */
+function presetConfigToExecutionModes(
+	presetConfig: PresetConfig | undefined,
+): DebateExecutionConfig | undefined {
+	if (!presetConfig) return undefined;
+
+	const result: DebateExecutionConfig = {};
+	if (presetConfig.globalPreset) {
+		result.defaultMode =
+			presetConfig.globalPreset as DebateExecutionConfig["defaultMode"];
+	}
+	if (presetConfig.rolePresets) {
+		const roleModes: Record<string, unknown> = {};
+		if (presetConfig.rolePresets.proposer) {
+			roleModes.proposer = presetConfig.rolePresets.proposer;
+		}
+		if (presetConfig.rolePresets.challenger) {
+			roleModes.challenger = presetConfig.rolePresets.challenger;
+		}
+		if (Object.keys(roleModes).length > 0) {
+			result.roleModes = roleModes as DebateExecutionConfig["roleModes"];
+		}
+	}
+	if (presetConfig.turnPresets) {
+		result.turnOverrides =
+			presetConfig.turnPresets as DebateExecutionConfig["turnOverrides"];
+	}
+	return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export const startCommand = new Command("start")
@@ -85,21 +129,26 @@ export const startCommand = new Command("start")
 	.option("--proposer-model <model>", "Model override for proposer")
 	.option("--challenger-model <model>", "Model override for challenger")
 	.option("--judge-model <model>", "Model override for judge")
+	.option("--config <path>", "Path to crossfire.json config file")
 	.option(
-		"--mode <mode>",
-		"Debate default execution mode: research, guarded, or dangerous",
+		"--preset <preset>",
+		"Default policy preset: research, guarded, dangerous, or plan",
 	)
 	.option(
-		"--proposer-mode <mode>",
-		"Proposer baseline execution mode: research, guarded, or dangerous",
+		"--proposer-preset <preset>",
+		"Proposer policy preset: research, guarded, dangerous, or plan",
 	)
 	.option(
-		"--challenger-mode <mode>",
-		"Challenger baseline execution mode: research, guarded, or dangerous",
+		"--challenger-preset <preset>",
+		"Challenger policy preset: research, guarded, dangerous, or plan",
 	)
 	.option(
-		"--turn-mode <turnId=mode>",
-		"Per-turn execution mode override, repeatable (for example: p-1=plan)",
+		"--judge-preset <preset>",
+		"Judge policy preset: research, guarded, dangerous, or plan",
+	)
+	.option(
+		"--turn-preset <turnId=preset>",
+		"Per-turn preset override, repeatable (for example: p-1=plan)",
 		collectOptionValues,
 		[],
 	)
@@ -227,170 +276,267 @@ export const startCommand = new Command("start")
 					})
 				: undefined;
 
-			// Build execution mode config (independent of classifier result)
-			const executionModes = buildExecutionModeConfig({
-				mode: options.mode,
-				proposerMode: options.proposerMode,
-				challengerMode: options.challengerMode,
-				turnMode: options.turnMode,
+			// Build preset config (independent of classifier result)
+			const presetConfig = buildPresetConfig({
+				preset: options.preset,
+				proposerPreset: options.proposerPreset,
+				challengerPreset: options.challengerPreset,
+				judgePreset: options.judgePreset,
+				turnPreset: options.turnPreset,
 			});
+			// Map to DebateExecutionConfig for runner backward compat
+			const executionModes = presetConfigToExecutionModes(presetConfig);
 
 			// Generate debate ID and output directory (independent of classifier result)
 			const debateId = generateDebateId();
 			const outputDir = options.output ?? `run_output/${debateId}`;
 			mkdirSync(outputDir, { recursive: true });
 
-			// Await classifier result now (LLM call overlapped with sync work above)
-			const autoTemplateFamily = classifierPromise
-				? await classifierPromise
-				: undefined;
-			if (options.verbose && autoTemplateFamily) {
-				console.log(
-					`  Template classifier: ${autoTemplateFamily.family} (${autoTemplateFamily.source}, confidence ${autoTemplateFamily.confidence.toFixed(2)})`,
-				);
-				console.log(`    Reason: ${autoTemplateFamily.reason}`);
-			}
+			let config: DebateConfig;
+			let adapterBundle: Awaited<ReturnType<typeof createAdapters>>;
 
-			const proposerPrompt = resolveRolePrompt({
-				role: "proposer",
-				family: resolvePromptTemplateFamily(
-					proposerSelection,
-					autoTemplateFamily?.family ?? "general",
-				),
-			});
-			const challengerPrompt = resolveRolePrompt({
-				role: "challenger",
-				family: resolvePromptTemplateFamily(
-					challengerSelection,
-					autoTemplateFamily?.family ?? "general",
-				),
-			});
-			const judgePrompt = resolveRolePrompt({
-				role: "judge",
-				family: resolvePromptTemplateFamily(
-					judgeSelection,
-					autoTemplateFamily?.family ?? "general",
-				),
-			});
-
-			// Resolve roles
-			const roles = resolveRoles({
-				proposer: {
-					profile: proposerProfile,
-					cliModel: options.proposerModel ?? options.model,
-					systemPrompt: proposerPrompt.systemPrompt,
-					promptTemplateFamily: proposerPrompt.promptTemplateFamily,
-				},
-				challenger: {
-					profile: challengerProfile,
-					cliModel: options.challengerModel ?? options.model,
-					systemPrompt: challengerPrompt.systemPrompt,
-					promptTemplateFamily: challengerPrompt.promptTemplateFamily,
-				},
-				judge: {
-					profile: judgeProfile,
-					cliModel: options.judgeModel ?? options.model,
-					systemPrompt: judgePrompt.systemPrompt,
-					promptTemplateFamily: judgePrompt.promptTemplateFamily,
-				},
-			});
-
-			// Build debate config
-			const config: DebateConfig = {
-				topic,
-				maxRounds,
-				judgeEveryNRounds,
-				convergenceThreshold,
-				executionModes,
-				promptTemplates: {
-					defaultSelection: templateSelection,
-					proposer: proposerPrompt.promptTemplateFamily,
-					challenger: challengerPrompt.promptTemplateFamily,
-					judge: judgePrompt.promptTemplateFamily,
-				},
-				proposerModel: roles.proposer.model,
-				challengerModel: roles.challenger.model,
-				judgeModel: roles.judge?.model,
-				proposerSystemPrompt: roles.proposer.systemPrompt,
-				challengerSystemPrompt: roles.challenger.systemPrompt,
-				judgeSystemPrompt: roles.judge?.systemPrompt,
-			};
-
-			// Write initial index.json with profile mapping (EventStore merges runtime data on close)
-			const initialIndex = {
-				debateId,
-				config,
-				profiles: {
-					proposer: {
-						name: proposerProfile.name,
-						agent: proposerProfile.agent,
-						model: roles.proposer.model,
-						promptTemplateFamily: roles.proposer.promptTemplateFamily,
-					},
-					challenger: {
-						name: challengerProfile.name,
-						agent: challengerProfile.agent,
-						model: roles.challenger.model,
-						promptTemplateFamily: roles.challenger.promptTemplateFamily,
-					},
-					...(roles.judge
-						? {
-								judge: {
-									name: judgeProfile.name,
-									agent: judgeProfile.agent,
-									model: roles.judge.model,
-									promptTemplateFamily: roles.judge.promptTemplateFamily,
-								},
-							}
+			if (options.config) {
+				// ── New config-file path ──────────────────────────────
+				const crossfireConfig = loadConfig(options.config);
+				const cliOverrides: CliPresetOverrides = {
+					...(presetConfig?.globalPreset
+						? { cliGlobalPreset: presetConfig.globalPreset }
 						: {}),
-				},
-				versions: {
-					crossfire: "0.1.0",
-					nodeVersion: process.version,
-				},
-			};
-			writeFileSync(
-				join(outputDir, "index.json"),
-				`${JSON.stringify(initialIndex, null, 2)}\n`,
-			);
+					...(presetConfig?.rolePresets?.proposer
+						? { cliProposerPreset: presetConfig.rolePresets.proposer }
+						: {}),
+					...(presetConfig?.rolePresets?.challenger
+						? { cliChallengerPreset: presetConfig.rolePresets.challenger }
+						: {}),
+					...(presetConfig?.rolePresets?.judge
+						? { cliJudgePreset: presetConfig.rolePresets.judge }
+						: {}),
+				};
+				const resolvedAllRoles = resolveAllRoles(crossfireConfig, cliOverrides);
 
-			if (options.verbose) {
-				console.log("Configuration:");
-				console.log(`  Topic: ${topic}`);
-				console.log(
-					`  Proposer: ${proposerProfile.name} (${roles.proposer.adapterType})`,
+				config = {
+					topic,
+					maxRounds,
+					judgeEveryNRounds,
+					convergenceThreshold,
+					executionModes,
+					proposerModel: resolvedAllRoles.proposer.model,
+					challengerModel: resolvedAllRoles.challenger.model,
+					judgeModel: resolvedAllRoles.judge?.model,
+					proposerSystemPrompt: resolvedAllRoles.proposer.systemPrompt,
+					challengerSystemPrompt: resolvedAllRoles.challenger.systemPrompt,
+					judgeSystemPrompt: resolvedAllRoles.judge?.systemPrompt,
+				};
+
+				const initialIndex = {
+					debateId,
+					config,
+					configFile: options.config,
+					roles: {
+						proposer: {
+							binding: resolvedAllRoles.proposer.bindingName,
+							adapter: resolvedAllRoles.proposer.adapter,
+							model: resolvedAllRoles.proposer.model,
+							preset: resolvedAllRoles.proposer.preset,
+						},
+						challenger: {
+							binding: resolvedAllRoles.challenger.bindingName,
+							adapter: resolvedAllRoles.challenger.adapter,
+							model: resolvedAllRoles.challenger.model,
+							preset: resolvedAllRoles.challenger.preset,
+						},
+						...(resolvedAllRoles.judge
+							? {
+									judge: {
+										binding: resolvedAllRoles.judge.bindingName,
+										adapter: resolvedAllRoles.judge.adapter,
+										model: resolvedAllRoles.judge.model,
+										preset: resolvedAllRoles.judge.preset,
+									},
+								}
+							: {}),
+					},
+					versions: {
+						crossfire: "0.1.0",
+						nodeVersion: process.version,
+					},
+				};
+				writeFileSync(
+					join(outputDir, "index.json"),
+					`${JSON.stringify(initialIndex, null, 2)}\n`,
 				);
-				if (roles.proposer.promptTemplateFamily) {
+
+				if (options.verbose) {
+					console.log("Configuration (from config file):");
+					console.log(`  Config: ${options.config}`);
+					console.log(`  Topic: ${topic}`);
 					console.log(
-						`    Prompt template: ${roles.proposer.promptTemplateFamily}`,
+						`  Proposer: ${resolvedAllRoles.proposer.bindingName} (${resolvedAllRoles.proposer.adapter}) preset=${resolvedAllRoles.proposer.preset.value}`,
 					);
-				}
-				console.log(
-					`  Challenger: ${challengerProfile.name} (${roles.challenger.adapterType})`,
-				);
-				if (roles.challenger.promptTemplateFamily) {
 					console.log(
-						`    Prompt template: ${roles.challenger.promptTemplateFamily}`,
+						`  Challenger: ${resolvedAllRoles.challenger.bindingName} (${resolvedAllRoles.challenger.adapter}) preset=${resolvedAllRoles.challenger.preset.value}`,
 					);
-				}
-				if (roles.judge) {
-					console.log(
-						`  Judge: ${judgeProfile.name} (${roles.judge.adapterType})`,
-					);
-					if (roles.judge.promptTemplateFamily) {
+					if (resolvedAllRoles.judge) {
 						console.log(
-							`    Prompt template: ${roles.judge.promptTemplateFamily}`,
+							`  Judge: ${resolvedAllRoles.judge.bindingName} (${resolvedAllRoles.judge.adapter}) preset=${resolvedAllRoles.judge.preset.value}`,
 						);
 					}
+					console.log(`  Output: ${outputDir}`);
 				}
-				console.log(`  Output: ${outputDir}`);
-			}
 
-			const adapterBundle = await createAdapters(
-				roles,
-				factories,
-				executionModes,
-			);
+				adapterBundle = await createAdaptersFromResolved(
+					resolvedAllRoles,
+					factories,
+				);
+			} else {
+				// ── Legacy profile-based path ────────────────────────
+				// Await classifier result now (LLM call overlapped with sync work above)
+				const autoTemplateFamily = classifierPromise
+					? await classifierPromise
+					: undefined;
+				if (options.verbose && autoTemplateFamily) {
+					console.log(
+						`  Template classifier: ${autoTemplateFamily.family} (${autoTemplateFamily.source}, confidence ${autoTemplateFamily.confidence.toFixed(2)})`,
+					);
+					console.log(`    Reason: ${autoTemplateFamily.reason}`);
+				}
+
+				const proposerPrompt = resolveRolePrompt({
+					role: "proposer",
+					family: resolvePromptTemplateFamily(
+						proposerSelection,
+						autoTemplateFamily?.family ?? "general",
+					),
+				});
+				const challengerPrompt = resolveRolePrompt({
+					role: "challenger",
+					family: resolvePromptTemplateFamily(
+						challengerSelection,
+						autoTemplateFamily?.family ?? "general",
+					),
+				});
+				const judgePrompt = resolveRolePrompt({
+					role: "judge",
+					family: resolvePromptTemplateFamily(
+						judgeSelection,
+						autoTemplateFamily?.family ?? "general",
+					),
+				});
+
+				// Resolve roles
+				const roles = resolveRoles({
+					proposer: {
+						profile: proposerProfile,
+						cliModel: options.proposerModel ?? options.model,
+						systemPrompt: proposerPrompt.systemPrompt,
+						promptTemplateFamily: proposerPrompt.promptTemplateFamily,
+					},
+					challenger: {
+						profile: challengerProfile,
+						cliModel: options.challengerModel ?? options.model,
+						systemPrompt: challengerPrompt.systemPrompt,
+						promptTemplateFamily: challengerPrompt.promptTemplateFamily,
+					},
+					judge: {
+						profile: judgeProfile,
+						cliModel: options.judgeModel ?? options.model,
+						systemPrompt: judgePrompt.systemPrompt,
+						promptTemplateFamily: judgePrompt.promptTemplateFamily,
+					},
+				});
+
+				config = {
+					topic,
+					maxRounds,
+					judgeEveryNRounds,
+					convergenceThreshold,
+					executionModes,
+					promptTemplates: {
+						defaultSelection: templateSelection,
+						proposer: proposerPrompt.promptTemplateFamily,
+						challenger: challengerPrompt.promptTemplateFamily,
+						judge: judgePrompt.promptTemplateFamily,
+					},
+					proposerModel: roles.proposer.model,
+					challengerModel: roles.challenger.model,
+					judgeModel: roles.judge?.model,
+					proposerSystemPrompt: roles.proposer.systemPrompt,
+					challengerSystemPrompt: roles.challenger.systemPrompt,
+					judgeSystemPrompt: roles.judge?.systemPrompt,
+				};
+
+				// Write initial index.json with profile mapping (EventStore merges runtime data on close)
+				const initialIndex = {
+					debateId,
+					config,
+					profiles: {
+						proposer: {
+							name: proposerProfile.name,
+							agent: proposerProfile.agent,
+							model: roles.proposer.model,
+							promptTemplateFamily: roles.proposer.promptTemplateFamily,
+						},
+						challenger: {
+							name: challengerProfile.name,
+							agent: challengerProfile.agent,
+							model: roles.challenger.model,
+							promptTemplateFamily: roles.challenger.promptTemplateFamily,
+						},
+						...(roles.judge
+							? {
+									judge: {
+										name: judgeProfile.name,
+										agent: judgeProfile.agent,
+										model: roles.judge.model,
+										promptTemplateFamily: roles.judge.promptTemplateFamily,
+									},
+								}
+							: {}),
+					},
+					versions: {
+						crossfire: "0.1.0",
+						nodeVersion: process.version,
+					},
+				};
+				writeFileSync(
+					join(outputDir, "index.json"),
+					`${JSON.stringify(initialIndex, null, 2)}\n`,
+				);
+
+				if (options.verbose) {
+					console.log("Configuration:");
+					console.log(`  Topic: ${topic}`);
+					console.log(
+						`  Proposer: ${proposerProfile.name} (${roles.proposer.adapterType})`,
+					);
+					if (roles.proposer.promptTemplateFamily) {
+						console.log(
+							`    Prompt template: ${roles.proposer.promptTemplateFamily}`,
+						);
+					}
+					console.log(
+						`  Challenger: ${challengerProfile.name} (${roles.challenger.adapterType})`,
+					);
+					if (roles.challenger.promptTemplateFamily) {
+						console.log(
+							`    Prompt template: ${roles.challenger.promptTemplateFamily}`,
+						);
+					}
+					if (roles.judge) {
+						console.log(
+							`  Judge: ${judgeProfile.name} (${roles.judge.adapterType})`,
+						);
+						if (roles.judge.promptTemplateFamily) {
+							console.log(
+								`    Prompt template: ${roles.judge.promptTemplateFamily}`,
+							);
+						}
+					}
+					console.log(`  Output: ${outputDir}`);
+				}
+
+				adapterBundle = await createAdapters(roles, factories, executionModes);
+			}
 			const busBundle = createBus({ outputDir });
 			const tuiBundle = createTui(busBundle.bus, options.headless);
 
