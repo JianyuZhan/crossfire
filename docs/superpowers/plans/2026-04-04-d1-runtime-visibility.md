@@ -4,19 +4,22 @@
 
 **Goal:** Make runtime policy state visible through `/status policy` and `/status tools` TUI live commands, and replace legacy `executionMode` display with effective preset from event-derived state.
 
-**Architecture:** Enrich policy events with observation payload, track per-role `RuntimePolicyState` in TUI store, expose it through decoupled view models and text renderers, and wire `/status` commands into the existing TUI command dispatch pipeline.
+**Architecture:** Enrich policy events with observation payload, track session-scoped per-role `RuntimePolicyState` in TUI store, expose it through decoupled view models and text renderers, and wire `/status` commands into the existing TUI command dispatch pipeline. Architecture and README docs are updated in the same commits that change contracts and user-facing behavior.
 
 **Tech Stack:** TypeScript, Vitest, Ink (React), Commander.js, pnpm monorepo
 
 ---
 
-### Task 1: Enrich Event Types with Observation Payload
+### Task 1: Enrich Event Types and Emit Full Observation
 
 **Files:**
 - Modify: `packages/orchestrator-core/src/orchestrator-events.ts`
 - Modify: `packages/orchestrator-core/__tests__/policy-events.test.ts`
+- Modify: `packages/orchestrator/src/runner.ts`
+- Modify: `packages/orchestrator/__tests__/policy-runner.test.ts`
+- Modify: `docs/architecture/orchestrator.md`
 
-The current `PolicyBaselineEvent` and `PolicyTurnOverrideEvent` carry `translationSummary` and `warnings` but not `toolView`, `capabilityEffects`, or `completeness`. The spec requires `/status tools` to render from event-derived state, so the full `ProviderObservationResult` must be in the events and `RuntimePolicyState`.
+The current `PolicyBaselineEvent` and `PolicyTurnOverrideEvent` carry `translationSummary` and `warnings` but not `toolView`, `capabilityEffects`, or `completeness`. The spec requires `/status tools` to render from event-derived state, so the full `ProviderObservationResult` must be in the events and `RuntimePolicyState`. The runner already computes observation via `getObservationForPolicy()` (line ~125-141) but only extracts `translation` and `warnings` into events. This task adds the type, emits it, and updates the architecture doc in one atomic commit.
 
 - [ ] **Step 1: Write failing test for observation in PolicyBaselineEvent**
 
@@ -151,40 +154,12 @@ export interface RuntimePolicyState {
 
 Update the existing `reconstructState()` tests to include `observation` in their event fixtures. For each test that creates a `PolicyBaselineEvent` or `PolicyTurnOverrideEvent`, add the `stubObservation` field.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 5: Run orchestrator-core tests to verify they pass**
 
 Run: `cd packages/orchestrator-core && pnpm vitest run __tests__/policy-events.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Fix any downstream type errors**
-
-Run: `pnpm build`
-
-The new required `observation` field will cause type errors in:
-- `packages/orchestrator/src/runner.ts` (event emission)
-- `packages/tui/src/state/tui-store.ts` (event handling)
-- Tests that construct these events
-
-For now, only fix the minimum to make `pnpm build` pass in `orchestrator-core`. Runner and TUI fixes are in subsequent tasks. If the build requires temporary stubs, use `observation: undefined as unknown as ProviderObservationResult` in runner.ts emission sites — Task 2 will replace these with real observation data.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add packages/orchestrator-core/src/orchestrator-events.ts packages/orchestrator-core/__tests__/policy-events.test.ts
-git commit -m "feat(events): add observation payload to policy baseline and override events"
-```
-
----
-
-### Task 2: Emit Full Observation in Runner Events
-
-**Files:**
-- Modify: `packages/orchestrator/src/runner.ts`
-- Modify: `packages/orchestrator/__tests__/policy-runner.test.ts`
-
-The runner already computes observation via `getObservationForPolicy()` (line ~125-141) but only extracts `translation` and `warnings` into events. This task makes it emit the full `ProviderObservationResult`.
-
-- [ ] **Step 1: Write failing test for observation in emitted baseline event**
+- [ ] **Step 6: Write failing test for observation in emitted baseline event**
 
 In `packages/orchestrator/__tests__/policy-runner.test.ts`, add a test that verifies the `policy.baseline` event includes the `observation` field:
 
@@ -205,12 +180,24 @@ it("emits policy.baseline with full observation payload", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 7: Write failing test for observation in emitted override event**
 
-Run: `cd packages/orchestrator && pnpm vitest run __tests__/policy-runner.test.ts`
-Expected: FAIL — observation is undefined or missing fields.
+```ts
+it("emits policy.turn.override with full observation payload", () => {
+  const overrideEvents = events.filter(
+    (e) => e.kind === "policy.turn.override",
+  );
+  // If no overrides in this test's debate config, skip gracefully
+  for (const evt of overrideEvents) {
+    const override = evt as PolicyTurnOverrideEvent;
+    expect(override.observation).toBeDefined();
+    expect(override.observation.toolView).toBeDefined();
+    expect(override.observation.completeness).toBeDefined();
+  }
+});
+```
 
-- [ ] **Step 3: Update emitBaselinePolicyEvents to include observation**
+- [ ] **Step 8: Update emitBaselinePolicyEvents to include observation**
 
 In `packages/orchestrator/src/runner.ts`, in `emitBaselinePolicyEvents()` (around line 143-168), change the event construction to include the full observation:
 
@@ -252,7 +239,7 @@ function emitBaselinePolicyEvents(
 }
 ```
 
-- [ ] **Step 4: Update turn override emission to include observation**
+- [ ] **Step 9: Update turn override emission to include observation**
 
 In the turn override emission block (around line 587-610), apply the same pattern:
 
@@ -292,40 +279,64 @@ if (hasTurnOverride) {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 10: Run runner tests**
 
 Run: `cd packages/orchestrator && pnpm vitest run __tests__/policy-runner.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Run full build to check for any remaining type errors**
+- [ ] **Step 11: Fix any remaining downstream type errors**
 
 Run: `pnpm build && pnpm test`
 Expected: PASS (fix any test fixtures that now need observation field)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 12: Update orchestrator architecture doc**
+
+In `docs/architecture/orchestrator.md`, update the `policy.baseline` emission note (around line 188) to mention the full observation payload:
+
+Change:
+```
+- it emits `policy.baseline` for each started role immediately after `debate.started`, carrying the full baseline `ResolvedPolicy`, clamp notes, preset provenance, translation summary, and warnings
+```
+To:
+```
+- it emits `policy.baseline` for each started role immediately after `debate.started`, carrying the full baseline `ResolvedPolicy`, clamp notes, preset provenance, translation summary, warnings, and the full `ProviderObservationResult` (tool view, capability effects, completeness) so that downstream consumers can reconstruct runtime policy state from events alone
+- it emits `policy.turn.override` before sending the turn (only when a turn-level override is active) with the same observation payload, and `policy.turn.override.clear` after the turn completes
+```
+
+- [ ] **Step 13: Commit**
 
 ```bash
-git add packages/orchestrator/src/runner.ts packages/orchestrator/__tests__/policy-runner.test.ts
-git commit -m "feat(runner): emit full observation payload in policy baseline and override events"
+git add packages/orchestrator-core/src/orchestrator-events.ts packages/orchestrator-core/__tests__/policy-events.test.ts packages/orchestrator/src/runner.ts packages/orchestrator/__tests__/policy-runner.test.ts docs/architecture/orchestrator.md
+git commit -m "feat(events): add observation payload to policy events and emit from runner
+
+Enrich PolicyBaselineEvent and PolicyTurnOverrideEvent with full
+ProviderObservationResult. Update runner to emit real observation
+data instead of extracting only translation/warnings."
 ```
 
 ---
 
-### Task 3: Track Per-Role RuntimePolicyState in TUI Store
+### Task 2: Track Session-Scoped Per-Role RuntimePolicyState in TUI Store
 
 **Files:**
 - Modify: `packages/tui/src/state/types.ts`
 - Modify: `packages/tui/src/state/tui-store.ts`
 - Modify: `packages/tui/__tests__/tui-store.test.ts`
 
-Currently `policy.baseline` is a no-op in TUI store and `policy.turn.override` only sets `executionMode` string. This task replaces that with proper `RuntimePolicyState` tracking.
+Currently `policy.baseline` is a no-op in TUI store and `policy.turn.override` only sets `executionMode` string. This task replaces that with proper session-scoped `RuntimePolicyState` tracking. The state is keyed by `debateId` (from `debate.started`) then by role, so multi-session contamination is impossible and the structure matches the spec's per-session per-role requirement.
 
-- [ ] **Step 1: Add policyState to TuiState**
+- [ ] **Step 1: Add session-scoped policyState to TuiState**
 
 In `packages/tui/src/state/types.ts`, add to `TuiState`:
 
 ```ts
 import type { RuntimePolicyState } from "@crossfire/orchestrator-core";
+
+/** Session-scoped policy state, keyed by debateId then role. */
+export interface PolicySessionState {
+  debateId: string;
+  roles: Record<string, RuntimePolicyState>;
+}
 
 export interface TuiState {
   proposer: LiveAgentPanelState;
@@ -338,11 +349,11 @@ export interface TuiState {
   debateState: DebateState;
   summaryGenerating?: boolean;
   summary?: DebateSummaryView;
-  policyState: Record<string, RuntimePolicyState>;
+  policySession?: PolicySessionState;
 }
 ```
 
-- [ ] **Step 2: Write failing test for policy.baseline tracking**
+- [ ] **Step 2: Write failing test for policy.baseline tracking with session scope**
 
 In `packages/tui/__tests__/tui-store.test.ts`:
 
@@ -363,8 +374,15 @@ const stubObservation: ProviderObservationResult = {
   completeness: "partial",
 };
 
-it("tracks RuntimePolicyState from policy.baseline events", () => {
+it("tracks RuntimePolicyState scoped to active session", () => {
   const store = new TuiStore();
+  // debate.started establishes the session
+  store.handleEvent(
+    ev("debate.started", {
+      debateId: "d-20260405-120000",
+      config: minimalConfig,
+    }),
+  );
   store.handleEvent(
     ev("policy.baseline", {
       role: "proposer",
@@ -377,45 +395,66 @@ it("tracks RuntimePolicyState from policy.baseline events", () => {
     }),
   );
   const state = store.getState();
-  expect(state.policyState.proposer).toBeDefined();
-  expect(state.policyState.proposer.baseline.preset.value).toBe("research");
-  expect(state.policyState.proposer.baseline.observation.completeness).toBe("partial");
+  expect(state.policySession).toBeDefined();
+  expect(state.policySession!.debateId).toBe("d-20260405-120000");
+  expect(state.policySession!.roles.proposer).toBeDefined();
+  expect(state.policySession!.roles.proposer.baseline.preset.value).toBe("research");
+  expect(state.policySession!.roles.proposer.baseline.observation.completeness).toBe("partial");
+});
+
+it("resets policySession on new debate.started", () => {
+  const store = new TuiStore();
+  store.handleEvent(ev("debate.started", { debateId: "d-session-1", config: minimalConfig }));
+  store.handleEvent(
+    ev("policy.baseline", {
+      role: "proposer",
+      policy: { preset: "research", roleContract: {}, capabilities: {}, interaction: {} },
+      clamps: [],
+      preset: { value: "research", source: "cli-role" },
+      translationSummary: stubObservation.translation,
+      warnings: [],
+      observation: stubObservation,
+    }),
+  );
+  // New session starts — old policy state must be wiped
+  store.handleEvent(ev("debate.started", { debateId: "d-session-2", config: minimalConfig }));
+  const state = store.getState();
+  expect(state.policySession!.debateId).toBe("d-session-2");
+  expect(state.policySession!.roles.proposer).toBeUndefined();
 });
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
 
 Run: `cd packages/tui && pnpm vitest run __tests__/tui-store.test.ts`
-Expected: FAIL — policyState not defined.
+Expected: FAIL — policySession not defined.
 
-- [ ] **Step 4: Initialize policyState in TuiStore constructor**
+- [ ] **Step 4: Implement session-scoped policy event handling**
 
-In `packages/tui/src/state/tui-store.ts`, update constructor:
+In `packages/tui/src/state/tui-store.ts`:
+
+Update the constructor to leave `policySession` as `undefined` (it is set on `debate.started`).
+
+In the `debate.started` case, initialize a fresh `policySession`:
 
 ```ts
-constructor() {
-  this.state = {
-    proposer: defaultAgentPanel("proposer"),
-    challenger: defaultAgentPanel("challenger"),
-    rounds: [],
-    judgeResults: [],
-    judge: defaultJudge(),
-    metrics: defaultMetrics(),
-    command: defaultCommand(),
-    debateState: DEFAULT_DEBATE_STATE,
-    policyState: {},
-  };
+case "debate.started": {
+  // ... existing debate.started handling ...
+  const debateId = (event as { debateId?: string }).debateId;
+  if (debateId) {
+    this.state.policySession = { debateId, roles: {} };
+  }
+  break;
 }
 ```
 
-- [ ] **Step 5: Implement policy event handling in applyEvent()**
-
-In `packages/tui/src/state/tui-store.ts`, replace the existing policy event cases:
+Replace the existing policy event cases:
 
 ```ts
 case "policy.baseline": {
   const e = event as PolicyBaselineEvent;
-  this.state.policyState[e.role] = {
+  if (!this.state.policySession) break; // no active session
+  this.state.policySession.roles[e.role] = {
     baseline: {
       policy: e.policy,
       clamps: [...e.clamps],
@@ -425,11 +464,16 @@ case "policy.baseline": {
       observation: e.observation,
     },
   };
+  // Set initial preset on panel for header display
+  if (e.role === "proposer" || e.role === "challenger") {
+    this.state[e.role].preset = e.preset.value;
+  }
   break;
 }
 case "policy.turn.override": {
   const e = event as PolicyTurnOverrideEvent;
-  const existing = this.state.policyState[e.role];
+  if (!this.state.policySession) break;
+  const existing = this.state.policySession.roles[e.role];
   if (existing) {
     existing.currentTurnOverride = {
       turnId: e.turnId,
@@ -440,14 +484,16 @@ case "policy.turn.override": {
       observation: e.observation,
     };
   }
-  // Keep backward-compatible executionMode for now (Task 6 removes it)
-  this.state[e.role as "proposer" | "challenger"].executionMode = e.preset;
+  // Keep backward-compatible preset display for now (Task 6 migrates it)
+  if (e.role === "proposer" || e.role === "challenger") {
+    this.state[e.role].executionMode = e.preset;
+  }
   break;
 }
 case "policy.turn.override.clear": {
   const e = event as PolicyTurnOverrideClearEvent;
-  // Clear override from all roles that have this turnId
-  for (const rps of Object.values(this.state.policyState)) {
+  if (!this.state.policySession) break;
+  for (const rps of Object.values(this.state.policySession.roles)) {
     if (rps.currentTurnOverride?.turnId === e.turnId) {
       rps.currentTurnOverride = undefined;
     }
@@ -465,12 +511,12 @@ import type {
 } from "@crossfire/orchestrator-core";
 ```
 
-- [ ] **Step 6: Write tests for override and clear tracking**
+- [ ] **Step 5: Write tests for override and clear tracking**
 
 ```ts
-it("tracks policy.turn.override in RuntimePolicyState", () => {
+it("tracks policy.turn.override in session-scoped RuntimePolicyState", () => {
   const store = new TuiStore();
-  // First set baseline
+  store.handleEvent(ev("debate.started", { debateId: "d-test", config: minimalConfig }));
   store.handleEvent(ev("policy.baseline", {
     role: "proposer",
     policy: { preset: "research", roleContract: {}, capabilities: {}, interaction: {} },
@@ -480,7 +526,6 @@ it("tracks policy.turn.override in RuntimePolicyState", () => {
     warnings: [],
     observation: stubObservation,
   }));
-  // Then override
   store.handleEvent(ev("policy.turn.override", {
     role: "proposer",
     turnId: "p-1",
@@ -491,13 +536,14 @@ it("tracks policy.turn.override in RuntimePolicyState", () => {
     observation: stubObservation,
   }));
 
-  const state = store.getState();
-  expect(state.policyState.proposer.currentTurnOverride).toBeDefined();
-  expect(state.policyState.proposer.currentTurnOverride?.preset).toBe("dangerous");
+  const session = store.getState().policySession!;
+  expect(session.roles.proposer.currentTurnOverride).toBeDefined();
+  expect(session.roles.proposer.currentTurnOverride?.preset).toBe("dangerous");
 });
 
 it("clears policy.turn.override on clear event", () => {
   const store = new TuiStore();
+  store.handleEvent(ev("debate.started", { debateId: "d-test", config: minimalConfig }));
   store.handleEvent(ev("policy.baseline", {
     role: "proposer",
     policy: { preset: "research", roleContract: {}, capabilities: {}, interaction: {} },
@@ -518,33 +564,47 @@ it("clears policy.turn.override on clear event", () => {
   }));
   store.handleEvent(ev("policy.turn.override.clear", { turnId: "p-1" }));
 
-  const state = store.getState();
-  expect(state.policyState.proposer.currentTurnOverride).toBeUndefined();
-  expect(state.policyState.proposer.baseline.preset.value).toBe("research");
+  const session = store.getState().policySession!;
+  expect(session.roles.proposer.currentTurnOverride).toBeUndefined();
+  expect(session.roles.proposer.baseline.preset.value).toBe("research");
+});
+
+it("ignores policy events before debate.started", () => {
+  const store = new TuiStore();
+  store.handleEvent(ev("policy.baseline", {
+    role: "proposer",
+    policy: { preset: "research", roleContract: {}, capabilities: {}, interaction: {} },
+    clamps: [],
+    preset: { value: "research", source: "cli-role" },
+    translationSummary: stubObservation.translation,
+    warnings: [],
+    observation: stubObservation,
+  }));
+  expect(store.getState().policySession).toBeUndefined();
 });
 ```
 
-- [ ] **Step 7: Run tests**
+- [ ] **Step 6: Run tests**
 
 Run: `cd packages/tui && pnpm vitest run __tests__/tui-store.test.ts`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add packages/tui/src/state/types.ts packages/tui/src/state/tui-store.ts packages/tui/__tests__/tui-store.test.ts
-git commit -m "feat(tui): track per-role RuntimePolicyState from policy events"
+git commit -m "feat(tui): track session-scoped per-role RuntimePolicyState from policy events"
 ```
 
 ---
 
-### Task 4: Create Status View Models
+### Task 3: Create Status View Models
 
 **Files:**
 - Create: `packages/tui/src/status/status-view-models.ts`
 - Create: `packages/tui/__tests__/status/status-view-models.test.ts`
 
-View models take `RuntimePolicyState` (from orchestrator-core) as input and return structured data for rendering. They do not import TUI store.
+View models take `RuntimePolicyState` (from orchestrator-core) as input and return structured data for rendering. They do not import TUI store. `StatusPolicyView` includes `model` and resolved policy summary per the spec's required output (role, adapter, model, baseline resolved policy, clamps, translation, warnings, active override).
 
 - [ ] **Step 1: Create status directory**
 
@@ -600,11 +660,14 @@ function makeState(overrides?: Partial<RuntimePolicyState>): RuntimePolicyState 
 }
 
 describe("buildStatusPolicyView", () => {
-  it("returns baseline policy summary", () => {
-    const view = buildStatusPolicyView("proposer", "claude", makeState());
+  it("returns baseline policy summary with model and resolved policy", () => {
+    const view = buildStatusPolicyView("proposer", "claude", "claude-sonnet-4-20250514", makeState());
     expect(view.role).toBe("proposer");
     expect(view.adapter).toBe("claude");
+    expect(view.model).toBe("claude-sonnet-4-20250514");
     expect(view.baseline.preset.value).toBe("research");
+    expect(view.baseline.policy).toBeDefined();
+    expect(view.baseline.policy.capabilities).toBeDefined();
     expect(view.baseline.clamps).toHaveLength(1);
     expect(view.baseline.warnings).toHaveLength(1);
     expect(view.override).toBeUndefined();
@@ -621,10 +684,11 @@ describe("buildStatusPolicyView", () => {
         observation: stubObservation,
       },
     });
-    const view = buildStatusPolicyView("proposer", "claude", state);
+    const view = buildStatusPolicyView("proposer", "claude", "claude-sonnet-4-20250514", state);
     expect(view.override).toBeDefined();
     expect(view.override?.turnId).toBe("p-1");
     expect(view.override?.preset).toBe("dangerous");
+    expect(view.override?.policy).toBeDefined();
   });
 });
 
@@ -685,6 +749,7 @@ import type { RuntimePolicyState } from "@crossfire/orchestrator-core";
 export interface StatusPolicyView {
   role: string;
   adapter: string;
+  model: string;
   baseline: {
     preset: { value: PolicyPreset; source: PresetSource };
     policy: ResolvedPolicy;
@@ -714,11 +779,13 @@ export interface StatusToolsView {
 export function buildStatusPolicyView(
   role: string,
   adapter: string,
+  model: string,
   state: RuntimePolicyState,
 ): StatusPolicyView {
   const view: StatusPolicyView = {
     role,
     adapter,
+    model,
     baseline: {
       preset: state.baseline.preset,
       policy: state.baseline.policy,
@@ -778,13 +845,13 @@ git commit -m "feat(tui): add status policy and tools view models"
 
 ---
 
-### Task 5: Create Status Text Renderers
+### Task 4: Create Status Text Renderers
 
 **Files:**
 - Create: `packages/tui/src/status/status-renderers.ts`
 - Create: `packages/tui/__tests__/status/status-renderers.test.ts`
 
-These render `StatusPolicyView` and `StatusToolsView` into text strings, following the same patterns as `packages/cli/src/commands/inspection-renderers.ts`.
+These render `StatusPolicyView` and `StatusToolsView` into text strings, following the same patterns as `packages/cli/src/commands/inspection-renderers.ts`. The policy renderer must display model, resolved policy capabilities/interaction summary, and translation details — not just preset and warnings.
 
 - [ ] **Step 1: Write failing tests for renderStatusPolicy**
 
@@ -802,6 +869,7 @@ import { makeResolvedPolicy } from "@crossfire/adapter-core/testing";
 const basePolicyView: StatusPolicyView = {
   role: "proposer",
   adapter: "claude",
+  model: "claude-sonnet-4-20250514",
   baseline: {
     preset: { value: "research", source: "cli-role" },
     policy: makeResolvedPolicy(),
@@ -820,14 +888,21 @@ const basePolicyView: StatusPolicyView = {
 };
 
 describe("renderStatusPolicy", () => {
-  it("renders baseline policy summary", () => {
+  it("renders baseline policy summary with model and resolved policy", () => {
     const text = renderStatusPolicy([basePolicyView]);
     expect(text).toContain("proposer");
     expect(text).toContain("claude");
+    expect(text).toContain("claude-sonnet-4-20250514");
     expect(text).toContain("research");
     expect(text).toContain("cli-role");
     expect(text).toContain("capabilities.shell");
     expect(text).toContain("maxTurns is approximate");
+  });
+
+  it("renders resolved policy capabilities summary", () => {
+    const text = renderStatusPolicy([basePolicyView]);
+    // Should display capability fields from the resolved policy
+    expect(text).toMatch(/capabilities/i);
   });
 
   it("renders override section when present", () => {
@@ -901,7 +976,33 @@ Expected: FAIL — module not found.
 Create `packages/tui/src/status/status-renderers.ts`:
 
 ```ts
+import type { ResolvedPolicy } from "@crossfire/adapter-core";
 import type { StatusPolicyView, StatusToolsView } from "./status-view-models.js";
+
+function renderPolicySummary(policy: ResolvedPolicy): string[] {
+  const lines: string[] = [];
+  const caps = policy.capabilities;
+  if (caps) {
+    const entries = Object.entries(caps).filter(([, v]) => v !== undefined);
+    if (entries.length > 0) {
+      lines.push("  Capabilities:");
+      for (const [k, v] of entries) {
+        lines.push(`    ${k}: ${String(v)}`);
+      }
+    }
+  }
+  const interaction = policy.interaction;
+  if (interaction) {
+    const entries = Object.entries(interaction).filter(([, v]) => v !== undefined);
+    if (entries.length > 0) {
+      lines.push("  Interaction:");
+      for (const [k, v] of entries) {
+        lines.push(`    ${k}: ${JSON.stringify(v)}`);
+      }
+    }
+  }
+  return lines;
+}
 
 export function renderStatusPolicy(views: StatusPolicyView[]): string {
   if (views.length === 0) {
@@ -910,8 +1011,10 @@ export function renderStatusPolicy(views: StatusPolicyView[]): string {
 
   const lines: string[] = [];
   for (const view of views) {
-    lines.push(`\n=== ${view.role} (${view.adapter}) ===`);
+    lines.push(`\n=== ${view.role} (${view.adapter}) model=${view.model} ===`);
     lines.push(`  Preset: ${view.baseline.preset.value} (${view.baseline.preset.source})`);
+
+    lines.push(...renderPolicySummary(view.baseline.policy));
 
     if (view.baseline.clamps.length > 0) {
       lines.push("  Clamps:");
@@ -932,6 +1035,7 @@ export function renderStatusPolicy(views: StatusPolicyView[]): string {
 
     if (view.override) {
       lines.push(`  Override: turnId=${view.override.turnId} preset=${view.override.preset}`);
+      lines.push(...renderPolicySummary(view.override.policy));
       if (view.override.warnings.length > 0) {
         lines.push("  Override Warnings:");
         for (const w of view.override.warnings) {
@@ -948,7 +1052,7 @@ export function renderStatusTools(views: StatusToolsView[]): string {
     return "Tool state not yet available.";
   }
 
-  const lines: string[] = ["(Best-effort observation — not an execution guarantee)"];
+  const lines: string[] = ["(Best-effort observation \u2014 not an execution guarantee)"];
   for (const view of views) {
     lines.push(`\n=== ${view.role} (${view.adapter}) ===`);
     lines.push(`  Source: ${view.source}`);
@@ -966,7 +1070,7 @@ export function renderStatusTools(views: StatusToolsView[]): string {
       for (const t of view.toolView) {
         const icon = t.status === "allowed" ? "\u2713" : "\u2717";
         const suffix = t.capabilityField ? ` (${t.capabilityField})` : "";
-        lines.push(`    ${icon} ${t.name} [${t.source}] ${t.status} — ${t.reason}${suffix}`);
+        lines.push(`    ${icon} ${t.name} [${t.source}] ${t.status} \u2014 ${t.reason}${suffix}`);
       }
     }
 
@@ -1005,14 +1109,17 @@ git commit -m "feat(tui): add status text renderers for policy and tools"
 
 ---
 
-### Task 6: Add /status Command Parsing and Dispatch
+### Task 5: Add /status Command Parsing and Dispatch
 
 **Files:**
 - Modify: `packages/tui/src/components/command-input.tsx`
 - Modify: `packages/cli/src/wiring/live-command-handler.ts`
 - Modify: `packages/tui/__tests__/command-input.test.tsx`
+- Modify: `docs/architecture/tui-cli.md`
+- Modify: `README.md`
+- Modify: `README.zh-CN.md`
 
-Add `/status policy` and `/status tools` to the command parsing and dispatch pipeline.
+Add `/status policy` and `/status tools` to the command parsing and dispatch pipeline. The handler reads from the session-scoped `policySession` and adapter metadata to build view models. This is a user-facing CLI change, so README and TUI architecture docs are updated in the same commit.
 
 - [ ] **Step 1: Write failing tests for /status command parsing**
 
@@ -1069,38 +1176,32 @@ Expected: PASS
 
 - [ ] **Step 6: Wire /status into live command handler**
 
-In `packages/cli/src/wiring/live-command-handler.ts`, add handling for the status command. The handler needs access to the TUI store's `policyState` and adapter metadata to build view models.
-
-First, update the `LiveCommandHandlerOptions` type to include a `getStatusContext` callback:
-
-```ts
-export interface LiveCommandHandlerOptions {
-  adapters: AdapterBundle["adapters"];
-  bus: DebateEventBus;
-  store: TuiStore;
-  triggerShutdown: () => void;
-  getUserQuitHandler: () => (() => void) | undefined;
-}
-```
+In `packages/cli/src/wiring/live-command-handler.ts`, add handling for the status command. The handler reads from the TUI store's `policySession` and projects view models using adapter metadata for model/adapter ID.
 
 In the command handler function, add the status case:
 
 ```ts
 case "status": {
-  const policyState = store.getState().policyState;
-  const roleEntries = Object.entries(policyState);
+  const session = store.getState().policySession;
+  if (!session) {
+    store.pushCommandOutput("Policy state not yet available (no active session).");
+    break;
+  }
+  const roleEntries = Object.entries(session.roles);
 
   if (cmd.target === "policy") {
     const views = roleEntries.map(([role, state]) => {
-      const adapter = adapters[role as keyof typeof adapters]?.session?.adapterId ?? "unknown";
-      return buildStatusPolicyView(role, adapter, state);
+      const adapterEntry = adapters[role as keyof typeof adapters];
+      const adapterId = adapterEntry?.session?.adapterId ?? "unknown";
+      const model = adapterEntry?.session?.model ?? "unknown";
+      return buildStatusPolicyView(role, adapterId, model, state);
     });
     const text = renderStatusPolicy(views);
     store.pushCommandOutput(text);
   } else {
     const views = roleEntries.map(([role, state]) => {
-      const adapter = adapters[role as keyof typeof adapters]?.session?.adapterId ?? "unknown";
-      return buildStatusToolsView(role, adapter, state);
+      const adapterId = adapters[role as keyof typeof adapters]?.session?.adapterId ?? "unknown";
+      return buildStatusToolsView(role, adapterId, state);
     });
     const text = renderStatusTools(views);
     store.pushCommandOutput(text);
@@ -1145,16 +1246,39 @@ export interface CommandState {
 Run: `pnpm build && pnpm test`
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 9: Update TUI-CLI architecture doc**
+
+In `docs/architecture/tui-cli.md`, add a section documenting:
+- `/status policy` and `/status tools` as TUI live commands (not standalone CLI subcommands)
+- snapshot-at-invocation semantics (reads `store.getState()` at command time)
+- session-scoped RuntimePolicyState tracking (keyed by debateId from `debate.started`)
+- view model architecture: `buildStatusPolicyView` and `buildStatusToolsView` are decoupled from TUI store internals, take `RuntimePolicyState` as input
+
+Update the live panel header description (line ~56) to note that `/status policy` is available for full provenance details while the header shows only the effective preset.
+
+- [ ] **Step 10: Update README.md**
+
+In `README.md`, in the TUI commands section or the live commands area, add `/status policy` and `/status tools` with brief descriptions:
+- `/status policy` — shows effective policy state per role (preset, capabilities, clamps, translation, warnings, active override)
+- `/status tools` — shows effective tool surface per role (tool view, capability effects, completeness; best-effort observation)
+
+- [ ] **Step 11: Update README.zh-CN.md**
+
+Mirror the README.md changes in the Chinese README, translating the command descriptions.
+
+- [ ] **Step 12: Commit**
 
 ```bash
-git add packages/tui/src/components/command-input.tsx packages/cli/src/wiring/live-command-handler.ts packages/tui/src/state/tui-store.ts packages/tui/src/state/types.ts packages/tui/__tests__/command-input.test.tsx
-git commit -m "feat(tui): add /status policy and /status tools command parsing and dispatch"
+git add packages/tui/src/components/command-input.tsx packages/cli/src/wiring/live-command-handler.ts packages/tui/src/state/tui-store.ts packages/tui/src/state/types.ts packages/tui/__tests__/command-input.test.tsx docs/architecture/tui-cli.md README.md README.zh-CN.md
+git commit -m "feat(tui): add /status policy and /status tools command parsing and dispatch
+
+Wire new live commands into TUI command parser and live-command-handler.
+Update architecture docs and READMEs for user-facing /status surface."
 ```
 
 ---
 
-### Task 7: Replace executionMode Display with Effective Preset
+### Task 6: Replace executionMode Display with Effective Preset
 
 **Files:**
 - Modify: `packages/tui/src/components/agent-panel.tsx`
@@ -1164,8 +1288,10 @@ git commit -m "feat(tui): add /status policy and /status tools command parsing a
 - Modify: `packages/tui/src/state/types.ts`
 - Modify: `packages/tui/__tests__/tui-store.test.ts`
 - Modify: `packages/tui/__tests__/render/render-blocks.test.ts`
+- Modify: `docs/architecture/tui-cli.md`
+- Modify: `docs/architecture/execution-modes.md`
 
-Replace the legacy `executionMode` string display with the effective preset derived from `RuntimePolicyState`. The panel header should show the effective preset; full provenance is reserved for `/status policy`.
+Replace the legacy `executionMode` string display with the effective preset derived from `RuntimePolicyState`. The panel header should show the effective preset; full provenance is reserved for `/status policy`. Architecture docs updated in the same commit since this changes the TUI display contract.
 
 - [ ] **Step 1: Update RenderBlock agent-header to use preset instead of executionMode**
 
@@ -1254,19 +1380,12 @@ In `packages/tui/src/state/tui-store.ts`:
 
 Where `defaultAgentPanel()` sets `executionMode: undefined`, change to `preset: undefined`.
 
-In the `policy.turn.override` case, change:
-```ts
-this.state[e.role as "proposer" | "challenger"].executionMode = e.preset;
-```
-to:
+In the `policy.turn.override` case (Task 2 wrote `this.state[e.role].executionMode = e.preset`), change to:
 ```ts
 this.state[e.role as "proposer" | "challenger"].preset = e.preset;
 ```
 
-In `policy.baseline` case, also set initial preset:
-```ts
-this.state[e.role as "proposer" | "challenger"].preset = e.preset.value;
-```
+In the `policy.baseline` case (Task 2 already sets `this.state[e.role].preset = e.preset.value`), verify it is correct.
 
 In `round.started` where `executionMode` is cleared, clear `preset` instead (or remove the clearing since preset should persist across rounds from baseline).
 
@@ -1288,16 +1407,43 @@ Search for all `executionMode` references in `packages/tui/` and replace.
 Run: `pnpm build && pnpm test`
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 9: Update architecture docs for preset display**
+
+In `docs/architecture/tui-cli.md`, update line ~56:
+
+Change:
+```
+- live proposer / challenger headers now append the effective execution mode inline as `Role [provider] [mode: ...]`, so the mode is visible without requiring a separate status row
+```
+To:
+```
+- live proposer / challenger headers append the effective preset inline as `Role [provider] [preset]`; full provenance (source, clamps, translation) is available via `/status policy`
+```
+
+In `docs/architecture/execution-modes.md`, update line ~162:
+
+Change:
+```
+- TUI: live panels show the current effective mode in the header/status text
+```
+To:
+```
+- TUI: live panels show the current effective preset in the header (not mode); `/status policy` shows full provenance
+```
+
+- [ ] **Step 10: Commit**
 
 ```bash
-git add packages/tui/
-git commit -m "refactor(tui): replace executionMode display with effective preset from policy state"
+git add packages/tui/ docs/architecture/tui-cli.md docs/architecture/execution-modes.md
+git commit -m "refactor(tui): replace executionMode display with effective preset from policy state
+
+Panel headers now show [preset] instead of [mode: ...]. Full policy
+provenance is available via /status policy. Architecture docs updated."
 ```
 
 ---
 
-### Task 8: Add Warning Badge to Panel Headers
+### Task 7: Add Warning Badge to Panel Headers
 
 **Files:**
 - Modify: `packages/tui/src/render/line-buffer.ts`
@@ -1348,14 +1494,15 @@ export { formatWarningBadge } from "./warning-badge.js";
 
 - [ ] **Step 3: Pass warning count into render blocks**
 
-In `packages/tui/src/render/render-blocks.ts`, add `warningCount?: number` to the agent-header block shape. Compute it from TuiState's policyState:
+In `packages/tui/src/render/render-blocks.ts`, add `warningCount?: number` to the agent-header block shape. Compute it from TuiState's policySession:
 
 ```ts
-// In liveStateToBlocks(), look up warning count from policyState
-warningCount: policyState?.[state.role]?.baseline?.warnings?.length ?? 0,
+// In liveStateToBlocks(), look up warning count from policySession
+const roleState = policySession?.roles?.[state.role];
+const warningCount = roleState?.baseline?.warnings?.length ?? 0;
 ```
 
-Note: `liveStateToBlocks` will need access to `policyState`. Check its current signature and add the parameter if needed.
+Note: `liveStateToBlocks` will need access to `policySession`. Check its current signature and add the parameter if needed.
 
 - [ ] **Step 4: Render warning badge in line-buffer**
 
@@ -1370,7 +1517,7 @@ Import `formatWarningBadge` from the status module.
 
 - [ ] **Step 5: Render warning badge in agent-panel.tsx**
 
-In the live mode header, append the badge after the preset suffix. Derive warning count from the store's `policyState` for the current role.
+In the live mode header, append the badge after the preset suffix. Derive warning count from the store's `policySession` for the current role.
 
 - [ ] **Step 6: Run tests**
 
@@ -1386,63 +1533,44 @@ git commit -m "feat(tui): add warning count badge to agent panel headers"
 
 ---
 
-### Task 9: Update Architecture Docs
-
-**Files:**
-- Modify: `docs/architecture/tui-cli.md`
-- Modify: `docs/architecture/orchestrator.md`
-
-- [ ] **Step 1: Update TUI-CLI architecture doc**
-
-In `docs/architecture/tui-cli.md`, add documentation for:
-- `/status policy` and `/status tools` commands
-- RuntimePolicyState tracking in TUI store
-- Status view model architecture (decoupled from TUI store)
-- Warning badge on panel headers
-- Preset display replacing executionMode
-
-- [ ] **Step 2: Update orchestrator architecture doc**
-
-In `docs/architecture/orchestrator.md`, update:
-- Policy event emission now includes full `ProviderObservationResult` in baseline and override events
-- RuntimePolicyState lifecycle description
-
-- [ ] **Step 3: Run build to verify no issues**
-
-Run: `pnpm build`
-Expected: PASS
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add docs/architecture/
-git commit -m "docs: update architecture docs for D1 runtime visibility"
-```
-
----
-
 ## Self-Review
 
 ### Spec coverage check
 
 | Spec requirement | Task |
 |-----------------|------|
-| `/status policy` TUI live command | Tasks 5, 6 |
-| `/status tools` TUI live command | Tasks 5, 6 |
-| Event-derived RuntimePolicyState per-session per-role | Tasks 1, 2, 3 |
-| Observation payload in baseline/override events | Tasks 1, 2 |
-| View models independent of TUI store | Task 4 |
-| Status renderers share patterns with inspect renderers | Task 5 |
-| Snapshot-at-invocation semantics | Task 6 (store.getState() is point-in-time) |
-| Replace executionMode with effective preset | Task 7 |
-| Header shows preset only, provenance reserved for /status | Task 7 |
-| Warning badge on panel headers | Task 8 |
-| Architecture docs updated | Task 9 |
+| `/status policy` TUI live command | Tasks 4, 5 |
+| `/status tools` TUI live command | Tasks 4, 5 |
+| Event-derived RuntimePolicyState per-session per-role | Tasks 1, 2 |
+| Observation payload in baseline/override events | Task 1 |
+| View models independent of TUI store | Task 3 |
+| Status renderers share patterns with inspect renderers | Task 4 |
+| Snapshot-at-invocation semantics | Task 5 (store.getState() is point-in-time) |
+| Replace executionMode with effective preset | Task 6 |
+| Header shows preset only, provenance reserved for /status | Task 6 |
+| Warning badge on panel headers | Task 7 |
+| `/status policy` shows model and resolved policy summary | Tasks 3, 4 |
+| Architecture docs updated in behavior-changing commits | Tasks 1, 5, 6 |
+| README updated for user-facing /status commands | Task 5 |
+| Session-scoped policy state (no cross-session contamination) | Task 2 |
+
+### Placeholder scan
+
+No TBD/TODO items. All steps have concrete code.
 
 ### Type consistency check
 
-- `RuntimePolicyState` used consistently across Tasks 1, 3, 4, 5
-- `ProviderObservationResult` added to events in Task 1, consumed in Tasks 3, 4
-- `StatusPolicyView` / `StatusToolsView` defined in Task 4, consumed in Tasks 5, 6
-- `ParsedCommand` extended in Task 6, handled in Task 6
-- `preset` replaces `executionMode` in Task 7 across all TUI types and renderers
+- `RuntimePolicyState` used consistently across Tasks 1, 2, 3, 4
+- `ProviderObservationResult` added to events in Task 1, consumed in Tasks 2, 3
+- `StatusPolicyView` / `StatusToolsView` defined in Task 3, consumed in Tasks 4, 5
+- `StatusPolicyView` includes `model: string` — built from `adapterEntry.session.model` in Task 5
+- `PolicySessionState` defined in Task 2, consumed in Tasks 5, 6, 7
+- `ParsedCommand` extended in Task 5, handled in Task 5
+- `preset` replaces `executionMode` in Task 6 across all TUI types and renderers
+
+### Review findings addressed
+
+1. **Docs folded into behavior-changing tasks**: Task 1 updates `orchestrator.md`, Task 5 updates `tui-cli.md` + READMEs, Task 6 updates `tui-cli.md` + `execution-modes.md`. No standalone docs task.
+2. **Session-scoped policyState**: Task 2 introduces `PolicySessionState` with `debateId` + `roles`, initialized on `debate.started`, reset on new session. Policy events are no-ops before session start.
+3. **Task 1 is atomic**: Event type changes and runner emission changes land in the same commit. No broken intermediate checkpoint.
+4. **`/status policy` covers full spec contract**: `StatusPolicyView` includes `model`, `buildStatusPolicyView` takes model parameter, renderer displays model + resolved policy capabilities/interaction summary + translation + clamps + warnings.
