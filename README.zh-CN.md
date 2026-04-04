@@ -51,8 +51,8 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 - **裁判仲裁** — 可选的裁判智能体评分论证、检测停滞、可提前终止辩论，并优先评估证据责任而不是奖励无依据断言
 - **自适应最终综合** — 辩论结束后在独立综合会话中生成最终行动计划，并强制综合阶段走无工具的 `plan` turn；模型综合失败时仍有结构化本地回退
 - **增量提示词** — 第 1 轮发送完整上下文，第 2 轮起仅发送对手/裁判的新消息，利用提供商会话记忆实现每轮 ~O(1) token 开销
-- **配置文件 + 提示词模板** — 内置 provider profile 负责适配器/模型/运行时配置，可复用的 `general` / `code` 模板负责 proposer/challenger/judge 的角色契约
-- **执行模式** — 支持 debate 默认模式、按角色 baseline，以及 `research`、`guarded`、`dangerous`、`plan` 这类按 turn 覆盖
+- **配置文件驱动** — `crossfire.json` 在单个文件中定义角色、provider 绑定、MCP 服务器和 policy preset
+- **策略预设** — 支持 debate 默认模式、按角色 baseline，以及 `research`、`guarded`、`dangerous`、`plan` 这类按 turn 覆盖
 
 ## 适用场景
 
@@ -110,34 +110,35 @@ node packages/cli/dist/index.js <command> [options]
 第一次运行前，请确认你将要使用的 profile 对应的 agent CLI 已经安装、完成认证，并且能在当前 shell 中正常执行。
 
 ```bash
+# 首先创建配置文件 (crossfire.json) 定义角色和 provider 绑定
+# 详见下方"配置文件格式"章节
+
 # Claude 对战 Claude（裁判自动推断）
 crossfire start \
+  --config crossfire.json \
   --topic "Should we adopt microservices?" \
-  --proposer claude/proposer \
-  --challenger claude/challenger \
   --max-rounds 5 \
   --output run_output/microservices
 
-# 跨模型对战：Claude vs Codex，Gemini 裁判
+# 使用显式 preset
 crossfire start \
+  --config crossfire.json \
   --topic "Is caching always better than recomputing?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --judge gemini/judge
+  --proposer-preset research \
+  --challenger-preset guarded
 
 # 无界面模式（完成信息仍输出到 stdout）
 crossfire start \
+  --config crossfire.json \
   --topic "Quick brainstorm" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --headless -v
 ```
 
 上面的示例之所以输出到 `run_output/microservices/`，是因为显式传入了 `--output run_output/microservices`。如果省略 `--output`，Crossfire 会写入带时间戳的辩论目录，例如 `run_output/d-20260331-224500/`。随后优先查看其中的 `action-plan.html` 或 `action-plan.md`，也可以用 `crossfire status <output-dir>` 查看摘要，或用 `crossfire replay <output-dir>` 回放事件日志。
 
-## 执行模式
+## 策略预设
 
-执行模式是 Crossfire 用来缓解审批疲劳的上层抽象。重点不是把三家 provider 硬压成同一排审批按钮，而是让编排层先决定“这一 turn 应该有多强的执行自由度”，再交给各 adapter 去做真实映射。
+策略预设是 Crossfire 用来缓解审批疲劳的上层抽象。重点不是把三家 provider 硬压成同一排审批按钮，而是让编排层先决定”这一 turn 应该有多强的执行自由度”，再交给各 adapter 去做真实映射。
 
 可以这样理解：
 
@@ -166,44 +167,42 @@ crossfire start \
 优先级规则是：
 
 ```text
-debate default < role baseline < turn override
+CLI 角色特定 > CLI 全局 > 配置文件 > 角色默认
 ```
 
 也就是说：
 
-- `--mode` 设置整场 debate 的默认模式
-- `--proposer-mode` / `--challenger-mode` 覆盖某个角色的 baseline
-- `--turn-mode p-1=plan` 或 `--turn-mode c-2=dangerous` 只覆盖指定 turn
+- `--preset` 设置所有角色的 debate 默认模式
+- `--proposer-preset` / `--challenger-preset` 覆盖某个角色的 baseline
+- `--turn-preset p-1=plan` 或 `--turn-preset c-2=dangerous` 只覆盖指定 turn
+- 配置文件中可以设置按角色的 `preset` 字段作为 baseline 默认值
 
 示例：
 
 ```bash
 # 整场 debate 的默认模式
 crossfire start \
+  --config crossfire.json \
   --topic "Should we migrate to Rust?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --mode guarded
+  --preset guarded
 ```
 
 ```bash
 # 两个角色用不同 baseline
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rebuild the auth service?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --proposer-mode research \
-  --challenger-mode guarded
+  --proposer-preset research \
+  --challenger-preset guarded
 ```
 
 ```bash
 # 在 proposer 第 1 轮前强制先出计划
 crossfire start \
+  --config crossfire.json \
   --topic "Should we move to event sourcing?" \
-  --proposer claude/proposer \
-  --challenger claude/challenger \
-  --proposer-mode research \
-  --turn-mode p-1=plan
+  --proposer-preset research \
+  --turn-preset p-1=plan
 ```
 
 三家 provider 的当前映射是故意不对称的：
@@ -217,10 +216,10 @@ crossfire start \
 
 实用建议：
 
-- proposer 如果经常做大量 research，优先试 `--proposer-mode research`
+- proposer 如果经常做大量 research，优先试 `--proposer-preset research`
 - 对 Claude 而言，`research` 是有意做了收束的；如果你就是想放长一轮自由探索，再考虑升到 `guarded` 或 `dangerous`
-- challenger 如果你仍希望保留明确控制，先用 `--challenger-mode guarded`
-- 想先看 agent 打算怎么做，再决定要不要放开权限时，用 `--turn-mode p-1=plan`
+- challenger 如果你仍希望保留明确控制，先用 `--challenger-preset guarded`
+- 想先看 agent 打算怎么做，再决定要不要放开权限时，用 `--turn-preset p-1=plan`
 - `dangerous` 只适合边界明确、可信度高、你愿意接受更少人工制动机会的任务
 
 ## 终端 UI
@@ -249,11 +248,9 @@ crossfire start \
 
 | 选项                          | 说明                                | 默认值                   |
 | ----------------------------- | ----------------------------------- | ------------------------ |
+| `--config <path>`             | 包含角色和 provider 绑定的配置文件  | _必填_                   |
 | `--topic <text>`              | 辩论主题                            | —                        |
 | `--topic-file <path>`         | 从文件读取主题（与 `--topic` 互斥） | —                        |
-| `--proposer <profile>`        | 提议者配置文件                      | _必填_                   |
-| `--challenger <profile>`      | 挑战者配置文件                      | _必填_                   |
-| `--judge <profile>`           | 裁判 profile（默认从 proposer 推断） | 自动推断                |
 | `--max-rounds <n>`            | 辩论最大轮数，达到后强制终止        | `10`                     |
 | `--judge-every-n-rounds <n>`  | 裁判每 N 轮介入一次（必须小于 max-rounds） | `3`                |
 | `--convergence-threshold <n>` | 立场距离 (0-1)，低于此值自动收敛    | `0.3`                    |
@@ -261,10 +258,11 @@ crossfire start \
 | `--proposer-model <model>`    | 提议者模型覆盖                      | —                        |
 | `--challenger-model <model>`  | 挑战者模型覆盖                      | —                        |
 | `--judge-model <model>`       | 裁判模型覆盖                        | —                        |
-| `--mode <mode>`               | debate 默认执行模式（`research`、`guarded`、`dangerous`） | —          |
-| `--proposer-mode <mode>`      | proposer baseline 执行模式          | —                        |
-| `--challenger-mode <mode>`    | challenger baseline 执行模式        | —                        |
-| `--turn-mode <turnId=mode>`   | 可重复的按 turn 覆盖，支持 `plan`   | —                        |
+| `--preset <preset>`           | debate 默认策略预设（`research`、`guarded`、`dangerous`） | —     |
+| `--proposer-preset <preset>`  | proposer baseline 策略预设          | —                        |
+| `--challenger-preset <preset>`| challenger baseline 策略预设        | —                        |
+| `--judge-preset <preset>`     | judge baseline 策略预设             | —                        |
+| `--turn-preset <turnId=preset>` | 可重复的按 turn 覆盖，支持 `plan` | —                        |
 | `--template <family>`         | 所有角色的提示词模板族（`auto`、`general`、`code`） | `auto` |
 | `--proposer-template <family>` | proposer 提示词模板覆盖            | 继承 `--template` |
 | `--challenger-template <family>` | challenger 提示词模板覆盖       | 继承 `--template` |
@@ -275,10 +273,10 @@ crossfire start \
 
 > **参数校验规则：** `--judge-every-n-rounds` 必须小于 `--max-rounds`。`--convergence-threshold` 必须在 0 到 1 之间。
 
-执行模式优先级：
+策略预设优先级：
 
 ```text
-debate default < role baseline < turn override
+CLI 角色特定 > CLI 全局 > 配置文件 > 角色默认
 ```
 
 **模型优先级：** `--proposer-model` > `--model` > 配置文件 `model` 字段 > 提供商默认值。
@@ -287,14 +285,12 @@ debate default < role baseline < turn override
 
 恢复中断的辩论，从持久化事件重建状态。
 
-| 选项                     | 说明           | 默认值           |
-| ------------------------ | -------------- | ---------------- |
-| `--proposer <profile>`   | 覆盖提议者配置 | 来自 `index.json` |
-| `--challenger <profile>` | 覆盖挑战者配置 | 来自 `index.json` |
-| `--judge <profile>`      | 覆盖裁判配置   | 来自 `index.json` |
-| `--headless`             | 禁用 TUI       | `false`          |
+| 选项             | 说明       | 默认值           |
+| ---------------- | ---------- | ---------------- |
+| `--config <path>`| 覆盖配置   | 来自 `index.json` |
+| `--headless`     | 禁用 TUI   | `false`          |
 
-只有原始辩论本身就带有 judge profile 时，`--judge` 覆盖才会生效。`resume` 不能给一个最初无裁判的运行临时补加全新的 judge。
+配置更改（角色、preset、模型覆盖）在 resume 时允许，但你不能给一个最初无裁判的 debate 临时补加 judge。
 
 ### `crossfire replay <output-dir>`
 
@@ -339,6 +335,22 @@ Configuration:
   Convergence Threshold: 0.3
 ```
 
+### `crossfire inspect-policy <config-path>`
+
+检查给定配置文件的策略编译。显示每个角色的已解析 preset、策略层和 provider 转换。
+
+```bash
+crossfire inspect-policy crossfire.json
+```
+
+### `crossfire inspect-tools <config-path> <role>`
+
+检查配置文件中特定角色的工具/MCP 服务器接线。显示可用工具及其来源。
+
+```bash
+crossfire inspect-tools crossfire.json proposer
+```
+
 ## 运行时命令
 
 通过 `crossfire start` 启动实时辩论后，可在 TUI 输入栏中输入命令：
@@ -377,9 +389,80 @@ Inject 语义说明：
 
 任何智能体可以担任任何角色（提议者、挑战者或裁判），自由混搭。
 
-## 配置文件
+## 配置文件格式
 
-Crossfire 现在把 provider/runtime profile 和可复用角色提示词彻底拆开。
+Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、MCP 服务器和策略预设。
+
+**`crossfire.json` 示例：**
+
+```json
+{
+  "roles": {
+    "proposer": {
+      "agent": "claude_code",
+      "model": "us.anthropic.claude-opus-4-6-v1",
+      "preset": "research",
+      "promptFamily": "auto"
+    },
+    "challenger": {
+      "agent": "codex",
+      "model": "gpt-5.4",
+      "preset": "guarded",
+      "promptFamily": "auto"
+    },
+    "judge": {
+      "agent": "claude_code",
+      "model": "us.anthropic.claude-opus-4-6-v1",
+      "preset": "plan",
+      "promptFamily": "auto"
+    }
+  },
+  "providerBindings": {
+    "claude_code": {
+      "inheritGlobalConfig": true,
+      "mcpServers": {
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@anthropic-ai/mcp-filesystem"]
+        }
+      }
+    },
+    "codex": {
+      "inheritGlobalConfig": true,
+      "mcpServers": {}
+    }
+  }
+}
+```
+
+| 字段 | 说明 | 必填 |
+| ---- | ---- | ---- |
+| `roles.proposer` | 提议者角色配置 | 是 |
+| `roles.challenger` | 挑战者角色配置 | 是 |
+| `roles.judge` | 裁判角色配置（可选，省略时自动推断） | 否 |
+| `providerBindings.<agent>` | 按 provider 的 MCP 服务器绑定 | 否 |
+
+**角色配置字段：**
+
+| 字段 | 说明 | 必填 | 默认值 |
+| ---- | ---- | ---- | ------ |
+| `agent` | Agent 类型（`claude_code`、`codex`、`gemini_cli`） | 是 | — |
+| `model` | 模型标识符 | 否 | provider 默认 |
+| `preset` | 策略预设（`research`、`guarded`、`dangerous`、`plan`） | 否 | 角色默认（proposer/challenger 为 `guarded`，judge 为 `plan`） |
+| `promptFamily` | 提示词模板族（`auto`、`general`、`code`） | 否 | `auto` |
+
+**Provider 绑定字段：**
+
+| 字段 | 说明 | 必填 | 默认值 |
+| ---- | ---- | ---- | ------ |
+| `inheritGlobalConfig` | 合并用户全局 MCP 配置 | 否 | `true` |
+| `mcpServers` | Provider 专属 MCP 服务器 | 否 | `{}` |
+
+## 配置文件（旧版）
+
+> **注意：** 基于 profile 的方式（`--proposer <profile>`、`--challenger <profile>`）已被弃用，请使用 `--config <path>`。内置 provider profile 仍用于内部测试和示例，但生产环境应迁移到配置文件格式。
+
+Crossfire 之前使用独立的 provider/runtime profile 和可复用角色提示词。
 
 provider profile 使用 JSON：
 
@@ -452,40 +535,36 @@ prompts/
 ```bash
 # 让 Crossfire 自动分类模板族
 crossfire start \
+  --config crossfire.json \
   --topic "Should we launch an API resale product?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --template auto
 ```
 
 ```bash
 # 强制所有角色都使用 code 模板
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rewrite the data layer?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --template code
 ```
 
 ```bash
 # 按角色使用不同模板族
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rewrite the data layer?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --proposer-template general \
   --challenger-template code
 ```
 
 ```bash
-# 组合 baseline、turn override 和模板选择
+# 组合 preset baseline、turn override 和模板选择
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rewrite the data layer?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --proposer-mode research \
-  --challenger-mode guarded \
-  --turn-mode p-1=plan \
+  --proposer-preset research \
+  --challenger-preset guarded \
+  --turn-preset p-1=plan \
   --template code
 ```
 

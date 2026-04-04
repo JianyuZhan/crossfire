@@ -51,8 +51,8 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
 - **Adaptive final synthesis** — After the debate, Crossfire generates a final action plan in a fresh synthesis session, forces synthesis into a tool-free planning turn, and falls back to a structured local report if model-backed synthesis fails
 - **Incremental prompts** — Turn 1 sends full context; Turn 2+ sends only new opponent/judge messages, leveraging provider session memory for ~O(1) per-turn cost
-- **Profiles + prompt templates** — Built-in provider profiles now hold agent/model/runtime config, while reusable `general` and `code` prompt templates define the role contract
-- **Execution modes** — Set debate defaults, per-role baselines, and per-turn overrides such as `research`, `guarded`, `dangerous`, and `plan`
+- **Config-driven setup** — `crossfire.json` defines roles, provider bindings, MCP servers, and policy presets in one file
+- **Policy presets** — Set debate defaults, per-role baselines, and per-turn overrides such as `research`, `guarded`, `dangerous`, and `plan`
 
 ## Best For
 
@@ -110,34 +110,35 @@ node packages/cli/dist/index.js <command> [options]
 Before your first run, make sure the agent CLI used by your selected profiles is installed, authenticated, and works in your shell.
 
 ```bash
+# First, create a config file (crossfire.json) with roles and provider bindings
+# See the "Config File Format" section below for details
+
 # Claude vs Claude (judge auto-inferred)
 crossfire start \
+  --config crossfire.json \
   --topic "Should we adopt microservices?" \
-  --proposer claude/proposer \
-  --challenger claude/challenger \
   --max-rounds 5 \
   --output run_output/microservices
 
-# Cross-provider: Claude vs Codex with Gemini judge
+# With explicit presets
 crossfire start \
+  --config crossfire.json \
   --topic "Is caching always better than recomputing?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --judge gemini/judge
+  --proposer-preset research \
+  --challenger-preset guarded
 
 # Headless mode (no TUI, completion info still printed to stdout)
 crossfire start \
+  --config crossfire.json \
   --topic "Quick brainstorm" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --headless -v
 ```
 
 In the example above, output lands in `run_output/microservices/` because `--output run_output/microservices` is set explicitly. If you omit `--output`, Crossfire writes to a timestamped debate directory such as `run_output/d-20260331-224500/`. Inspect `action-plan.html` or `action-plan.md` there, use `crossfire status <output-dir>` for a summary, and `crossfire replay <output-dir>` to replay the event log.
 
-## Execution Modes
+## Policy Presets
 
-Execution modes are Crossfire's way to reduce approval fatigue without flattening every provider into the same approval protocol.
+Policy presets are Crossfire's way to reduce approval fatigue without flattening every provider into the same approval protocol.
 
 Think of them as an orchestration-level policy layer:
 
@@ -163,47 +164,45 @@ Why `plan` is not a normal baseline:
 - a permanent `plan` baseline would turn many turns into pure LLM reasoning with weaker evidence
 - in practice, `plan` is most useful as a one-turn preview, not as a steady-state runtime mode
 
-Mode precedence is:
+Preset precedence is:
 
 ```text
-debate default < role baseline < turn override
+CLI role-specific > CLI global > config file > role default
 ```
 
 That means:
 
-- `--mode` sets the debate-wide default
-- `--proposer-mode` and `--challenger-mode` override the default for one role
-- `--turn-mode p-1=plan` or `--turn-mode c-2=dangerous` wins for that one turn only
+- `--preset` sets the debate-wide default for all roles
+- `--proposer-preset` and `--challenger-preset` override the default for one role
+- `--turn-preset p-1=plan` or `--turn-preset c-2=dangerous` wins for that one turn only
+- Config file can set per-role `preset` fields as baseline defaults
 
 Examples:
 
 ```bash
 # Debate-wide default
 crossfire start \
+  --config crossfire.json \
   --topic "Should we migrate to Rust?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --mode guarded
+  --preset guarded
 ```
 
 ```bash
 # Different baselines by role
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rebuild the auth service?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --proposer-mode research \
-  --challenger-mode guarded
+  --proposer-preset research \
+  --challenger-preset guarded
 ```
 
 ```bash
 # Force a one-turn planning preview before proposer round 1
 crossfire start \
+  --config crossfire.json \
   --topic "Should we move to event sourcing?" \
-  --proposer claude/proposer \
-  --challenger claude/challenger \
-  --proposer-mode research \
-  --turn-mode p-1=plan
+  --proposer-preset research \
+  --turn-preset p-1=plan
 ```
 
 Current provider mapping is intentionally asymmetric:
@@ -217,10 +216,10 @@ Current provider mapping is intentionally asymmetric:
 
 Practical guidance:
 
-- start with `proposer-mode research` when the proposer tends to do broad evidence gathering
+- start with `--proposer-preset research` when the proposer tends to do broad evidence gathering
 - for Claude, `research` is intentionally bounded; if you need a longer free-form exploration turn, step up to `guarded` or `dangerous`
-- keep `challenger-mode guarded` when you still want explicit control over stronger validation actions
-- use `--turn-mode p-1=plan` when you want to inspect the agent's intended workflow before letting it execute
+- keep `--challenger-preset guarded` when you still want explicit control over stronger validation actions
+- use `--turn-preset p-1=plan` when you want to inspect the agent's intended workflow before letting it execute
 - use `dangerous` only for trusted, well-bounded tasks where interruption cost matters more than reviewability
 
 ## TUI
@@ -249,11 +248,9 @@ Start a new debate.
 
 | Option                        | Description                                              | Default                  |
 | ----------------------------- | -------------------------------------------------------- | ------------------------ |
+| `--config <path>`             | Config file with roles and provider bindings             | _required_               |
 | `--topic <text>`              | Debate topic                                             | —                        |
 | `--topic-file <path>`         | Read topic from file (mutually exclusive with `--topic`) | —                        |
-| `--proposer <profile>`        | Proposer profile                                         | _required_               |
-| `--challenger <profile>`      | Challenger profile                                       | _required_               |
-| `--judge <profile>`           | Judge profile (default: inferred from proposer)          | Auto-inferred            |
 | `--max-rounds <n>`            | Maximum debate rounds before forced termination          | `10`                     |
 | `--judge-every-n-rounds <n>`  | Judge intervenes every N rounds (must be < max-rounds)   | `3`                      |
 | `--convergence-threshold <n>` | Stance distance (0-1) below which debate auto-converges  | `0.3`                    |
@@ -261,10 +258,11 @@ Start a new debate.
 | `--proposer-model <model>`    | Model override for proposer                              | —                        |
 | `--challenger-model <model>`  | Model override for challenger                            | —                        |
 | `--judge-model <model>`       | Model override for judge                                 | —                        |
-| `--mode <mode>`               | Debate default execution mode (`research`, `guarded`, `dangerous`) | —            |
-| `--proposer-mode <mode>`      | Proposer baseline execution mode                         | —                        |
-| `--challenger-mode <mode>`    | Challenger baseline execution mode                       | —                        |
-| `--turn-mode <turnId=mode>`   | Repeatable per-turn override; supports `plan`           | —                        |
+| `--preset <preset>`           | Debate default policy preset (`research`, `guarded`, `dangerous`) | —        |
+| `--proposer-preset <preset>`  | Proposer baseline policy preset                          | —                        |
+| `--challenger-preset <preset>`| Challenger baseline policy preset                        | —                        |
+| `--judge-preset <preset>`     | Judge baseline policy preset                             | —                        |
+| `--turn-preset <turnId=preset>` | Repeatable per-turn override; supports `plan`         | —                        |
 | `--template <family>`         | Prompt template family for all roles (`auto`, `general`, `code`) | `auto` |
 | `--proposer-template <family>` | Proposer prompt template override                      | inherited from `--template` |
 | `--challenger-template <family>` | Challenger prompt template override                 | inherited from `--template` |
@@ -275,26 +273,24 @@ Start a new debate.
 
 > **Validation rules:** `--judge-every-n-rounds` must be less than `--max-rounds`. `--convergence-threshold` must be between 0 and 1.
 
-Execution mode precedence is:
+Policy preset precedence is:
 
 ```text
-debate default < role baseline < turn override
+CLI role-specific > CLI global > config file > role default
 ```
 
-**Model resolution:** `--proposer-model` > `--model` > profile `model` field > provider default.
+**Model resolution:** `--proposer-model` > `--model` > config file `model` field > provider default.
 
 ### `crossfire resume <output-dir>`
 
 Resume an interrupted debate. State is reconstructed from persisted events.
 
-| Option                   | Description                 | Default           |
-| ------------------------ | --------------------------- | ----------------- |
-| `--proposer <profile>`   | Override proposer profile   | from `index.json` |
-| `--challenger <profile>` | Override challenger profile | from `index.json` |
-| `--judge <profile>`      | Override judge profile      | from `index.json` |
-| `--headless`             | Disable TUI                 | `false`           |
+| Option           | Description     | Default           |
+| ---------------- | --------------- | ----------------- |
+| `--config <path>`| Override config | from `index.json` |
+| `--headless`     | Disable TUI     | `false`           |
 
-`--judge` is only honored if the original debate already had a judge profile. Resume cannot add a brand-new judge to a run that started without one.
+Config changes (role, preset, model overrides) are allowed on resume, but you cannot add a judge to a debate that started without one.
 
 ### `crossfire replay <output-dir>`
 
@@ -339,6 +335,22 @@ Configuration:
   Convergence Threshold: 0.3
 ```
 
+### `crossfire inspect-policy <config-path>`
+
+Inspect policy compilation for a given config file. Shows the resolved preset, policy layers, and provider translation for each role.
+
+```bash
+crossfire inspect-policy crossfire.json
+```
+
+### `crossfire inspect-tools <config-path> <role>`
+
+Inspect tool/MCP server wiring for a specific role in a config file. Shows available tools and their sources.
+
+```bash
+crossfire inspect-tools crossfire.json proposer
+```
+
 ## Runtime Commands
 
 During a live debate started with `crossfire start`, type commands in the TUI input bar:
@@ -377,9 +389,80 @@ Inject semantics:
 
 Any agent can play any role (proposer, challenger, or judge). Mix and match freely.
 
-## Profiles
+## Config File Format
 
-Crossfire now separates provider/runtime profiles from reusable role prompts.
+Crossfire uses a `crossfire.json` config file to define roles, provider bindings, MCP servers, and policy presets.
+
+**Example `crossfire.json`:**
+
+```json
+{
+  "roles": {
+    "proposer": {
+      "agent": "claude_code",
+      "model": "us.anthropic.claude-opus-4-6-v1",
+      "preset": "research",
+      "promptFamily": "auto"
+    },
+    "challenger": {
+      "agent": "codex",
+      "model": "gpt-5.4",
+      "preset": "guarded",
+      "promptFamily": "auto"
+    },
+    "judge": {
+      "agent": "claude_code",
+      "model": "us.anthropic.claude-opus-4-6-v1",
+      "preset": "plan",
+      "promptFamily": "auto"
+    }
+  },
+  "providerBindings": {
+    "claude_code": {
+      "inheritGlobalConfig": true,
+      "mcpServers": {
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@anthropic-ai/mcp-filesystem"]
+        }
+      }
+    },
+    "codex": {
+      "inheritGlobalConfig": true,
+      "mcpServers": {}
+    }
+  }
+}
+```
+
+| Field | Description | Required |
+| ----- | ----------- | -------- |
+| `roles.proposer` | Proposer role config | yes |
+| `roles.challenger` | Challenger role config | yes |
+| `roles.judge` | Judge role config (optional, auto-inferred if omitted) | no |
+| `providerBindings.<agent>` | Per-provider MCP server bindings | no |
+
+**Role config fields:**
+
+| Field | Description | Required | Default |
+| ----- | ----------- | -------- | ------- |
+| `agent` | Agent type (`claude_code`, `codex`, `gemini_cli`) | yes | — |
+| `model` | Model identifier | no | provider default |
+| `preset` | Policy preset (`research`, `guarded`, `dangerous`, `plan`) | no | role default (`guarded` for proposer/challenger, `plan` for judge) |
+| `promptFamily` | Prompt template family (`auto`, `general`, `code`) | no | `auto` |
+
+**Provider binding fields:**
+
+| Field | Description | Required | Default |
+| ----- | ----------- | -------- | ------- |
+| `inheritGlobalConfig` | Merge user's global MCP config | no | `true` |
+| `mcpServers` | Provider-specific MCP servers | no | `{}` |
+
+## Profiles (Legacy)
+
+> **Note:** The profile-based approach (`--proposer <profile>`, `--challenger <profile>`) is deprecated in favor of `--config <path>`. Built-in provider profiles are still used internally for testing and examples, but production usage should migrate to the config file format.
+
+Crossfire previously used separate provider/runtime profiles from reusable role prompts.
 
 Provider profiles are JSON files:
 
@@ -452,40 +535,36 @@ Typical usage:
 ```bash
 # Let Crossfire classify the template family automatically
 crossfire start \
+  --config crossfire.json \
   --topic "Should we launch an API resale product?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --template auto
 ```
 
 ```bash
 # Force code-oriented prompting for every role
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rewrite the data layer?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --template code
 ```
 
 ```bash
 # Use different template families by role
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rewrite the data layer?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --proposer-template general \
   --challenger-template code
 ```
 
 ```bash
-# Combine role baselines, per-turn execution override, and template selection
+# Combine role presets, per-turn override, and template selection
 crossfire start \
+  --config crossfire.json \
   --topic "Should we rewrite the data layer?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --proposer-mode research \
-  --challenger-mode guarded \
-  --turn-mode p-1=plan \
+  --proposer-preset research \
+  --challenger-preset guarded \
+  --turn-preset p-1=plan \
   --template code
 ```
 
