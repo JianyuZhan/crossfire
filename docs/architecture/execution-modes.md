@@ -51,6 +51,23 @@ Why `plan` is not a role baseline:
 
 Judge turns always use the `plan` preset. When no policy is present, the legacy `executionMode: "plan"` fallback is preserved.
 
+### Preset Resolution Precedence (Phase C)
+
+Phase C introduces a 4-level precedence system for resolving which preset applies to each role:
+
+```text
+CLI role-specific > CLI global > config file > role default
+```
+
+- **CLI role-specific**: `--proposer-preset plan` applies only to proposer turns
+- **CLI global**: `--preset guarded` applies to all roles unless overridden
+- **Config file**: `roles.proposer.preset` in `crossfire.config.json`
+- **Role default**: `proposer`/`challenger` default to `guarded`, `judge` defaults to `plan`
+
+The resolution function (`resolveRolePreset()` in `@crossfire/cli/config/policy-resolution`) returns both the resolved preset and its source (`cli-role`, `cli-global`, `config`, or `role-default`) for observability.
+
+This preset resolution feeds into the runtime turn-level precedence system described below.
+
 ## Precedence
 
 Effective turn mode is resolved with this priority:
