@@ -589,11 +589,26 @@ it("ignores policy events before debate.started", () => {
 Run: `cd packages/tui && pnpm vitest run __tests__/tui-store.test.ts`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Update TUI-CLI architecture doc for session-scoped state model**
+
+In `docs/architecture/tui-cli.md`, add or update documentation for the new session-scoped policy state model:
+
+- The TUI store now tracks `PolicySessionState` keyed by `debateId` (from `debate.started`), containing per-role `RuntimePolicyState` entries
+- Policy events (`policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`) are no-ops before `debate.started` establishes a session
+- A new `debate.started` event resets the policy session, preventing cross-session contamination
+- `RuntimePolicyState` is event-derived: baseline is set from `policy.baseline`, overrides are set/cleared from override events
+
+This is a data-flow/interface change in the TUI store, so the architecture doc must be updated in the same commit.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add packages/tui/src/state/types.ts packages/tui/src/state/tui-store.ts packages/tui/__tests__/tui-store.test.ts
-git commit -m "feat(tui): track session-scoped per-role RuntimePolicyState from policy events"
+git add packages/tui/src/state/types.ts packages/tui/src/state/tui-store.ts packages/tui/__tests__/tui-store.test.ts docs/architecture/tui-cli.md
+git commit -m "feat(tui): track session-scoped per-role RuntimePolicyState from policy events
+
+Introduce PolicySessionState keyed by debateId. Policy events are
+no-ops before debate.started. Architecture docs updated for new
+session-scoped state model."
 ```
 
 ---
@@ -926,6 +941,31 @@ describe("renderStatusPolicy", () => {
     const text = renderStatusPolicy([]);
     expect(text).toContain("not yet available");
   });
+
+  it("renders evidence section when present on resolved policy (forward-compat for D2)", () => {
+    // D2 will add ResolvedPolicy.evidence as a top-level section.
+    // This test verifies the renderer is forward-compatible: when evidence
+    // fields appear, they are displayed. Until D2 lands, ResolvedPolicy has
+    // no evidence section, so this test uses a cast to simulate D2 shape.
+    const policyWithEvidence = {
+      ...basePolicyView.baseline.policy,
+      evidence: { bar: "high", requiresCitation: true },
+    };
+    const viewWithEvidence: StatusPolicyView = {
+      ...basePolicyView,
+      baseline: { ...basePolicyView.baseline, policy: policyWithEvidence as StatusPolicyView["baseline"]["policy"] },
+    };
+    const text = renderStatusPolicy([viewWithEvidence]);
+    expect(text).toContain("Evidence");
+    expect(text).toContain("bar");
+    expect(text).toContain("high");
+  });
+
+  it("omits evidence section when not present (pre-D2 resolved policy)", () => {
+    // Before D2, ResolvedPolicy has no evidence field. Renderer must not crash.
+    const text = renderStatusPolicy([basePolicyView]);
+    expect(text).not.toContain("Evidence:");
+  });
 });
 
 describe("renderStatusTools", () => {
@@ -998,6 +1038,19 @@ function renderPolicySummary(policy: ResolvedPolicy): string[] {
       lines.push("  Interaction:");
       for (const [k, v] of entries) {
         lines.push(`    ${k}: ${JSON.stringify(v)}`);
+      }
+    }
+  }
+  // Forward-compatible: render evidence section when D2 adds it to ResolvedPolicy.
+  // Currently evidence lives only in roleContract.evidenceBar; D2 will promote it
+  // to a top-level ResolvedPolicy.evidence section. This block is a no-op until then.
+  const evidence = (policy as Record<string, unknown>).evidence;
+  if (evidence && typeof evidence === "object") {
+    const entries = Object.entries(evidence).filter(([, v]) => v !== undefined);
+    if (entries.length > 0) {
+      lines.push("  Evidence:");
+      for (const [k, v] of entries) {
+        lines.push(`    ${k}: ${String(v)}`);
       }
     }
   }
@@ -1114,12 +1167,13 @@ git commit -m "feat(tui): add status text renderers for policy and tools"
 **Files:**
 - Modify: `packages/tui/src/components/command-input.tsx`
 - Modify: `packages/cli/src/wiring/live-command-handler.ts`
+- Modify: `packages/cli/__tests__/live-command-handler.test.ts`
 - Modify: `packages/tui/__tests__/command-input.test.tsx`
 - Modify: `docs/architecture/tui-cli.md`
 - Modify: `README.md`
 - Modify: `README.zh-CN.md`
 
-Add `/status policy` and `/status tools` to the command parsing and dispatch pipeline. The handler reads from the session-scoped `policySession` and adapter metadata to build view models. This is a user-facing CLI change, so README and TUI architecture docs are updated in the same commit.
+Add `/status policy` and `/status tools` to the command parsing and dispatch pipeline. The handler reads from the session-scoped `policySession` and adapter metadata to build view models. Both the parser and the full dispatch path must have dedicated tests. This is a user-facing CLI change, so README and TUI architecture docs are updated in the same commit.
 
 - [ ] **Step 1: Write failing tests for /status command parsing**
 
@@ -1241,38 +1295,158 @@ export interface CommandState {
 }
 ```
 
-- [ ] **Step 8: Run build and tests**
+- [ ] **Step 8: Write failing dispatch-path tests for /status commands**
+
+In `packages/cli/__tests__/live-command-handler.test.ts`, add tests that exercise the full dispatch: session-scoped store state → handler receives status command → builds view model → pushes rendered output to store. These tests use the existing mock patterns in the file:
+
+```ts
+import type { RuntimePolicyState } from "@crossfire/orchestrator-core";
+import type { ProviderObservationResult } from "@crossfire/adapter-core";
+
+const stubObservation: ProviderObservationResult = {
+  translation: {
+    adapter: "claude",
+    nativeSummary: {},
+    exactFields: [],
+    approximateFields: [],
+    unsupportedFields: [],
+  },
+  toolView: [
+    { name: "Bash", source: "builtin", status: "allowed", reason: "adapter_default" },
+  ],
+  capabilityEffects: [],
+  warnings: [
+    { field: "limits", adapter: "claude", reason: "approximate", message: "approx" },
+  ],
+  completeness: "partial",
+};
+
+const stubPolicySession = {
+  debateId: "d-test",
+  roles: {
+    proposer: {
+      baseline: {
+        policy: { preset: "research", roleContract: {}, capabilities: {}, interaction: {} },
+        clamps: [],
+        preset: { value: "research", source: "cli-role" },
+        translationSummary: stubObservation.translation,
+        warnings: [...stubObservation.warnings],
+        observation: stubObservation,
+      },
+    } as RuntimePolicyState,
+  },
+};
+
+it("/status policy dispatches through session-scoped store and pushes rendered output", () => {
+  let captured: string | undefined;
+  const store = {
+    getState: () => ({
+      ...minimalState,
+      policySession: stubPolicySession,
+    }),
+    pushCommandOutput: (text: string) => { captured = text; },
+  } as unknown as TuiStore;
+
+  const handler = createLiveCommandHandler({
+    adapters,
+    bus: mockBus,
+    store,
+    triggerShutdown: vi.fn(),
+    getUserQuitHandler: () => undefined,
+  });
+  handler({ type: "status", target: "policy" });
+
+  expect(captured).toBeDefined();
+  expect(captured).toContain("proposer");
+  expect(captured).toContain("research");
+  expect(captured).toContain("cli-role");
+});
+
+it("/status tools dispatches through session-scoped store and pushes rendered output", () => {
+  let captured: string | undefined;
+  const store = {
+    getState: () => ({
+      ...minimalState,
+      policySession: stubPolicySession,
+    }),
+    pushCommandOutput: (text: string) => { captured = text; },
+  } as unknown as TuiStore;
+
+  const handler = createLiveCommandHandler({
+    adapters,
+    bus: mockBus,
+    store,
+    triggerShutdown: vi.fn(),
+    getUserQuitHandler: () => undefined,
+  });
+  handler({ type: "status", target: "tools" });
+
+  expect(captured).toBeDefined();
+  expect(captured).toContain("proposer");
+  expect(captured).toContain("Bash");
+  expect(captured).toContain("partial");
+  expect(captured).toMatch(/best.effort/i);
+});
+
+it("/status policy before session shows not-available message", () => {
+  let captured: string | undefined;
+  const store = {
+    getState: () => ({ ...minimalState, policySession: undefined }),
+    pushCommandOutput: (text: string) => { captured = text; },
+  } as unknown as TuiStore;
+
+  const handler = createLiveCommandHandler({
+    adapters,
+    bus: mockBus,
+    store,
+    triggerShutdown: vi.fn(),
+    getUserQuitHandler: () => undefined,
+  });
+  handler({ type: "status", target: "policy" });
+
+  expect(captured).toContain("not yet available");
+});
+```
+
+- [ ] **Step 9: Run dispatch-path tests to verify they fail**
+
+Run: `cd packages/cli && pnpm vitest run __tests__/live-command-handler.test.ts`
+Expected: FAIL — status case not yet implemented (or handler does not handle type "status").
+
+- [ ] **Step 10: Run build and all tests**
 
 Run: `pnpm build && pnpm test`
-Expected: PASS
+Expected: PASS (dispatch-path tests now pass because Step 6 added the implementation)
 
-- [ ] **Step 9: Update TUI-CLI architecture doc**
+- [ ] **Step 11: Update TUI-CLI architecture doc for /status commands**
 
 In `docs/architecture/tui-cli.md`, add a section documenting:
 - `/status policy` and `/status tools` as TUI live commands (not standalone CLI subcommands)
 - snapshot-at-invocation semantics (reads `store.getState()` at command time)
-- session-scoped RuntimePolicyState tracking (keyed by debateId from `debate.started`)
 - view model architecture: `buildStatusPolicyView` and `buildStatusToolsView` are decoupled from TUI store internals, take `RuntimePolicyState` as input
 
 Update the live panel header description (line ~56) to note that `/status policy` is available for full provenance details while the header shows only the effective preset.
 
-- [ ] **Step 10: Update README.md**
+Note: The session-scoping architecture was already documented in Task 2. This step adds the `/status` command surface and view model docs.
+
+- [ ] **Step 12: Update README.md**
 
 In `README.md`, in the TUI commands section or the live commands area, add `/status policy` and `/status tools` with brief descriptions:
 - `/status policy` — shows effective policy state per role (preset, capabilities, clamps, translation, warnings, active override)
 - `/status tools` — shows effective tool surface per role (tool view, capability effects, completeness; best-effort observation)
 
-- [ ] **Step 11: Update README.zh-CN.md**
+- [ ] **Step 13: Update README.zh-CN.md**
 
 Mirror the README.md changes in the Chinese README, translating the command descriptions.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
-git add packages/tui/src/components/command-input.tsx packages/cli/src/wiring/live-command-handler.ts packages/tui/src/state/tui-store.ts packages/tui/src/state/types.ts packages/tui/__tests__/command-input.test.tsx docs/architecture/tui-cli.md README.md README.zh-CN.md
+git add packages/tui/src/components/command-input.tsx packages/cli/src/wiring/live-command-handler.ts packages/cli/__tests__/live-command-handler.test.ts packages/tui/src/state/tui-store.ts packages/tui/src/state/types.ts packages/tui/__tests__/command-input.test.tsx docs/architecture/tui-cli.md README.md README.zh-CN.md
 git commit -m "feat(tui): add /status policy and /status tools command parsing and dispatch
 
 Wire new live commands into TUI command parser and live-command-handler.
+Dispatch-path tests cover full store→view-model→render→output pipeline.
 Update architecture docs and READMEs for user-facing /status surface."
 ```
 
@@ -1550,9 +1724,11 @@ git commit -m "feat(tui): add warning count badge to agent panel headers"
 | Header shows preset only, provenance reserved for /status | Task 6 |
 | Warning badge on panel headers | Task 7 |
 | `/status policy` shows model and resolved policy summary | Tasks 3, 4 |
-| Architecture docs updated in behavior-changing commits | Tasks 1, 5, 6 |
+| Architecture docs updated in behavior-changing commits | Tasks 1, 2, 5, 6 |
 | README updated for user-facing /status commands | Task 5 |
 | Session-scoped policy state (no cross-session contamination) | Task 2 |
+| Dispatch-path test for /status commands | Task 5 |
+| Evidence forward-compat in /status policy renderer | Task 4 |
 
 ### Placeholder scan
 
@@ -1570,7 +1746,9 @@ No TBD/TODO items. All steps have concrete code.
 
 ### Review findings addressed
 
-1. **Docs folded into behavior-changing tasks**: Task 1 updates `orchestrator.md`, Task 5 updates `tui-cli.md` + READMEs, Task 6 updates `tui-cli.md` + `execution-modes.md`. No standalone docs task.
-2. **Session-scoped policyState**: Task 2 introduces `PolicySessionState` with `debateId` + `roles`, initialized on `debate.started`, reset on new session. Policy events are no-ops before session start.
+1. **Docs folded into behavior-changing tasks**: Task 1 updates `orchestrator.md`, Task 2 updates `tui-cli.md` (session-scoped state model), Task 5 updates `tui-cli.md` (commands) + READMEs, Task 6 updates `tui-cli.md` + `execution-modes.md`. No standalone docs task.
+2. **Session-scoped policyState**: Task 2 introduces `PolicySessionState` with `debateId` + `roles`, initialized on `debate.started`, reset on new session. Policy events are no-ops before session start. Architecture doc updated in same commit.
 3. **Task 1 is atomic**: Event type changes and runner emission changes land in the same commit. No broken intermediate checkpoint.
-4. **`/status policy` covers full spec contract**: `StatusPolicyView` includes `model`, `buildStatusPolicyView` takes model parameter, renderer displays model + resolved policy capabilities/interaction summary + translation + clamps + warnings.
+4. **`/status policy` covers full spec contract**: `StatusPolicyView` includes `model`, `buildStatusPolicyView` takes model parameter, renderer displays model + resolved policy capabilities/interaction/evidence summary + translation + clamps + warnings.
+5. **Dispatch-path tests**: Task 5 adds dedicated tests in `live-command-handler.test.ts` that exercise the full store→view-model→render→pushCommandOutput pipeline for both `/status policy` and `/status tools`, plus a no-session guard test.
+6. **Evidence forward-compat**: Task 4 renderer includes a forward-compatible evidence section that renders `ResolvedPolicy.evidence` when present (D2 adds it). Tests verify it renders when present and is a no-op when absent.
