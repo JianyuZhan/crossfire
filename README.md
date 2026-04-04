@@ -236,7 +236,7 @@ The terminal UI is a full-screen Ink (React for CLI) application with four stack
 - **Six-state Claude tool model** — Claude tool requests are projected as `requested`, `running`, `succeeded`, `failed`, `denied`, or `unknown` rather than assuming every `tool.call` is already executing. A provider `tool.progress` upgrades a request into `running`, permission denials collapse into `denied`, and only observed terminal hooks become `succeeded` / `failed`
 - **Unresolved tool closure** — If a turn ends while some provider tool requests never produce a terminal hook, Crossfire closes those live rows as `unknown outcome` instead of letting them sit in `running` forever
 - **Command/approval area** — Context-aware live prompt (`>`, `approval>`) plus expanded approval cards that show the pending tool/command, batch actions, and provider-aware shortcuts such as `/approve 2`, `/approve 2 2`, or `/approve all`
-- **Mode visibility** — Proposer and challenger headers append the effective turn mode inline as `Role [provider] [mode: ...]`, so you can tell at a glance whether a role is in `research`, `guarded`, `dangerous`, or `plan` without hunting for a separate status line
+- **Preset visibility** — Proposer and challenger headers append the effective preset inline as `Role [provider] [preset]`, so you can tell at a glance whether a role is in `research`, `guarded`, `dangerous`, or `plan` without hunting for a separate status line
 
 Use `--headless` to skip the TUI. Events and synthesis outputs are still persisted for later inspection.
 

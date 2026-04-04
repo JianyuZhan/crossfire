@@ -321,7 +321,7 @@ describe("liveStateToBlocks", () => {
 		}
 	});
 
-	it("stores the current execution mode on the live header block", () => {
+	it("stores the effective preset on the live header block", () => {
 		const state: LiveAgentPanelState = {
 			role: "proposer",
 			status: "thinking",

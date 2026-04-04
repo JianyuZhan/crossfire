@@ -329,7 +329,7 @@ describe("TuiStore", () => {
 		expect(store.getState().proposer.tools[0]?.resultSummary).toContain("404");
 	});
 
-	it("tracks the effective execution mode for the active role", () => {
+	it("tracks the effective preset for the active role", () => {
 		const store = new TuiStore();
 		store.handleEvent(
 			ev("debate.started", {
