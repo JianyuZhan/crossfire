@@ -215,13 +215,11 @@ export function buildPanelLines(
 				const color = ROLE_COLORS[block.role] ?? "white";
 				const label = roleLabel(block.role);
 				const agent = block.agentType ? ` [${block.agentType}]` : "";
-				const mode = block.executionMode
-					? ` [mode: ${block.executionMode}]`
-					: "";
+				const presetLabel = block.preset ? ` [${block.preset}]` : "";
 				result.push(
 					screenLine([
 						{
-							text: `${icon} ${label}${agent}${mode}`,
+							text: `${icon} ${label}${agent}${presetLabel}`,
 							style: { bold: true, color },
 						},
 					]),

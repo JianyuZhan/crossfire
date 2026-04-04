@@ -80,7 +80,7 @@ describe("MetricsBar", () => {
 					proposer: makePanel({
 						role: "proposer",
 						status: "tool",
-						executionMode: "research",
+						preset: "research",
 						tools: [
 							{
 								toolUseId: "t1",

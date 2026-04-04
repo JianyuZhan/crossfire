@@ -37,13 +37,13 @@ describe("AgentPanel — live mode", () => {
 				role="proposer"
 				state={makePanel({
 					status: "thinking",
-					executionMode: "research",
+					preset: "research",
 					thinkingText: "Analyzing...",
 				})}
 			/>,
 		);
 		expect(lastFrame()).toContain("Thinking");
-		expect(lastFrame()).toContain("mode: research");
+		expect(lastFrame()).toContain("[research]");
 		expect(lastFrame()).not.toContain("Thinking... [research]");
 		expect(lastFrame()).toContain("Analyzing...");
 	});

@@ -118,15 +118,15 @@ export function buildCompactActiveStatus(
 	if (!["thinking", "tool", "speaking", "error"].includes(panel.status)) {
 		return undefined;
 	}
-	const modeSuffix = panel.executionMode ? ` [${panel.executionMode}]` : "";
+	const presetSuffix = panel.preset ? ` [${panel.preset}]` : "";
 	if (panel.status === "tool") {
-		return `${roleLabel(panel.role)} ${buildToolActivityLabel(panel.tools)}${modeSuffix}`;
+		return `${roleLabel(panel.role)} ${buildToolActivityLabel(panel.tools)}${presetSuffix}`;
 	}
 	if (panel.status === "thinking") {
-		return `${roleLabel(panel.role)} thinking${modeSuffix}`;
+		return `${roleLabel(panel.role)} thinking${presetSuffix}`;
 	}
 	if (panel.status === "speaking") {
-		return `${roleLabel(panel.role)} responding${modeSuffix}`;
+		return `${roleLabel(panel.role)} responding${presetSuffix}`;
 	}
-	return `${roleLabel(panel.role)} error${modeSuffix}`;
+	return `${roleLabel(panel.role)} error${presetSuffix}`;
 }

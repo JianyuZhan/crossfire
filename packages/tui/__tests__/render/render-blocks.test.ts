@@ -325,7 +325,7 @@ describe("liveStateToBlocks", () => {
 		const state: LiveAgentPanelState = {
 			role: "proposer",
 			status: "thinking",
-			executionMode: "research",
+			preset: "research",
 			thinkingText: "Planning",
 			narrationTexts: [],
 			currentMessageText: "",
@@ -335,7 +335,7 @@ describe("liveStateToBlocks", () => {
 		const header = liveStateToBlocks(state)[0];
 		expect(header.kind).toBe("agent-header");
 		if (header.kind === "agent-header") {
-			expect(header.executionMode).toBe("research");
+			expect(header.preset).toBe("research");
 			expect(header.statusLabel).toBeUndefined();
 		}
 	});

@@ -159,7 +159,7 @@ Relevant surfaces:
 - adapter-core: `ResolvedPolicy`, `compilePolicy()`, `translatePolicy()` per adapter
 - orchestrator-core: `DebateConfig.turnPresets` for per-turn preset overrides
 - orchestrator: `policy.baseline`, `policy.turn.override`, `policy.turn.override.clear` events
-- TUI: live panels show the current effective mode in the header/status text
+- TUI: live panels show the current effective preset in the header; full policy provenance is available via `/status policy`
 - Translation warnings are emitted as `run.warning` events when policy intent is approximated during provider translation
 
 This keeps the event log explicit about mode decisions instead of forcing operators to infer them from provider-side behavior.

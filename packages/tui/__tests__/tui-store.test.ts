@@ -372,7 +372,7 @@ describe("TuiStore", () => {
 				observation: stubObservation,
 			}),
 		);
-		expect(store.getState().proposer.executionMode).toBe("plan");
+		expect(store.getState().proposer.preset).toBe("plan");
 	});
 
 	it("archives pre-tool narration into a persistent block", () => {
@@ -1299,8 +1299,8 @@ describe("TuiStore", () => {
 
 		const s = store.getState();
 		expect(s.policySession?.roles.proposer.currentTurnOverride).toBeUndefined();
-		// executionMode must revert to baseline preset after override clear
-		expect(store.getState().proposer.executionMode).toBe("research");
+		// preset must revert to baseline preset after override clear
+		expect(store.getState().proposer.preset).toBe("research");
 	});
 
 	it("ignores policy events before debate.started", () => {

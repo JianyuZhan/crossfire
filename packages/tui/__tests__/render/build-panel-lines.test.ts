@@ -9,7 +9,7 @@ describe("buildPanelLines", () => {
 				kind: "agent-header",
 				role: "proposer",
 				agentType: "claude",
-				executionMode: "research",
+				preset: "research",
 				status: "speaking",
 				duration: 1500,
 			},
@@ -18,20 +18,20 @@ describe("buildPanelLines", () => {
 		expect(lines).toHaveLength(2);
 	});
 
-	it("renders execution mode on the header line with an explicit mode label", () => {
+	it("renders preset on the header line", () => {
 		const blocks: RenderBlock[] = [
 			{
 				kind: "agent-header",
 				role: "proposer",
 				agentType: "claude",
-				executionMode: "research",
+				preset: "research",
 				status: "thinking",
 			},
 		];
 		const text = buildPanelLines(blocks, 80)
 			.flatMap((line) => line.segments.map((segment) => segment.text))
 			.join("\n");
-		expect(text).toContain("Proposer [claude] [mode: research]");
+		expect(text).toContain("Proposer [claude] [research]");
 		expect(text).not.toContain("Thinking... [research]");
 	});
 

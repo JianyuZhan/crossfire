@@ -71,8 +71,8 @@ function toolWarnings(tools: LiveToolEntry[]): string[] {
 	return warnings;
 }
 
-function modeSuffix(executionMode?: string): string {
-	return executionMode ? ` [mode: ${executionMode}]` : "";
+function presetSuffix(preset?: string): string {
+	return preset ? ` [${preset}]` : "";
 }
 
 function statusText(state: LiveAgentPanelState): string {
@@ -191,7 +191,7 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 		const duration = snapshot.turnDurationMs
 			? ` (${formatDuration(snapshot.turnDurationMs)})`
 			: "";
-		const headerMode = modeSuffix(snapshot.executionMode);
+		const headerMode = presetSuffix(snapshot.preset);
 		return (
 			<Box flexDirection="column" paddingX={1}>
 				<Box>
@@ -256,7 +256,7 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 				<Text bold color={color}>
 					{STATUS_ICONS[state.status] ?? "○"} {label}
 					<Text dimColor>{agent}</Text>
-					<Text dimColor>{modeSuffix(state.executionMode)}</Text>
+					<Text dimColor>{presetSuffix(state.preset)}</Text>
 				</Text>
 				<Text> </Text>
 				<Text color={state.status === "error" ? "red" : "cyan"}>

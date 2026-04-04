@@ -44,7 +44,7 @@ export interface SubagentEntry {
 export interface AgentTurnSnapshot {
 	messageText: string;
 	narrationTexts?: string[];
-	executionMode?: string;
+	preset?: string;
 	thinkingText?: string;
 	thinkingType?: "raw-thinking" | "reasoning-summary";
 	latestPlan?: PlanStep[];
@@ -85,7 +85,7 @@ export interface LiveAgentPanelState {
 	role: "proposer" | "challenger";
 	agentType?: string;
 	model?: string;
-	executionMode?: string;
+	preset?: string;
 	status: "idle" | "thinking" | "tool" | "speaking" | "done" | "error";
 	thinkingText: string;
 	thinkingType?: "raw-thinking" | "reasoning-summary";
@@ -230,7 +230,7 @@ export type RenderBlock =
 			kind: "agent-header";
 			role: "proposer" | "challenger";
 			agentType?: string;
-			executionMode?: string;
+			preset?: string;
 			status: "idle" | "thinking" | "tool" | "speaking" | "done" | "error";
 			statusLabel?: string;
 			duration?: number;

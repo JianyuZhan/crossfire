@@ -41,7 +41,7 @@ function defaultAgentPanel(
 	return {
 		role,
 		status: "idle",
-		executionMode: undefined,
+		preset: undefined,
 		thinkingText: "",
 		thinkingType: undefined,
 		narrationTexts: [],
@@ -191,7 +191,7 @@ function captureSnapshot(panel: LiveAgentPanelState): AgentTurnSnapshot {
 		narrationTexts: panel.narrationTexts.map((text) =>
 			stripInternalBlocks(text),
 		),
-		executionMode: panel.executionMode,
+		preset: panel.preset,
 		thinkingText: panel.thinkingText || undefined,
 		thinkingType: panel.thinkingType,
 		latestPlan: panel.latestPlan?.map((step) => ({ ...step })),
@@ -759,7 +759,7 @@ export class TuiStore {
 				p.status = "thinking";
 				p.turnDurationMs = undefined;
 				p.turnStatus = undefined;
-				p.executionMode = undefined;
+				p.preset = undefined;
 				// Clear completed judge panel when new round begins
 				if (this.state.judge.visible) {
 					this.state.judge.visible = false;
@@ -800,7 +800,7 @@ export class TuiStore {
 					},
 				};
 				if (e.role === "proposer" || e.role === "challenger") {
-					this.state[e.role].executionMode = e.preset.value;
+					this.state[e.role].preset = e.preset.value;
 				}
 				break;
 			}
@@ -819,7 +819,7 @@ export class TuiStore {
 					};
 				}
 				if (e.role === "proposer" || e.role === "challenger") {
-					this.state[e.role].executionMode = e.preset;
+					this.state[e.role].preset = e.preset;
 				}
 				break;
 			}
@@ -832,7 +832,7 @@ export class TuiStore {
 					if (rps.currentTurnOverride?.turnId === e.turnId) {
 						rps.currentTurnOverride = undefined;
 						if (role === "proposer" || role === "challenger") {
-							this.state[role].executionMode = rps.baseline.preset.value;
+							this.state[role].preset = rps.baseline.preset.value;
 						}
 					}
 				}
