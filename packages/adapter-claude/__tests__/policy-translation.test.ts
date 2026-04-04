@@ -1,5 +1,4 @@
 import {
-	expectNoWarnings,
 	expectWarning,
 	makeResolvedPolicy,
 } from "@crossfire/adapter-core/testing";

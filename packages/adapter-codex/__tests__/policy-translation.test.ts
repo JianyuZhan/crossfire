@@ -157,4 +157,24 @@ describe("translatePolicy (Codex)", () => {
 			});
 		});
 	});
+
+	describe("intentional deltas", () => {
+		it("INTENTIONAL DELTA: on-risk maps to on-request, not a direct match", () => {
+			// Old behavior: Codex had no concept of on-risk; callers had to pick a mode manually
+			// New behavior: on-risk is explicitly mapped to on-request (closest Codex equivalent)
+			const policy = makeResolvedPolicy({
+				preset: "guarded",
+				role: "proposer",
+			});
+			const { native, warnings } = translatePolicy(policy);
+			// New behavior holds
+			expect(native.approvalPolicy).toBe("on-request");
+			// Mapping is marked approximate (not exact)
+			expectWarning(warnings, {
+				field: "interaction.approval",
+				adapter: "codex",
+				reason: "approximate",
+			});
+		});
+	});
 });
