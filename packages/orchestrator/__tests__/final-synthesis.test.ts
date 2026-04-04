@@ -86,7 +86,6 @@ describe("runFinalSynthesis", () => {
 			expect.objectContaining({
 				turnId: "synthesis-final",
 				prompt: "test prompt",
-				executionMode: "plan",
 			}),
 		);
 	});

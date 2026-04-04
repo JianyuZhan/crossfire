@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { AgentAdapter } from "@crossfire/adapter-core";
 import { DebateEventBus } from "@crossfire/orchestrator";
 import { describe, expect, it, vi } from "vitest";
-import type { ResolvedRoles } from "../src/profile/resolver.js";
+import type { ResolvedAllRoles } from "../src/config/resolver.js";
 import { createAdapters } from "../src/wiring/create-adapters.js";
 import { createBus } from "../src/wiring/create-bus.js";
 import { createTui } from "../src/wiring/create-tui.js";
@@ -25,34 +25,31 @@ function mockAdapter(id: string): AgentAdapter {
 	};
 }
 
-const makeProfile = (agent: string) => ({
-	name: "test",
-	agent: agent as any,
-	inherit_global_config: true,
-	mcp_servers: {},
-	allowed_tools: undefined,
-	disallowed_tools: undefined,
-	filePath: "/test.json",
-});
+function makeResolvedRole(
+	role: "proposer" | "challenger" | "judge",
+	adapter: "claude" | "codex" | "gemini",
+) {
+	return {
+		role,
+		adapter,
+		bindingName: `test-${role}`,
+		model: undefined,
+		preset: {
+			value: role === "judge" ? ("plan" as const) : ("guarded" as const),
+			source: "role-default" as const,
+		},
+		systemPrompt: undefined,
+		providerOptions: undefined,
+		mcpServers: undefined,
+	};
+}
 
 describe("createAdapters", () => {
 	it("creates adapter bundle for all three roles", async () => {
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: makeProfile("claude_code"),
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
-			judge: {
-				profile: makeProfile("gemini_cli"),
-				model: undefined,
-				adapterType: "gemini",
-			},
+		const roles: ResolvedAllRoles = {
+			proposer: makeResolvedRole("proposer", "claude"),
+			challenger: makeResolvedRole("challenger", "codex"),
+			judge: makeResolvedRole("judge", "gemini"),
 		};
 		const bundle = await createAdapters(roles, {
 			claude: () => mockAdapter("claude"),
@@ -67,17 +64,9 @@ describe("createAdapters", () => {
 	});
 
 	it("skips judge when role is undefined", async () => {
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: makeProfile("claude_code"),
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
+		const roles: ResolvedAllRoles = {
+			proposer: makeResolvedRole("proposer", "claude"),
+			challenger: makeResolvedRole("challenger", "codex"),
 			judge: undefined,
 		};
 		const bundle = await createAdapters(roles, {
@@ -89,97 +78,11 @@ describe("createAdapters", () => {
 		await bundle.closeAll();
 	});
 
-	it("passes per-role baseline execution modes into startSession", async () => {
-		const proposerAdapter = mockAdapter("claude");
-		const challengerAdapter = mockAdapter("codex");
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: makeProfile("claude_code"),
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
-			judge: undefined,
-		};
-		const bundle = await createAdapters(
-			roles,
-			{
-				claude: () => proposerAdapter,
-				codex: () => challengerAdapter,
-				gemini: () => mockAdapter("gemini"),
-			},
-			{
-				roleModes: {
-					proposer: "research",
-					challenger: "dangerous",
-				},
-			},
-		);
-
-		expect(proposerAdapter.startSession).toHaveBeenCalledWith(
-			expect.objectContaining({ executionMode: "research" }),
-		);
-		expect(challengerAdapter.startSession).toHaveBeenCalledWith(
-			expect.objectContaining({ executionMode: "dangerous" }),
-		);
-		await bundle.closeAll();
-	});
-
-	it("passes profile tool policy into startSession", async () => {
-		const proposerAdapter = mockAdapter("claude");
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: {
-					...makeProfile("claude_code"),
-					allowed_tools: ["Read", "mcp__fetch"],
-					disallowed_tools: ["WebFetch"],
-				},
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
-			judge: undefined,
-		};
-		const bundle = await createAdapters(roles, {
-			claude: () => proposerAdapter,
-			codex: () => mockAdapter("codex"),
-			gemini: () => mockAdapter("gemini"),
-		});
-
-		expect(proposerAdapter.startSession).toHaveBeenCalledWith(
-			expect.objectContaining({
-				allowedTools: ["Read", "mcp__fetch"],
-				disallowedTools: ["WebFetch"],
-			}),
-		);
-		await bundle.closeAll();
-	});
-
 	it("passes compiled policy to adapter startSession", async () => {
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: makeProfile("claude_code"),
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
-			judge: {
-				profile: makeProfile("gemini_cli"),
-				model: undefined,
-				adapterType: "gemini",
-			},
+		const roles: ResolvedAllRoles = {
+			proposer: makeResolvedRole("proposer", "claude"),
+			challenger: makeResolvedRole("challenger", "codex"),
+			judge: makeResolvedRole("judge", "gemini"),
 		};
 		const mock = mockAdapter("claude");
 		await createAdapters(roles, {
@@ -197,22 +100,10 @@ describe("createAdapters", () => {
 	});
 
 	it("judge gets plan preset by default", async () => {
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: makeProfile("claude_code"),
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
-			judge: {
-				profile: makeProfile("gemini_cli"),
-				model: undefined,
-				adapterType: "gemini",
-			},
+		const roles: ResolvedAllRoles = {
+			proposer: makeResolvedRole("proposer", "claude"),
+			challenger: makeResolvedRole("challenger", "codex"),
+			judge: makeResolvedRole("judge", "gemini"),
 		};
 		const judgeMock = mockAdapter("gemini");
 		await createAdapters(roles, {
@@ -228,53 +119,12 @@ describe("createAdapters", () => {
 		);
 	});
 
-	it("profile allowed_tools flow into legacy tool overrides", async () => {
-		const profileWithTools = {
-			...makeProfile("claude_code"),
-			allowed_tools: ["Read", "Grep"],
-			disallowed_tools: ["WebFetch"],
-		};
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: profileWithTools,
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
-		};
-		const mock = mockAdapter("claude");
-		await createAdapters(roles, {
-			claude: () => mock,
-			codex: () => mockAdapter("codex"),
-			gemini: () => mockAdapter("gemini"),
-		});
-		const startCall = (mock.startSession as ReturnType<typeof vi.fn>).mock
-			.calls[0][0];
-		expect(startCall.policy.capabilities.legacyToolOverrides).toEqual({
-			allow: ["Read", "Grep"],
-			deny: ["WebFetch"],
-			source: "legacy-profile",
-		});
-	});
-
 	it("closeAll swallows individual errors", async () => {
 		const failing = mockAdapter("claude");
 		(failing.close as any).mockRejectedValue(new Error("close failed"));
-		const roles: ResolvedRoles = {
-			proposer: {
-				profile: makeProfile("claude_code"),
-				model: undefined,
-				adapterType: "claude",
-			},
-			challenger: {
-				profile: makeProfile("codex"),
-				model: undefined,
-				adapterType: "codex",
-			},
+		const roles: ResolvedAllRoles = {
+			proposer: makeResolvedRole("proposer", "claude"),
+			challenger: makeResolvedRole("challenger", "codex"),
 			judge: undefined,
 		};
 		const bundle = await createAdapters(roles, {

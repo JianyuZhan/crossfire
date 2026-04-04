@@ -35,7 +35,6 @@ import {
 	renderActionPlanHtml,
 	renderActionPlanMarkdown,
 	renderMarkdownToHtml,
-	resolveExecutionMode,
 } from "@crossfire/orchestrator-core";
 import { DebateEventBus } from "./event-bus.js";
 import {
@@ -508,17 +507,14 @@ export async function runDebate(
 		// Step 4: Clear lastJudgeText
 		lastJudgeText = undefined;
 
-		// Step 5: Resolve execution mode, push turn.mode.changed
+		// Step 5: Resolve turn preset override
 		const turnId = `${role[0]}-${round}`;
-		const executionModeResult = resolveExecutionMode(
-			config.executionModes,
-			role,
-			turnId,
-		);
+		const turnOverridePreset = config.turnPresets?.[turnId];
+		const hasTurnOverride = turnOverridePreset !== undefined;
 		// Only emit policy.turn.override when there IS a turn-level override
-		if (executionModeResult.source === "turn-override") {
+		if (hasTurnOverride) {
 			const overridePolicy = compilePolicy({
-				preset: executionModeResult.effectiveMode as PolicyPreset,
+				preset: turnOverridePreset,
 				role: role as "proposer" | "challenger",
 				legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
 			});
@@ -527,7 +523,7 @@ export async function runDebate(
 				role: role as "proposer" | "challenger",
 				turnId,
 				policy: overridePolicy,
-				preset: executionModeResult.effectiveMode as PolicyPreset,
+				preset: turnOverridePreset,
 				translationSummary: {
 					adapter: adapterEntry.session.adapterId ?? "unknown",
 					nativeSummary: {},
@@ -541,13 +537,13 @@ export async function runDebate(
 		}
 
 		// Step 6: Compile per-turn policy if baseline exists
-		const turnPolicy = adapterEntry.baselinePolicy
+		const turnPolicy = hasTurnOverride
 			? compilePolicy({
-					preset: executionModeResult.effectiveMode as PolicyPreset,
+					preset: turnOverridePreset,
 					role: role as "proposer" | "challenger" | "judge",
 					legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
 				})
-			: undefined;
+			: adapterEntry.baselinePolicy;
 
 		// Step 7: Set activeTurn, call sendTurn
 		activeTurn = {
@@ -561,13 +557,12 @@ export async function runDebate(
 			turnId,
 			prompt,
 			policy: turnPolicy,
-			executionMode: executionModeResult.effectiveMode,
 		});
 
 		// Step 7: Await waitForTurnCompleted, clear activeTurn
 		const turnResult = await waitForTurnCompleted(bus, turnId);
 		activeTurn = undefined;
-		if (executionModeResult.source === "turn-override") {
+		if (hasTurnOverride) {
 			bus.push({
 				kind: "policy.turn.override.clear",
 				turnId,

@@ -146,7 +146,6 @@ export async function runFinalSynthesis(
 		await adapter.sendTurn(session, {
 			turnId,
 			prompt,
-			executionMode: "plan",
 		});
 
 		// Wait for turn.completed or timeout

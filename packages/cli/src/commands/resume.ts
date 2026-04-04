@@ -6,8 +6,8 @@ import { App } from "@crossfire/tui";
 import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
-import { loadProfile } from "../profile/loader.js";
-import { resolveRoles } from "../profile/resolver.js";
+import { loadConfig } from "../config/loader.js";
+import { resolveAllRoles } from "../config/resolver.js";
 import { createAdapters } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
 import { createDefaultFactories } from "../wiring/create-factories.js";
@@ -17,9 +17,7 @@ import { createLiveCommandHandler } from "../wiring/live-command-handler.js";
 export const resumeCommand = new Command("resume")
 	.description("Resume an existing debate")
 	.argument("<output-dir>", "Output directory containing the debate")
-	.option("--proposer <profile>", "Override proposer profile")
-	.option("--challenger <profile>", "Override challenger profile")
-	.option("--judge <profile>", "Override judge profile")
+	.option("--config <path>", "Override config file path")
 	.option("--headless", "Run without TUI", false)
 	.action(async (outputDir: string, options) => {
 		try {
@@ -46,42 +44,16 @@ export const resumeCommand = new Command("resume")
 				process.exit(0);
 			}
 
-			// Load profiles (CLI overrides or from index.json)
-			const proposerProfile = loadProfile(
-				options.proposer ?? meta.profiles.proposer.name,
-			);
-			const challengerProfile = loadProfile(
-				options.challenger ?? meta.profiles.challenger.name,
-			);
-
-			let judgeProfile: ReturnType<typeof loadProfile> | "none" = "none";
-			if (meta.profiles.judge) {
-				judgeProfile = loadProfile(options.judge ?? meta.profiles.judge.name);
+			// Resolve config file: CLI override > saved configFile > error
+			const configFilePath = options.config ?? meta.configFile;
+			if (!configFilePath) {
+				console.error(
+					"Error: no config file found in index.json and --config not provided",
+				);
+				process.exit(1);
 			}
-
-			const roles = resolveRoles({
-				proposer: {
-					profile: proposerProfile,
-					cliModel: undefined,
-					systemPrompt: config.proposerSystemPrompt ?? "",
-					promptTemplateFamily: config.promptTemplates?.proposer,
-				},
-				challenger: {
-					profile: challengerProfile,
-					cliModel: undefined,
-					systemPrompt: config.challengerSystemPrompt ?? "",
-					promptTemplateFamily: config.promptTemplates?.challenger,
-				},
-				judge:
-					judgeProfile === "none"
-						? "none"
-						: {
-								profile: judgeProfile,
-								cliModel: undefined,
-								systemPrompt: config.judgeSystemPrompt ?? "",
-								promptTemplateFamily: config.promptTemplates?.judge,
-							},
-			});
+			const crossfireConfig = loadConfig(configFilePath);
+			const resolvedAllRoles = resolveAllRoles(crossfireConfig, {});
 
 			console.log(
 				`Resuming debate from round ${currentState.currentRound + 1}`,
@@ -89,7 +61,7 @@ export const resumeCommand = new Command("resume")
 			console.log(`Topic: ${config.topic}`);
 
 			const adapterBundle = await createAdapters(
-				roles,
+				resolvedAllRoles,
 				createDefaultFactories(),
 			);
 

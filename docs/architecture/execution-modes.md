@@ -1,6 +1,6 @@
-# Execution Modes and Policy Model
+# Policy Model
 
-> Crossfire's policy compilation pipeline, execution-mode presets, precedence rules, and provider translation.
+> Crossfire's policy compilation pipeline, presets, precedence rules, and provider translation.
 
 Back to the overview: [overview.md](./overview.md)
 
@@ -17,13 +17,12 @@ Crossfire reduces approval fatigue and provider lock-in by modeling turn executi
 The compilation pipeline:
 
 ```text
-PresetInput → compilePolicy() → ResolvedPolicy → adapter translatePolicy() → ProviderTranslationResult
+PresetInput -> compilePolicy() -> ResolvedPolicy -> adapter translatePolicy() -> ProviderTranslationResult
 ```
 
 - `PresetInput` carries a preset name (`research`, `guarded`, `dangerous`, `plan`), a role, and optional legacy tool overrides
 - `compilePolicy()` expands the preset, applies default role contracts, clamps capabilities to role ceilings, and merges legacy tool overrides
 - Each adapter's `translatePolicy()` is a pure function that maps `ResolvedPolicy` to provider-native options plus translation warnings
-- Adapters use the translated result when a policy is present; otherwise they fall back to legacy `mapExecutionMode*()` functions for backward compatibility
 
 ## Policy Layers
 
@@ -32,16 +31,16 @@ A `ResolvedPolicy` comprises:
 - **Role contract**: semantic constraints (exploration, fact-check scope, evidence bar, whether new proposals are allowed)
 - **Capability policy**: filesystem, network, shell, subagents levels plus optional legacy tool overrides
 - **Interaction policy**: approval mode (`always`, `on-risk`, `on-failure`, `never`) plus optional limits (maxTurns, budgetUsd, timeoutMs, maxToolCalls)
-- **Preset**: the originating preset name, preserved for diagnostics only — adapters must not branch on it
+- **Preset**: the originating preset name, preserved for diagnostics only -- adapters must not branch on it
 
 ## Presets
 
 Crossfire uses these presets as entry points:
 
-- `research` — read/search oriented, bounded turns, on-risk approval
-- `guarded` — read/write with on-risk approval (the default)
-- `dangerous` — full access, no approval
-- `plan` — read-only reasoning, always-approve (used for judge turns)
+- `research` -- read/search oriented, bounded turns, on-risk approval
+- `guarded` -- read/write with on-risk approval (the default)
+- `dangerous` -- full access, no approval
+- `plan` -- read-only reasoning, always-approve (used for judge turns)
 
 Why `plan` is not a role baseline:
 
@@ -49,11 +48,11 @@ Why `plan` is not a role baseline:
 - most productive proposer / challenger turns still need real reads, searches, or validation
 - treating `plan` as a normal baseline would make it too easy to accidentally degrade debate quality into pure reasoning-only turns
 
-Judge turns always use the `plan` preset. When no policy is present, the legacy `executionMode: "plan"` fallback is preserved.
+Judge turns always use the `plan` preset.
 
-### Preset Resolution Precedence (Phase C)
+### Preset Resolution Precedence
 
-Phase C introduces a 4-level precedence system for resolving which preset applies to each role:
+The preset for each role is resolved through a 4-level precedence system:
 
 ```text
 CLI role-specific > CLI global > config file > role default
@@ -68,28 +67,22 @@ The resolution function (`resolveRolePreset()` in `@crossfire/cli/config/policy-
 
 This preset resolution feeds into the runtime turn-level precedence system described below.
 
-## Precedence
+## Turn-Level Precedence
 
-Effective turn mode is resolved with this priority:
+Effective turn policy is resolved with this priority:
 
 ```text
-debate default < role baseline < turn override
+role baseline < turn override
 ```
 
-Current implementation supports:
+- Role baseline is compiled via `compilePolicy({ preset, role })` during adapter wiring and stored as `baselinePolicy` on each adapter entry
+- Per-turn overrides are specified via `DebateConfig.turnPresets` (a `Record<string, PolicyPreset>` mapping turnId to preset name)
 
-- debate default via `DebateConfig.executionModes.defaultMode`
-- per-role baseline via `DebateConfig.executionModes.roleModes`
-- per-turn override via `DebateConfig.executionModes.turnOverrides`
-
-The resolver returns:
-
-- `baselineMode`
-- `effectiveMode`
-- `source` (`debate-default`, `role-baseline`, or `turn-override`)
+When a turn override is active, the runner compiles a fresh policy with the override preset while preserving any `legacyToolPolicyInput` from the adapter entry. The baseline policy is never mutated.
 
 The runner emits `policy.turn.override` before a proposer / challenger turn when a turn-level override is active, and `policy.turn.override.clear` after the turn completes. When no override is active, no policy event is emitted for that turn.
-Judge turns are treated differently: Crossfire sends them in `plan` mode and judge prompts explicitly instruct the model not to start a fresh tool-driven investigation.
+
+Judge turns always receive the judge adapter entry's baseline policy (compiled with `plan` preset).
 
 ## Provider Translation
 
@@ -99,10 +92,10 @@ Each adapter has a `translatePolicy(policy: ResolvedPolicy): ProviderTranslation
 
 `translatePolicy()` maps `ResolvedPolicy` to Claude SDK query options:
 
-- `interaction.approval` → `permissionMode`: `always` → `default`, `on-risk` → `default`, `on-failure` → `dontAsk`, `never` → `bypassPermissions`
-- `capabilities.shell === "exec"` → `allowDangerouslySkipPermissions: true`
-- `interaction.limits.maxTurns` → `maxTurns` (defaults to 12 for on-failure/dontAsk modes)
-- `capabilities.legacyToolOverrides.deny` → `disallowedTools`; `.allow` → `allowedTools`
+- `interaction.approval` -> `permissionMode`: `always` -> `default`, `on-risk` -> `default`, `on-failure` -> `dontAsk`, `never` -> `bypassPermissions`
+- `capabilities.shell === "exec"` -> `allowDangerouslySkipPermissions: true`
+- `interaction.limits.maxTurns` -> `maxTurns` (defaults to 12 for on-failure/dontAsk modes)
+- `capabilities.legacyToolOverrides.deny` -> `disallowedTools`; `.allow` -> `allowedTools`
 
 Intentional semantic delta: `research` preset now maps to `on-failure` approval (Claude `dontAsk`) rather than combining it with a hard-coded tool allowlist. Tool restrictions are driven by `capabilities.legacyToolOverrides` instead, making execution mode and tool policy independent knobs.
 
@@ -112,9 +105,9 @@ Recovery path: the Claude adapter reapplies the same translated policy options w
 
 `translatePolicy()` maps `ResolvedPolicy` to Codex JSON-RPC session parameters:
 
-- `interaction.approval` → `approvalPolicy`: `always`/`on-risk` → `on-request`, `on-failure` → `on-failure`, `never` → `never`
-- `capabilities` → `sandboxPolicy`: filesystem/shell/network levels determine `readOnly`, `workspace-write`, or `danger-full-access`
-- `capabilities.network === "off"` → `networkDisabled: true`
+- `interaction.approval` -> `approvalPolicy`: `always`/`on-risk` -> `on-request`, `on-failure` -> `on-failure`, `never` -> `never`
+- `capabilities` -> `sandboxPolicy`: filesystem/shell/network levels determine `readOnly`, `workspace-write`, or `danger-full-access`
+- `capabilities.network === "off"` -> `networkDisabled: true`
 
 The `sandboxPolicy` object from `translatePolicy()` is forwarded verbatim to `thread/start` and `turn/start`. Codex-native approval options (`availableDecisions`) are preserved as `nativeOptions` in approval events, not flattened to plain allow/deny.
 
@@ -124,79 +117,48 @@ Warnings: Codex does not support per-tool allow/deny lists, per-session turn lim
 
 `translatePolicy()` maps `ResolvedPolicy` to Gemini CLI approval-mode arguments:
 
-- `interaction.approval` → `approvalMode`: `never` → `yolo`, `on-failure` → `plan`, `on-risk`/`always` → `default`
-- `capabilities.shell === "exec"` + `network === "full"` → `yolo` override
+- `interaction.approval` -> `approvalMode`: `never` -> `yolo`, `on-failure` -> `plan`, `on-risk`/`always` -> `default`
+- `capabilities.shell === "exec"` + `network === "full"` -> `yolo` override
 
 Limitations: Gemini headless does not provide approval round-trips comparable to Claude or Codex; mode support is best-effort startup mapping. Tool-selection control remains provider-native / MCP-driven.
 
-### Legacy Fallback
-
-When no `ResolvedPolicy` is present (e.g., callers that have not migrated), adapters fall back to legacy `mapExecutionMode*()` functions that map mode strings directly to provider parameters:
-
-- Claude: `research` → `dontAsk` + allowlist + `maxTurns: 12`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
-- Codex: `research` → `on-request` + `readOnly`, `guarded` → `on-failure`, `dangerous` → `never` + `danger-full-access`
-- Gemini: `research` → `plan`, `guarded` → default, `dangerous` → `yolo`, `plan` → `plan`
-
-These legacy paths are preserved for backward compatibility and will be removed once all callers pass policies.
-
 ## CLI Entry Points
 
-`crossfire start` now accepts preset-first flags (replacing the old `--mode` flags):
+`crossfire start` accepts preset-first flags:
 
 - `--preset <research|guarded|dangerous|plan>` sets the debate default
 - `--proposer-preset <research|guarded|dangerous|plan>` per-role preset
 - `--challenger-preset <research|guarded|dangerous|plan>` per-role preset
 - `--judge-preset <research|guarded|dangerous|plan>` per-role preset
 - repeatable `--turn-preset <turnId=preset>` applies a static per-turn override
-- `--config <path>` loads a `crossfire.json` config file (new config-file path)
+- `--config <path>` loads a `crossfire.json` config file (required)
 
 Examples:
 
 ```bash
 crossfire start \
+  --config crossfire.json \
   --topic "Should we migrate to Rust?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
   --proposer-preset research \
   --challenger-preset guarded
 ```
 
 ```bash
 crossfire start \
+  --config crossfire.json \
   --topic "Should we adopt feature flags?" \
-  --proposer claude/proposer \
-  --challenger claude/challenger \
   --proposer-preset research \
   --turn-preset p-1=plan
 ```
-
-```bash
-# Config-file path (new):
-crossfire start \
-  --topic "Should we adopt feature flags?" \
-  --proposer claude/proposer \
-  --challenger codex/challenger \
-  --config crossfire.json \
-  --proposer-preset research
-```
-
-## Policy Model Integration
-
-The legacy execution-mode resolver now has a companion `resolveExecutionModeAsPolicy()` that returns both the resolved mode and a compiled `ResolvedPolicy`. This allows existing callers to migrate incrementally:
-
-- `resolveExecutionMode()` remains unchanged and returns mode strings
-- `resolveExecutionModeAsPolicy()` calls the mode resolver, then feeds the effective mode as a preset into `compilePolicy()`
-- callers that already have a `ResolvedPolicy` should use `compilePolicy()` directly instead of going through the compat wrapper
-
-The orchestrator runner compiles a fresh policy per turn using the resolved effective mode as the preset, which allows turn-level mode overrides to produce different policies without changing the baseline.
 
 ## Event and UI Implications
 
 Relevant surfaces:
 
-- adapter-core: `StartSessionInput.policy`, `TurnInput.policy` (new); `StartSessionInput.executionMode`, `TurnInput.executionMode` (deprecated, legacy fallback)
+- adapter-core: `StartSessionInput.policy`, `TurnInput.policy` carry the compiled `ResolvedPolicy`
 - adapter-core: `ResolvedPolicy`, `compilePolicy()`, `translatePolicy()` per adapter
-- orchestrator-core: `DebateConfig.executionModes`, `resolveExecutionMode()`, `resolveExecutionModeAsPolicy()`, `policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`
+- orchestrator-core: `DebateConfig.turnPresets` for per-turn preset overrides
+- orchestrator: `policy.baseline`, `policy.turn.override`, `policy.turn.override.clear` events
 - TUI: live panels show the current effective mode in the header/status text
 - Translation warnings are emitted as `run.warning` events when policy intent is approximated during provider translation
 
@@ -206,11 +168,11 @@ This keeps the event log explicit about mode decisions instead of forcing operat
 
 Phase B established a three-layer regression harness for the policy compilation pipeline:
 
-1. **Policy core** (`adapter-core`): Golden matrix of 7 preset×role combinations with full field assertions. Verifies `ResolvedPolicy` structure, capability clamping, and legacy override behavior. No provider-native assertions allowed in this layer.
+1. **Policy core** (`adapter-core`): Golden matrix of 7 preset x role combinations with full field assertions. Verifies `ResolvedPolicy` structure, capability clamping, and legacy override behavior. No provider-native assertions allowed in this layer.
 
 2. **Adapter translation** (`adapter-{claude,codex,gemini}`): Per-adapter golden cases covering exact mappings, approximate mappings, and intentional deltas. All tests use structured `expectWarning()` assertions on `field` + `adapter` + `reason`, not message text.
 
-3. **Wiring regression** (`cli`, `orchestrator`): Baseline policy flow and turn override flow tested separately. Includes data-flow smoke that verifies the compile→translate→adapter chain without LLM mocking.
+3. **Wiring regression** (`cli`, `orchestrator`): Baseline policy flow and turn override flow tested separately. Includes data-flow smoke that verifies the compile -> translate -> adapter chain without LLM mocking.
 
 Shared test fixtures and warning helpers live in `@crossfire/adapter-core/testing` (internal test-support surface, not a public API).
 

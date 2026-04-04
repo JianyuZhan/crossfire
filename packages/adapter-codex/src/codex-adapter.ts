@@ -8,10 +8,8 @@ import {
 	type LocalTurnMetrics,
 	type NormalizedEvent,
 	type ResolvedPolicy,
-	type RoleExecutionMode,
 	type SessionHandle,
 	type StartSessionInput,
-	type TurnExecutionMode,
 	type TurnHandle,
 	type TurnInput,
 	measureLocalMetrics,
@@ -48,7 +46,6 @@ interface SessionState {
 	handle: SessionHandle;
 	profile: string;
 	model: string;
-	executionMode: RoleExecutionMode;
 	baselinePolicy?: ResolvedPolicy;
 	currentTurnId?: string;
 	currentNativeTurnId?: string;
@@ -86,32 +83,6 @@ judge_verdict '{"leading":"proposer","score":{"proposer":7,"challenger":5},"reas
 Pass the complete JSON as a single quoted argument. Do NOT omit any required fields.`;
 
 let sessionCounter = 0;
-
-function mapExecutionModeToCodexPolicies(
-	mode: TurnExecutionMode | RoleExecutionMode | undefined,
-): {
-	approvalPolicy: string;
-	sandboxPolicy?: Record<string, unknown>;
-} {
-	switch (mode) {
-		case "research":
-		case "plan":
-			return {
-				approvalPolicy: "on-request",
-				sandboxPolicy: { type: "readOnly" },
-			};
-		case "dangerous":
-			return {
-				approvalPolicy: "never",
-				sandboxPolicy: { type: "danger-full-access" },
-			};
-		case "guarded":
-		case undefined:
-			return {
-				approvalPolicy: "on-failure",
-			};
-	}
-}
 
 function humanizeDecision(decisionId: string): string {
 	return decisionId
@@ -328,13 +299,12 @@ export class CodexAdapter implements AgentAdapter {
 		sessionCounter++;
 		const adapterSessionId = `codex-session-${sessionCounter}-${Date.now()}`;
 		const model = input.model ?? "gpt-5.4";
-		const executionMode = input.executionMode ?? "guarded";
 
 		let policies: {
 			approvalPolicy: string;
 			sandboxPolicy?: Record<string, unknown>;
 			networkDisabled?: boolean;
-		};
+		} = { approvalPolicy: "on-failure" };
 		if (input.policy) {
 			const { native, warnings } = translatePolicy(input.policy);
 			for (const w of warnings) {
@@ -353,8 +323,6 @@ export class CodexAdapter implements AgentAdapter {
 					: {}),
 				...(native.networkDisabled ? { networkDisabled: true } : {}),
 			};
-		} else {
-			policies = mapExecutionModeToCodexPolicies(executionMode);
 		}
 
 		// 1. Send `initialize` request
@@ -395,7 +363,6 @@ export class CodexAdapter implements AgentAdapter {
 			handle,
 			profile: input.profile,
 			model,
-			executionMode,
 			baselinePolicy: input.policy,
 			turnCount: 0,
 		};
@@ -445,7 +412,7 @@ export class CodexAdapter implements AgentAdapter {
 			approvalPolicy: string;
 			sandboxPolicy?: Record<string, unknown>;
 			networkDisabled?: boolean;
-		};
+		} = { approvalPolicy: "on-failure" };
 		if (activePolicy) {
 			const { native, warnings } = translatePolicy(activePolicy);
 			for (const w of warnings) {
@@ -465,10 +432,6 @@ export class CodexAdapter implements AgentAdapter {
 					: {}),
 				...(native.networkDisabled ? { networkDisabled: true } : {}),
 			};
-		} else {
-			policies = mapExecutionModeToCodexPolicies(
-				input.executionMode ?? session?.executionMode,
-			);
 		}
 
 		try {
@@ -547,7 +510,7 @@ export class CodexAdapter implements AgentAdapter {
 			approvalPolicy: string;
 			sandboxPolicy?: Record<string, unknown>;
 			networkDisabled?: boolean;
-		};
+		} = { approvalPolicy: "on-failure" };
 		if (recoveryActivePolicy) {
 			const { native } = translatePolicy(recoveryActivePolicy);
 			recoveryPolicies = {
@@ -557,10 +520,6 @@ export class CodexAdapter implements AgentAdapter {
 					: {}),
 				...(native.networkDisabled ? { networkDisabled: true } : {}),
 			};
-		} else {
-			recoveryPolicies = mapExecutionModeToCodexPolicies(
-				input.executionMode ?? session?.executionMode,
-			);
 		}
 		const threadResult = (await this.client.request("thread/start", {
 			model: session?.model ?? "gpt-5.4",

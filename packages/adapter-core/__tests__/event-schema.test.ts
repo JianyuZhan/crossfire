@@ -241,22 +241,22 @@ describe("NormalizedEventSchema", () => {
 		expect(NormalizedEventSchema.safeParse(warning).success).toBe(true);
 	});
 
-	it("accepts StartSessionInput with an execution mode baseline", () => {
+	it("accepts StartSessionInput with policy field", () => {
 		expect(
 			AdapterContractSchema.shape.startSessionInput.safeParse({
 				profile: "test",
 				workingDirectory: "/tmp/project",
-				executionMode: "guarded",
 			}).success,
 		).toBe(true);
 	});
 
-	it("accepts TurnInput with a per-turn execution mode override", () => {
+	it("accepts TurnInput with role and roundNumber", () => {
 		expect(
 			AdapterContractSchema.shape.turnInput.safeParse({
 				prompt: "hello",
 				turnId: "p-1",
-				executionMode: "plan",
+				role: "proposer",
+				roundNumber: 1,
 			}).success,
 		).toBe(true);
 	});

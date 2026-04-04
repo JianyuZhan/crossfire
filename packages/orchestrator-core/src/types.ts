@@ -1,4 +1,4 @@
-import type { DebateExecutionConfig } from "./execution-modes.js";
+import type { PolicyPreset } from "@crossfire/adapter-core";
 
 export type DebateRole = "proposer" | "challenger";
 export type PromptTemplateFamily = "general" | "code";
@@ -24,7 +24,7 @@ export interface DebateConfig {
 	maxRounds: number;
 	judgeEveryNRounds: number;
 	convergenceThreshold: number;
-	executionModes?: DebateExecutionConfig;
+	turnPresets?: Record<string, PolicyPreset>;
 	promptTemplates?: {
 		defaultSelection?: "auto" | PromptTemplateFamily;
 		proposer?: PromptTemplateFamily;

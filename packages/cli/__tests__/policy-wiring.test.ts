@@ -15,8 +15,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import type { ClaudeNativeOptions } from "../../adapter-claude/src/policy-translation.js";
 import { translatePolicy as translateClaudePolicy } from "../../adapter-claude/src/policy-translation.js";
-import type { ResolvedRoles } from "../src/profile/resolver.js";
-import type { ProfileConfig } from "../src/profile/schema.js";
+import type { ResolvedAllRoles } from "../src/config/resolver.js";
 import { createAdapters } from "../src/wiring/create-adapters.js";
 
 const STUB_CAPABILITIES = {
@@ -99,46 +98,37 @@ function makeClaudeTranslatingStubAdapter(): {
 	};
 }
 
-const makeProfile = (agent: ProfileConfig["agent"]): ProfileConfig => ({
-	name: "test",
-	agent,
-	inherit_global_config: true,
-	mcp_servers: {},
-	allowed_tools: undefined,
-	disallowed_tools: undefined,
-	filePath: "/test.json",
-});
+function makeResolvedRole(
+	role: "proposer" | "challenger" | "judge",
+	adapter: AdapterId,
+	preset: "research" | "guarded" | "dangerous" | "plan" = role === "judge"
+		? "plan"
+		: "guarded",
+) {
+	return {
+		role,
+		adapter,
+		bindingName: `test-${role}`,
+		model: undefined,
+		preset: { value: preset, source: "role-default" as const },
+		systemPrompt: "test",
+		providerOptions: undefined,
+		mcpServers: undefined,
+	};
+}
 
 function makeRoles(overrides?: {
-	proposerProfile?: Partial<ProfileConfig>;
-	challengerProfile?: Partial<ProfileConfig>;
-	judgeProfile?: Partial<ProfileConfig> | null;
-}): ResolvedRoles {
+	proposerPreset?: "research" | "guarded" | "dangerous" | "plan";
+	challengerPreset?: "research" | "guarded" | "dangerous" | "plan";
+}): ResolvedAllRoles {
 	return {
-		proposer: {
-			profile: { ...makeProfile("claude_code"), ...overrides?.proposerProfile },
-			model: undefined,
-			adapterType: "claude",
-			systemPrompt: "test",
-		},
-		challenger: {
-			profile: { ...makeProfile("codex"), ...overrides?.challengerProfile },
-			model: undefined,
-			adapterType: "codex",
-			systemPrompt: "test",
-		},
-		judge:
-			overrides?.judgeProfile === null
-				? undefined
-				: {
-						profile: {
-							...makeProfile("gemini_cli"),
-							...overrides?.judgeProfile,
-						},
-						model: undefined,
-						adapterType: "gemini",
-						systemPrompt: "test",
-					},
+		proposer: makeResolvedRole("proposer", "claude", overrides?.proposerPreset),
+		challenger: makeResolvedRole(
+			"challenger",
+			"codex",
+			overrides?.challengerPreset,
+		),
+		judge: makeResolvedRole("judge", "gemini"),
 	};
 }
 
@@ -191,44 +181,22 @@ describe("policy wiring", () => {
 			await bundle.closeAll();
 		});
 
-		it("custom execution modes flow into preset selection", async () => {
+		it("custom presets flow into policy selection", async () => {
 			const proposer = makeStubAdapter("claude");
 			const challenger = makeStubAdapter("codex");
 			const bundle = await createAdapters(
-				makeRoles(),
+				makeRoles({
+					proposerPreset: "research",
+					challengerPreset: "dangerous",
+				}),
 				{
 					claude: () => proposer,
 					codex: () => challenger,
 					gemini: () => makeStubAdapter("gemini"),
 				},
-				{ roleModes: { proposer: "research", challenger: "dangerous" } },
 			);
 			expect(getStartSessionPolicy(proposer).preset).toBe("research");
 			expect(getStartSessionPolicy(challenger).preset).toBe("dangerous");
-			await bundle.closeAll();
-		});
-
-		it("legacy allowed_tools flow into legacyToolOverrides", async () => {
-			const proposer = makeStubAdapter("claude");
-			const bundle = await createAdapters(
-				makeRoles({
-					proposerProfile: {
-						allowed_tools: ["Read", "Grep"],
-						disallowed_tools: ["WebFetch"],
-					},
-				}),
-				{
-					claude: () => proposer,
-					codex: () => makeStubAdapter("codex"),
-					gemini: () => makeStubAdapter("gemini"),
-				},
-			);
-			const policy = getStartSessionPolicy(proposer);
-			expect(policy.capabilities.legacyToolOverrides).toEqual({
-				allow: ["Read", "Grep"],
-				deny: ["WebFetch"],
-				source: "legacy-profile",
-			});
 			await bundle.closeAll();
 		});
 
@@ -244,47 +212,16 @@ describe("policy wiring", () => {
 			expect(bundle.adapters.judge?.baselinePolicy?.preset).toBe("plan");
 			await bundle.closeAll();
 		});
-
-		it("legacyToolPolicyInput is stored on adapter entry", async () => {
-			const bundle = await createAdapters(
-				makeRoles({
-					proposerProfile: { allowed_tools: ["Read"] },
-				}),
-				{
-					claude: () => makeStubAdapter("claude"),
-					codex: () => makeStubAdapter("codex"),
-					gemini: () => makeStubAdapter("gemini"),
-				},
-			);
-			expect(bundle.adapters.proposer.legacyToolPolicyInput).toEqual({
-				allow: ["Read"],
-				deny: undefined,
-			});
-			expect(bundle.adapters.challenger.legacyToolPolicyInput).toBeUndefined();
-			await bundle.closeAll();
-		});
 	});
 
 	describe("turn override flow", () => {
-		it("adapter entry keeps baseline policy and legacy tool input for downstream override compilation", async () => {
-			const bundle = await createAdapters(
-				makeRoles({
-					proposerProfile: {
-						allowed_tools: ["Read"],
-						disallowed_tools: ["WebFetch"],
-					},
-				}),
-				{
-					claude: () => makeStubAdapter("claude"),
-					codex: () => makeStubAdapter("codex"),
-					gemini: () => makeStubAdapter("gemini"),
-				},
-			);
-			expect(bundle.adapters.proposer.baselinePolicy?.preset).toBe("guarded");
-			expect(bundle.adapters.proposer.legacyToolPolicyInput).toEqual({
-				allow: ["Read"],
-				deny: ["WebFetch"],
+		it("adapter entry keeps baseline policy for downstream override compilation", async () => {
+			const bundle = await createAdapters(makeRoles(), {
+				claude: () => makeStubAdapter("claude"),
+				codex: () => makeStubAdapter("codex"),
+				gemini: () => makeStubAdapter("gemini"),
 			});
+			expect(bundle.adapters.proposer.baselinePolicy?.preset).toBe("guarded");
 			await bundle.closeAll();
 		});
 	});
@@ -311,19 +248,11 @@ describe("policy wiring", () => {
 
 		it("turn override smoke: compile -> translate -> adapter sendTurn uses override while baseline stays clean", async () => {
 			const proposer = makeClaudeTranslatingStubAdapter();
-			const bundle = await createAdapters(
-				makeRoles({
-					proposerProfile: {
-						allowed_tools: ["Read"],
-						disallowed_tools: ["WebFetch"],
-					},
-				}),
-				{
-					claude: () => proposer.adapter,
-					codex: () => makeStubAdapter("codex"),
-					gemini: () => makeStubAdapter("gemini"),
-				},
-			);
+			const bundle = await createAdapters(makeRoles(), {
+				claude: () => proposer.adapter,
+				codex: () => makeStubAdapter("codex"),
+				gemini: () => makeStubAdapter("gemini"),
+			});
 
 			const baseline = bundle.adapters.proposer.baselinePolicy;
 			expect(baseline).toBeDefined();
@@ -333,7 +262,6 @@ describe("policy wiring", () => {
 			const turnPolicy = compilePolicy({
 				preset: "research",
 				role: "proposer",
-				legacyToolPolicy: bundle.adapters.proposer.legacyToolPolicyInput,
 			});
 
 			await bundle.adapters.proposer.adapter.sendTurn(
@@ -351,12 +279,6 @@ describe("policy wiring", () => {
 			expect(proposer.turnTranslations[0]?.policy.preset).toBe("research");
 			expect(proposer.turnTranslations[0]?.native.permissionMode).toBe(
 				"default",
-			);
-			expect(proposer.turnTranslations[0]?.native.allowedTools).toEqual([
-				"Read",
-			]);
-			expect(proposer.turnTranslations[0]?.native.disallowedTools).toContain(
-				"WebFetch",
 			);
 			expect(baseline?.preset).toBe("guarded");
 			expect(baseline?.capabilities.filesystem).toBe("write");

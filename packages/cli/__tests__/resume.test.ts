@@ -418,21 +418,9 @@ describe("resume command option definitions", () => {
 		expect(args[0].required).toBe(true);
 	});
 
-	it("defines --proposer option for profile override", async () => {
+	it("defines --config option for config file override", async () => {
 		const { resumeCommand } = await import("../src/commands/resume.js");
-		const opt = resumeCommand.options.find((o) => o.long === "--proposer");
-		expect(opt).toBeDefined();
-	});
-
-	it("defines --challenger option for profile override", async () => {
-		const { resumeCommand } = await import("../src/commands/resume.js");
-		const opt = resumeCommand.options.find((o) => o.long === "--challenger");
-		expect(opt).toBeDefined();
-	});
-
-	it("defines --judge option for profile override", async () => {
-		const { resumeCommand } = await import("../src/commands/resume.js");
-		const opt = resumeCommand.options.find((o) => o.long === "--judge");
+		const opt = resumeCommand.options.find((o) => o.long === "--config");
 		expect(opt).toBeDefined();
 	});
 

@@ -191,7 +191,7 @@ Current classification rules:
 ### runFinalSynthesis()
 
 - creates a fresh isolated session
-- sends exactly one synthesis turn in `executionMode: "plan"` so synthesis is treated as tool-free consolidation rather than a new research pass
+- sends exactly one synthesis turn (tool-free consolidation rather than a new research pass)
 - listens directly to adapter events for that session
 - auto-approves Claude `ExitPlanMode` requests during synthesis and captures the submitted `plan` payload
 - prefers `message.final`, falls back to accumulated deltas

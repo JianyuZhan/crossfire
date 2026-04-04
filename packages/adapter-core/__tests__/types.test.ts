@@ -24,7 +24,6 @@ import {
 	type NormalizedEvent,
 	type ProviderUsageMetrics,
 	type ProviderUsageSemantics,
-	type RoleExecutionMode,
 	type RunErrorEvent,
 	type RunWarningEvent,
 	type SessionHandle,
@@ -35,7 +34,6 @@ import {
 	type ToolDeniedEvent,
 	type ToolResultEvent,
 	type TurnCompletedEvent,
-	type TurnExecutionMode,
 	type TurnHandle,
 	type TurnInput,
 	type TurnRecord,
@@ -194,30 +192,6 @@ describe("NormalizedEvent types", () => {
 			optionId: "allow-session",
 		};
 		expect(decision.optionId).toBe("allow-session");
-	});
-
-	it("StartSessionInput accepts a role baseline execution mode", () => {
-		const input: StartSessionInput = {
-			profile: "test",
-			workingDirectory: "/tmp",
-			executionMode: "research",
-		};
-		expectTypeOf(input.executionMode).toEqualTypeOf<
-			RoleExecutionMode | undefined
-		>();
-		expect(input.executionMode).toBe("research");
-	});
-
-	it("TurnInput accepts a per-turn execution mode override", () => {
-		const input: TurnInput = {
-			prompt: "hello",
-			turnId: "p-1",
-			executionMode: "plan",
-		};
-		expectTypeOf(input.executionMode).toEqualTypeOf<
-			TurnExecutionMode | undefined
-		>();
-		expect(input.executionMode).toBe("plan");
 	});
 
 	it("ThinkingDeltaEvent distinguishes raw-thinking from reasoning-summary", () => {

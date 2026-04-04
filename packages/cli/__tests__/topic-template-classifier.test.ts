@@ -7,7 +7,6 @@ import type {
 	TurnInput,
 } from "@crossfire/adapter-core";
 import { describe, expect, it, vi } from "vitest";
-import type { ProfileConfig } from "../src/profile/schema.js";
 import {
 	classifyPromptTemplateFamily,
 	parseClassifierOutput,
@@ -28,14 +27,11 @@ const TEST_CAPABILITIES: AdapterCapabilities = {
 	supportsStreamingDelta: true,
 };
 
-const TEST_PROFILE: ProfileConfig = {
+const TEST_PROFILE = {
 	name: "judge_profile",
-	agent: "claude_code",
+	agent: "claude_code" as const,
 	model: "test-model",
-	prompt_family: "auto",
-	inherit_global_config: true,
 	mcp_servers: {},
-	filePath: "/tmp/judge.json",
 };
 
 describe("parseClassifierOutput", () => {
@@ -119,7 +115,6 @@ describe("classifyPromptTemplateFamily", () => {
 			expect.any(Object),
 			expect.objectContaining({
 				turnId: "template-classifier",
-				executionMode: "plan",
 			}),
 		);
 		expect(adapter.close).toHaveBeenCalledTimes(1);

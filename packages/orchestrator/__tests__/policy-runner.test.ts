@@ -512,10 +512,7 @@ describe("runner policy flow (real runDebate path)", () => {
 			await runDebate(
 				{
 					...debateConfig,
-					executionModes: {
-						roleModes: { proposer: "guarded" },
-						turnOverrides: { "p-1": "research" },
-					},
+					turnPresets: { "p-1": "research" },
 				},
 				adapters,
 			);

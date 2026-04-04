@@ -334,16 +334,20 @@ describe("runDebate", () => {
 			challengerTurns,
 		);
 
+		const { compilePolicy } = await import("@crossfire/adapter-core");
+		const proposerPolicy = compilePolicy({
+			preset: "research",
+			role: "proposer",
+		});
+		const challengerPolicy = compilePolicy({
+			preset: "dangerous",
+			role: "challenger",
+		});
+
 		await runDebate(
 			{
 				...config,
 				maxRounds: 1,
-				executionModes: {
-					roleModes: {
-						proposer: "research",
-						challenger: "dangerous",
-					},
-				},
 			},
 			{
 				proposer: {
@@ -352,6 +356,7 @@ describe("runDebate", () => {
 						profile: "test",
 						workingDirectory: "/tmp",
 					}),
+					baselinePolicy: proposerPolicy,
 				},
 				challenger: {
 					adapter: challenger,
@@ -359,12 +364,13 @@ describe("runDebate", () => {
 						profile: "test",
 						workingDirectory: "/tmp",
 					}),
+					baselinePolicy: challengerPolicy,
 				},
 			},
 		);
 
-		expect(proposerTurns[0]?.executionMode).toBe("research");
-		expect(challengerTurns[0]?.executionMode).toBe("dangerous");
+		expect(proposerTurns[0]?.policy?.preset).toBe("research");
+		expect(challengerTurns[0]?.policy?.preset).toBe("dangerous");
 	});
 
 	it("lets per-turn overrides win over role baselines and emits policy.turn.override", async () => {
@@ -394,14 +400,13 @@ describe("runDebate", () => {
 			}),
 		});
 
+		const { compilePolicy } = await import("@crossfire/adapter-core");
+
 		await runDebate(
 			{
 				...config,
 				maxRounds: 1,
-				executionModes: {
-					roleModes: { proposer: "research" },
-					turnOverrides: { "p-1": "plan" },
-				},
+				turnPresets: { "p-1": "plan" },
 			},
 			{
 				proposer: {
@@ -409,6 +414,10 @@ describe("runDebate", () => {
 					session: await proposer.startSession({
 						profile: "test",
 						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: compilePolicy({
+						preset: "research",
+						role: "proposer",
 					}),
 				},
 				challenger: {
@@ -422,7 +431,7 @@ describe("runDebate", () => {
 			{ bus },
 		);
 
-		expect(proposerTurns[0]?.executionMode).toBe("plan");
+		expect(proposerTurns[0]?.policy?.preset).toBe("plan");
 		expect(
 			collected.find((event) => event.kind === "policy.turn.override"),
 		).toMatchObject({

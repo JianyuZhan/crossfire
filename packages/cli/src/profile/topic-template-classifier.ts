@@ -1,4 +1,5 @@
 import type {
+	AdapterId,
 	AgentAdapter,
 	MessageDeltaEvent,
 	MessageFinalEvent,
@@ -11,8 +12,27 @@ import {
 	type PromptTemplateFamily,
 	inferPromptTemplateFamily,
 } from "./prompt-template.js";
-import { resolveAdapterType } from "./resolver.js";
-import type { ProfileConfig } from "./schema.js";
+
+/** Minimal profile shape needed by the template classifier */
+interface ClassifierProfileConfig {
+	name: string;
+	agent: "claude_code" | "codex" | "gemini_cli";
+	model?: string;
+	mcp_servers?: Record<string, unknown>;
+}
+
+function resolveAdapterType(
+	agent: ClassifierProfileConfig["agent"],
+): AdapterId {
+	switch (agent) {
+		case "claude_code":
+			return "claude";
+		case "codex":
+			return "codex";
+		case "gemini_cli":
+			return "gemini";
+	}
+}
 
 export const DEFAULT_TEMPLATE_CLASSIFIER_TIMEOUT_MS = 20_000;
 const TEMPLATE_CLASSIFIER_TURN_ID = "template-classifier";
@@ -37,7 +57,7 @@ export interface PromptTemplateClassification {
 
 export interface ClassifyPromptTemplateFamilyInput {
 	topic: string;
-	profile: ProfileConfig;
+	profile: ClassifierProfileConfig;
 	model?: string;
 	factories: AdapterFactoryMap;
 	timeoutMs?: number;
@@ -78,7 +98,6 @@ export async function classifyPromptTemplateFamily(
 		await adapter.sendTurn(session, {
 			turnId: TEMPLATE_CLASSIFIER_TURN_ID,
 			prompt: buildClassifierPrompt(input.topic),
-			executionMode: "plan",
 			timeout: input.timeoutMs ?? DEFAULT_TEMPLATE_CLASSIFIER_TIMEOUT_MS,
 		});
 		const completed = await waitForTurnCompletion(

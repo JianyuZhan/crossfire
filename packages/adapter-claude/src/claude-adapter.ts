@@ -9,7 +9,6 @@ import type {
 	ResolvedPolicy,
 	SessionHandle,
 	StartSessionInput,
-	TurnExecutionMode,
 	TurnHandle,
 	TurnInput,
 } from "@crossfire/adapter-core";
@@ -39,8 +38,6 @@ export interface ClaudeAdapterOptions {
 
 interface ClaudeSessionConfig {
 	model?: string;
-	allowedTools?: string[];
-	disallowedTools?: string[];
 	baselinePolicy?: ResolvedPolicy;
 }
 
@@ -65,60 +62,6 @@ interface PendingApproval {
 }
 
 let sessionCounter = 0;
-
-const CLAUDE_RESEARCH_ALLOWED_TOOLS = [
-	"Read",
-	"Grep",
-	"Glob",
-	"LS",
-	"WebFetch",
-	"Task",
-];
-const CLAUDE_RESEARCH_MAX_TURNS = 12;
-
-function mapExecutionModeToClaudeQueryOptions(
-	mode: TurnExecutionMode | undefined,
-	toolConfig: {
-		allowedTools?: string[];
-		disallowedTools?: string[];
-	},
-): {
-	permissionMode?: ClaudePermissionMode;
-	allowDangerouslySkipPermissions?: boolean;
-	maxTurns?: number;
-	allowedTools?: string[];
-	disallowedTools?: string[];
-} {
-	switch (mode) {
-		case "research":
-			return {
-				permissionMode: "dontAsk",
-				maxTurns: CLAUDE_RESEARCH_MAX_TURNS,
-				allowedTools: toolConfig.allowedTools ?? CLAUDE_RESEARCH_ALLOWED_TOOLS,
-				disallowedTools: toolConfig.disallowedTools,
-			};
-		case "dangerous":
-			return {
-				permissionMode: "bypassPermissions",
-				allowDangerouslySkipPermissions: true,
-				allowedTools: toolConfig.allowedTools,
-				disallowedTools: toolConfig.disallowedTools,
-			};
-		case "plan":
-			return {
-				permissionMode: "plan",
-				allowedTools: toolConfig.allowedTools,
-				disallowedTools: toolConfig.disallowedTools,
-			};
-		case "guarded":
-		case undefined:
-			return {
-				permissionMode: "default",
-				allowedTools: toolConfig.allowedTools,
-				disallowedTools: toolConfig.disallowedTools,
-			};
-	}
-}
 
 function buildApprovalOptions(): ApprovalOption[] {
 	const options: ApprovalOption[] = [
@@ -219,8 +162,6 @@ export class ClaudeAdapter implements AgentAdapter {
 		const adapterSessionId = `claude-session-${sessionCounter}-${Date.now()}`;
 		this.sessionConfigs.set(adapterSessionId, {
 			model: input.model,
-			allowedTools: input.allowedTools,
-			disallowedTools: input.disallowedTools,
 			baselinePolicy: input.policy,
 		});
 		return {
@@ -295,7 +236,7 @@ export class ClaudeAdapter implements AgentAdapter {
 		const sessionConfig = this.sessionConfigs.get(handle.adapterSessionId);
 		const activePolicy = input.policy ?? sessionConfig?.baselinePolicy;
 
-		let queryOptions: Record<string, unknown>;
+		let queryOptions: Record<string, unknown> = {};
 		if (activePolicy) {
 			const { native, warnings } = translatePolicy(activePolicy);
 			for (const w of warnings) {
@@ -315,11 +256,6 @@ export class ClaudeAdapter implements AgentAdapter {
 				disallowedTools: native.disallowedTools,
 				allowDangerouslySkipPermissions: native.allowDangerouslySkipPermissions,
 			};
-		} else {
-			queryOptions = mapExecutionModeToClaudeQueryOptions(input.executionMode, {
-				allowedTools: sessionConfig?.allowedTools,
-				disallowedTools: sessionConfig?.disallowedTools,
-			});
 		}
 
 		const query = this.queryFn({
@@ -535,14 +471,6 @@ export class ClaudeAdapter implements AgentAdapter {
 						allowDangerouslySkipPermissions:
 							native.allowDangerouslySkipPermissions,
 					};
-				} else if (turnInput.executionMode) {
-					recoveryOptions = mapExecutionModeToClaudeQueryOptions(
-						turnInput.executionMode,
-						{
-							allowedTools: sessionConfig?.allowedTools,
-							disallowedTools: sessionConfig?.disallowedTools,
-						},
-					);
 				}
 
 				const recoveryQuery = this.queryFn({

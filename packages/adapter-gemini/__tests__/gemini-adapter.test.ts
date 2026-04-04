@@ -237,7 +237,8 @@ describe("GeminiAdapter", () => {
 			expect(spawnArgs[0]).toContain("stream-json");
 		});
 
-		it("maps dangerous mode to --approval-mode yolo", async () => {
+		it("maps dangerous policy to --approval-mode yolo", async () => {
+			const { compilePolicy } = await import("@crossfire/adapter-core");
 			const { pm, spawnArgs } = createMockProcessManager([
 				{
 					lines: [initLine("s1"), resultLine()],
@@ -253,7 +254,7 @@ describe("GeminiAdapter", () => {
 			await adapter.sendTurn(handle, {
 				prompt: "ship it",
 				turnId: "t1",
-				executionMode: "dangerous",
+				policy: compilePolicy({ preset: "dangerous", role: "proposer" }),
 			});
 			await waitForTurnCompleted(events, "t1");
 

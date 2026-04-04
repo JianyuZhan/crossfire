@@ -5,10 +5,8 @@ import {
 	type LocalTurnMetrics,
 	type NormalizedEvent,
 	type ResolvedPolicy,
-	type RoleExecutionMode,
 	type SessionHandle,
 	type StartSessionInput,
-	type TurnExecutionMode,
 	type TurnHandle,
 	type TurnInput,
 	measureLocalMetrics,
@@ -38,7 +36,6 @@ interface TurnRuntimeState {
 interface GeminiSessionContext {
 	providerSessionId: string | undefined;
 	model: string | undefined;
-	executionMode: RoleExecutionMode;
 	baselinePolicy?: ResolvedPolicy;
 	sessionStarted: boolean; // global flag: has session.started been emitted?
 	currentProcess: ProcessHandle | null;
@@ -49,21 +46,6 @@ interface GeminiSessionContext {
 }
 
 let sessionCounter = 0;
-
-function mapExecutionModeToGeminiApprovalMode(
-	mode: TurnExecutionMode | RoleExecutionMode | undefined,
-): "default" | "plan" | "yolo" | "auto_edit" {
-	switch (mode) {
-		case "dangerous":
-			return "yolo";
-		case "research":
-		case "plan":
-			return "plan";
-		case "guarded":
-		case undefined:
-			return "default";
-	}
-}
 
 /**
  * Adapter for the Gemini CLI. Spawns a subprocess per turn, reads JSONL from
@@ -95,7 +77,6 @@ export class GeminiAdapter implements AgentAdapter {
 		const ctx: GeminiSessionContext = {
 			providerSessionId: undefined,
 			model: input.model,
-			executionMode: input.executionMode ?? "guarded",
 			baselinePolicy: input.policy,
 			sessionStarted: false,
 			currentProcess: null,
@@ -183,9 +164,9 @@ export class GeminiAdapter implements AgentAdapter {
 		// Determine if this is a resume attempt (A path)
 		const isResumeAttempt = session.providerSessionId !== undefined;
 
-		// Resolve approval mode from policy or legacy path
+		// Resolve approval mode from policy
 		const activePolicy = input.policy ?? session.baselinePolicy;
-		let approvalMode: "default" | "plan" | "yolo" | "auto_edit";
+		let approvalMode: "default" | "plan" | "yolo" | "auto_edit" = "default";
 		if (activePolicy) {
 			const { native, warnings } = translatePolicy(activePolicy);
 			for (const w of warnings) {
@@ -199,10 +180,6 @@ export class GeminiAdapter implements AgentAdapter {
 				});
 			}
 			approvalMode = native.approvalMode;
-		} else {
-			approvalMode = mapExecutionModeToGeminiApprovalMode(
-				input.executionMode ?? session.executionMode,
-			);
 		}
 
 		// Build args via ResumeManager

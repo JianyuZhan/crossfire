@@ -213,12 +213,13 @@ describe("CodexAdapter", () => {
 			expect(h1.adapterSessionId).not.toBe(h2.adapterSessionId);
 		});
 
-		it("maps research baseline to readOnly sandbox and on-request approval", async () => {
+		it("maps research policy to readOnly sandbox and on-request approval", async () => {
+			const { compilePolicy } = await import("@crossfire/adapter-core");
 			const sessionPromise = adapter.startSession({
 				profile: "test-profile",
 				workingDirectory: "/tmp/work",
 				model: "o4-mini",
-				executionMode: "research",
+				policy: compilePolicy({ preset: "research", role: "proposer" }),
 			});
 
 			let msg = await mock.readNextMessage();
@@ -303,13 +304,14 @@ describe("CodexAdapter", () => {
 			expect(turnHandle.status).toBe("running");
 		});
 
-		it("maps per-turn dangerous override to never plus danger-full-access", async () => {
+		it("maps per-turn dangerous policy to never plus danger-full-access", async () => {
+			const { compilePolicy } = await import("@crossfire/adapter-core");
 			const handle = await setupSession();
 
 			const turnPromise = adapter.sendTurn(handle, {
 				prompt: "Ship it",
 				turnId: "t1",
-				executionMode: "dangerous",
+				policy: compilePolicy({ preset: "dangerous", role: "proposer" }),
 			});
 
 			const turnMsg = await mock.readNextMessage();

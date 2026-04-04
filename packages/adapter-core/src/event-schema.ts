@@ -2,13 +2,6 @@ import { z } from "zod";
 
 // Base schemas
 const AdapterIdSchema = z.enum(["claude", "codex", "gemini"]);
-const RoleExecutionModeSchema = z.enum(["research", "guarded", "dangerous"]);
-const TurnExecutionModeSchema = z.enum([
-	"research",
-	"guarded",
-	"dangerous",
-	"plan",
-]);
 
 const BaseEventFields = {
 	kind: z.string(),
@@ -139,7 +132,6 @@ const StartSessionInputSchema = z.object({
 	model: z.string().optional(),
 	mcpServers: z.record(z.string(), z.unknown()).optional(),
 	permissionMode: z.enum(["auto", "approve-all", "deny-all"]).optional(),
-	executionMode: RoleExecutionModeSchema.optional(),
 	providerOptions: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -147,7 +139,6 @@ const TurnInputSchema = z.object({
 	prompt: z.string(),
 	turnId: z.string(),
 	timeout: z.number().optional(),
-	executionMode: TurnExecutionModeSchema.optional(),
 	role: z.enum(["proposer", "challenger", "judge"]).optional(),
 	roundNumber: z.number().optional(),
 });

@@ -147,71 +147,51 @@ describe("ClaudeAdapter", () => {
 			expect(turnHandle.status).toBe("running");
 		});
 
-		it("maps research mode to dontAsk with a read-only allowlist", async () => {
+		it("maps research policy to dontAsk via policy translation", async () => {
+			const { compilePolicy } = await import("@crossfire/adapter-core");
 			const queryFn = vi.fn<QueryFn>(() => ({
 				messages: messagesFrom([]),
 				interrupt: vi.fn(),
 			}));
 			adapter = new ClaudeAdapter({ queryFn });
+			const policy = compilePolicy({ preset: "research", role: "proposer" });
 			const handle = await adapter.startSession({
 				profile: "test",
 				workingDirectory: "/tmp",
+				policy,
 			});
 
 			await adapter.sendTurn(handle, {
 				prompt: "research",
 				turnId: "t1",
-				executionMode: "research",
+				policy,
 			});
 
 			expect(queryFn).toHaveBeenCalledWith(
 				expect.objectContaining({
-					permissionMode: "dontAsk",
-					allowedTools: expect.arrayContaining(["Read", "WebFetch", "Task"]),
-					maxTurns: 12,
+					permissionMode: "default",
 				}),
 			);
 		});
 
-		it("does not apply the research max-turn budget to guarded mode", async () => {
+		it("maps dangerous policy to bypassPermissions", async () => {
+			const { compilePolicy } = await import("@crossfire/adapter-core");
 			const queryFn = vi.fn<QueryFn>(() => ({
 				messages: messagesFrom([]),
 				interrupt: vi.fn(),
 			}));
 			adapter = new ClaudeAdapter({ queryFn });
+			const policy = compilePolicy({ preset: "dangerous", role: "proposer" });
 			const handle = await adapter.startSession({
 				profile: "test",
 				workingDirectory: "/tmp",
-			});
-
-			await adapter.sendTurn(handle, {
-				prompt: "guarded",
-				turnId: "t1",
-				executionMode: "guarded",
-			});
-
-			expect(queryFn).toHaveBeenCalledWith(
-				expect.not.objectContaining({
-					maxTurns: expect.any(Number),
-				}),
-			);
-		});
-
-		it("maps dangerous mode to bypassPermissions", async () => {
-			const queryFn = vi.fn<QueryFn>(() => ({
-				messages: messagesFrom([]),
-				interrupt: vi.fn(),
-			}));
-			adapter = new ClaudeAdapter({ queryFn });
-			const handle = await adapter.startSession({
-				profile: "test",
-				workingDirectory: "/tmp",
+				policy,
 			});
 
 			await adapter.sendTurn(handle, {
 				prompt: "dangerous",
 				turnId: "t1",
-				executionMode: "dangerous",
+				policy,
 			});
 
 			expect(queryFn).toHaveBeenCalledWith(
@@ -222,21 +202,24 @@ describe("ClaudeAdapter", () => {
 			);
 		});
 
-		it("maps plan mode to plan", async () => {
+		it("maps plan policy to plan permission mode", async () => {
+			const { compilePolicy } = await import("@crossfire/adapter-core");
 			const queryFn = vi.fn<QueryFn>(() => ({
 				messages: messagesFrom([]),
 				interrupt: vi.fn(),
 			}));
 			adapter = new ClaudeAdapter({ queryFn });
+			const policy = compilePolicy({ preset: "plan", role: "judge" });
 			const handle = await adapter.startSession({
 				profile: "test",
 				workingDirectory: "/tmp",
+				policy,
 			});
 
 			await adapter.sendTurn(handle, {
 				prompt: "plan",
 				turnId: "t1",
-				executionMode: "plan",
+				policy,
 			});
 
 			expect(queryFn).toHaveBeenCalledWith(

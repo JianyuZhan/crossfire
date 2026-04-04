@@ -82,9 +82,9 @@ interface ApprovalDecision {
 Behavioral notes:
 
 - `startSession()` allocates an adapter session and returns a `SessionHandle`. `providerSessionId` may still be `undefined` at this point for Claude and Gemini.
-- `StartSessionInput.executionMode` carries the role baseline known when the adapter session is created.
+- `StartSessionInput.policy` carries the compiled `ResolvedPolicy` baseline when the adapter session is created.
 - `sendTurn()` means “adapter accepted and began processing the turn”, not “turn finished”.
-- `TurnInput.executionMode` carries the effective mode resolved by the orchestrator for that specific turn.
+- `TurnInput.policy` carries the compiled `ResolvedPolicy` (baseline or turn override) for that specific turn.
 - `session.started` should appear at most once per adapter session.
 - `turn.completed` is the only authoritative end-of-turn signal.
 - `turn.completed` must be the last event for its `turnId`.
@@ -205,19 +205,19 @@ Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslati
 
 ### Policy Integration Points
 
-`StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` instead of reading the deprecated `executionMode` field. `AdapterMap` entries carry optional `baselinePolicy` and `legacyToolPolicyInput` so the orchestrator runner can thread compiled policy through to adapters.
+`StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` to derive provider-native parameters. `AdapterMap` entries carry `baselinePolicy` and optional `legacyToolPolicyInput` so the orchestrator runner can thread compiled policy through to adapters.
 
-The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sendTurn()`. When a policy is present, it calls `translatePolicy()` and emits `run.warning` events for any translation warnings. The legacy `mapExecutionModeToClaudeQueryOptions()` path is preserved as fallback when no policy is set.
+The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sendTurn()`. When a policy is present, it calls `translatePolicy()` and emits `run.warning` events for any translation warnings. When no policy is set, it falls back to empty query options.
 
-The Codex adapter applies the same pattern in both `startSession()` (for `thread/start` policies) and `sendTurn()` (for per-turn policies), including the transcript recovery path. Legacy `mapExecutionModeToCodexPolicies()` is preserved as fallback.
+The Codex adapter applies the same pattern in both `startSession()` (for `thread/start` policies) and `sendTurn()` (for per-turn policies), including the transcript recovery path. When no policy is set, it defaults to `{ approvalPolicy: "on-failure" }`.
 
-The Gemini adapter resolves the approval mode from `input.policy ?? session.baselinePolicy` in `attemptTurn()`, reusing the resolved mode for both the primary and fallback paths. Legacy `mapExecutionModeToGeminiApprovalMode()` is preserved as fallback.
+The Gemini adapter resolves the approval mode from `input.policy ?? session.baselinePolicy` in `attemptTurn()`, reusing the resolved mode for both the primary and fallback paths. When no policy is set, it defaults to `"default"` approval mode.
 
 ### CLI Compilation Flow
 
-`create-adapters.ts` compiles policy at startup: CLI `--mode` flag → `PolicyPreset` → `compilePolicy({ preset, role, legacyToolPolicy })` → `ResolvedPolicy` passed via `startSession({ policy })`. Judge always gets the `plan` preset. Profile `allowed_tools`/`disallowed_tools` flow through as `legacyToolPolicy`.
+`create-adapters.ts` compiles policy at startup using `compilePolicy({ preset, role, legacyToolPolicy })` and stores the result as `baselinePolicy` on each adapter entry. The baseline policy is passed via `startSession({ policy })`. Judge always gets the `plan` preset. Config-file `allowed_tools`/`disallowed_tools` flow through as `legacyToolPolicy`.
 
-The orchestrator runner recompiles policy per turn using the resolved effective mode as a preset, so turn-level overrides produce different policies without mutating the baseline. The judge turn absorbs the legacy `executionMode: "plan"` special case: when a policy is present, `executionMode` is omitted; when no policy exists, the legacy fallback is preserved. `resolveExecutionModeAsPolicy()` in `orchestrator-core` provides a compat wrapper for callers migrating incrementally.
+The orchestrator runner recompiles policy per turn when a `turnPresets` override is active, using the override preset with the same role and legacy tool policy. When no override is active, the runner uses the adapter entry's baseline policy directly. The baseline is never mutated.
 
 ## Session, Turn, and Recovery Types
 
@@ -254,7 +254,7 @@ interface TurnInput {
   prompt: string;
   turnId: string;
   timeout?: number;
-  executionMode?: "research" | "guarded" | "dangerous" | "plan";
+  policy?: ResolvedPolicy;
   role?: "proposer" | "challenger" | "judge";
   roundNumber?: number;
 }
@@ -269,7 +269,7 @@ interface StartSessionInput {
   model?: string;
   mcpServers?: Record<string, unknown>;
   permissionMode?: "auto" | "approve-all" | "deny-all";
-  executionMode?: "research" | "guarded" | "dangerous";
+  policy?: ResolvedPolicy;
   providerOptions?: Record<string, unknown>;
 }
 ```

@@ -1,23 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { resolveRoles } from "../src/profile/resolver.js";
-import type { ProfileConfig } from "../src/profile/schema.js";
-
-/**
- * Helper to build a minimal ProfileConfig for testing.
- */
-function makeProfile(
-	agent: ProfileConfig["agent"],
-	model?: string,
-): ProfileConfig {
-	return {
-		name: `test-${agent}`,
-		agent,
-		model,
-		inherit_global_config: true,
-		mcp_servers: {},
-		filePath: `/test/${agent}.json`,
-	};
-}
 
 /**
  * Mirrors the numeric validation logic now in start.ts.
@@ -178,34 +159,7 @@ describe("maxRounds vs judgeEveryNRounds cross-validation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Judge option interactions
-// ---------------------------------------------------------------------------
-describe("judge option interactions", () => {
-	it("resolveRoles always returns judge when judge input is provided", () => {
-		const roles = resolveRoles({
-			proposer: { profile: makeProfile("claude_code"), cliModel: undefined },
-			challenger: { profile: makeProfile("codex"), cliModel: undefined },
-			judge: {
-				profile: makeProfile("gemini_cli", "gemini-2.5-pro"),
-				cliModel: undefined,
-			},
-		});
-		expect(roles.judge).toBeDefined();
-		expect(roles.judge?.adapterType).toBe("gemini");
-		expect(roles.judge?.model).toBe("gemini-2.5-pro");
-	});
-
-	it("judge profile is inferred from proposer adapter type by default", () => {
-		// When --judge is not specified, start.ts infers `${adapterType}/judge`.
-		// This test documents the convention.
-		const adapterType = "claude";
-		const inferredJudge = `${adapterType}/judge`;
-		expect(inferredJudge).toBe("claude/judge");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// 4. Headless mode
+// 3. Headless mode
 // ---------------------------------------------------------------------------
 describe("headless mode", () => {
 	it("headless flag defaults to false in Commander definition", () => {
@@ -224,7 +178,7 @@ describe("headless mode", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Topic mutual exclusivity
+// 4. Topic mutual exclusivity
 // ---------------------------------------------------------------------------
 describe("topic mutual exclusivity", () => {
 	function isTopicValid(options: {

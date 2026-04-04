@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { ProfileConfig } from "./schema.js";
+
+/** Minimal profile shape needed by prompt template selection */
+interface PromptTemplateProfileConfig {
+	prompt_family?: "auto" | "general" | "code";
+}
 
 export type PromptTemplateFamily = "general" | "code";
 export type PromptTemplateSelection = PromptTemplateFamily | "auto";
@@ -55,7 +59,7 @@ export function resolvePromptTemplateFamily(
 }
 
 export function selectPromptTemplateSelection(input: {
-	profile: ProfileConfig;
+	profile: PromptTemplateProfileConfig;
 	explicitSelection?: PromptTemplateSelection;
 	inheritedSelection?: PromptTemplateSelection;
 }): PromptTemplateSelection {
