@@ -186,6 +186,8 @@ The CLI is a thin assembly layer. It is responsible for:
 
 ## Profile System
 
+> **Note:** Phase C is introducing a new unified config system (`@crossfire/cli/config`) that will eventually replace the profile-based approach. The new system uses `crossfire.json` for declarative configuration with policy presets, provider bindings, and role-level settings. During the transition, both systems coexist.
+
 Crossfire separates provider/runtime config from reusable role prompting.
 
 Key fields:
