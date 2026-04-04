@@ -199,7 +199,7 @@ The `adapter-core` package exports a policy compilation module (`policy/`) that 
 
 Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslationResult<NativeOptions>` pure function that maps the resolved policy to provider-native parameters plus structured warnings:
 
-- **Claude** (`adapter-claude/src/policy-translation.ts`): maps approval to `ClaudePermissionMode`, capabilities to tool deny lists (`Bash`, `Edit`, `Write`, `WebFetch`, `Task`), with `isPlanShape()` for exact `plan` mode matching
+- **Claude** (`adapter-claude/src/policy-translation.ts`): maps approval to `ClaudePermissionMode`, capabilities to tool deny lists (`Bash`, `Edit`, `Write`, `WebFetch`, `Task`), with `isPlanShape()` for exact `plan` mode matching. Shared rule helpers are extracted in `policy-observation.ts` for use by both translation and inspection layers.
 - **Codex** (`adapter-codex/src/policy-translation.ts`): maps approval to `on-request | on-failure | never`, capabilities to sandbox level (`readOnly | workspace-write | danger-full-access`) via per-dimension max, network off → `networkDisabled`
 - **Gemini** (`adapter-gemini/src/policy-translation.ts`): maps approval to `default | auto_edit | plan | yolo`, with `isPlanShape()` for plan mode; filesystem/network off → `not_implemented` warnings
 
