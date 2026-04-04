@@ -27,6 +27,7 @@
 | `packages/cli/src/commands/inspect-policy.ts` | `crossfire inspect-policy` command |
 | `packages/cli/src/commands/inspect-tools.ts` | `crossfire inspect-tools` command |
 | `packages/cli/src/commands/inspection-context.ts` | Shared `buildInspectionContext()` pipeline |
+| `packages/cli/src/commands/inspection-renderers.ts` | `renderPolicyText()` and `renderToolsText()` — extracted for direct testability |
 | `packages/adapter-core/src/policy/observation-types.ts` | `ProviderObservationResult`, `PolicyTranslationSummary`, `CapabilityEffectRecord`, `ToolInspectionRecord`, `PolicyClampNote`, `CompilePolicyDiagnostics` types |
 | `packages/adapter-claude/src/policy-observation.ts` | Claude `inspectPolicy()` + shared rule helpers |
 | `packages/adapter-codex/src/policy-observation.ts` | Codex `inspectPolicy()` + shared rule helpers |
@@ -2189,23 +2190,44 @@ describe("buildInspectionContext", () => {
     expect(proposer.observation.completeness).toBe("partial");
   });
 
-  it("per-role failure isolation: one adapter error does not block others", () => {
-    const badConfig: CrossfireConfig = {
+  it("per-role failure isolation: one adapter observation error does not block others", async () => {
+    // Use a valid config but inject a failing adapter inspector via the
+    // adapterInspectors registry (vi.spyOn or module mock). The test
+    // verifies that buildInspectionContext catches the per-role error
+    // and still resolves unaffected roles.
+    const { vi } = await import("vitest");
+    const observation = await import("@crossfire/adapter-codex/policy-observation");
+    const spy = vi.spyOn(observation, "inspectPolicy").mockImplementation(() => {
+      throw new Error("codex observation not available");
+    });
+
+    const mixedConfig: CrossfireConfig = {
       providerBindings: [
         { name: "claude-test", adapter: "claude", model: "claude-sonnet" },
-        { name: "bad-adapter", adapter: "codex" as any, model: "bad" },
+        { name: "codex-test", adapter: "codex", model: "gpt-5-codex" },
       ],
       roles: {
         proposer: { binding: "claude-test", preset: "guarded" },
-        challenger: { binding: "bad-adapter" },
+        challenger: { binding: "codex-test", preset: "guarded" },
         judge: { binding: "claude-test", preset: "plan" },
       },
     };
-    // Even if challenger observation throws, proposer and judge should still resolve
-    const context = buildInspectionContext(badConfig, {});
-    const proposer = context.find((c) => c.role === "proposer");
-    expect(proposer).toBeDefined();
-    expect(proposer!.error).toBeUndefined();
+    const context = buildInspectionContext(mixedConfig, {});
+
+    // Challenger should have an error
+    const challenger = context.find((c) => c.role === "challenger")!;
+    expect(challenger.error).toBeDefined();
+    expect(challenger.error!.message).toContain("codex observation not available");
+
+    // Proposer and judge should still succeed
+    const proposer = context.find((c) => c.role === "proposer")!;
+    expect(proposer.error).toBeUndefined();
+    expect(proposer.observation).toBeDefined();
+
+    const judge = context.find((c) => c.role === "judge")!;
+    expect(judge.error).toBeUndefined();
+
+    spy.mockRestore();
   });
 });
 ```
@@ -2215,7 +2237,7 @@ describe("buildInspectionContext", () => {
 ```ts
 // packages/cli/__tests__/commands/inspect-tools.test.ts
 import { describe, expect, it } from "vitest";
-import { buildInspectionContext } from "../../src/commands/inspection-context.js";
+import { buildInspectionContext, type RoleInspectionContext } from "../../src/commands/inspection-context.js";
 import type { CrossfireConfig } from "../../src/config/schema.js";
 
 const testConfig: CrossfireConfig = {
@@ -2268,22 +2290,61 @@ describe("inspect-tools output contract", () => {
 });
 
 describe("text output contract", () => {
-  it("text renderer does not throw for any valid context", () => {
+  // Tests call the actual renderer functions, which are extracted into
+  // inspection-renderers.ts for direct testability. The renderers return
+  // string output rather than printing to console.
+
+  it("renderPolicyText: summary line appears before detail sections", () => {
     const context = buildInspectionContext(testConfig, {});
-    // Text rendering must not throw — validates no undefined access in renderer
-    expect(() => {
-      for (const ctx of context) {
-        // Simulate text output access patterns
-        const _ = `${ctx.role} (${ctx.adapter}) — ${ctx.preset.value} (${ctx.preset.source})`;
-        for (const c of ctx.clamps) {
-          const __ = `${c.field}: ${c.before} → ${c.after} (${c.reason})`;
-        }
-        for (const w of ctx.observation.warnings) {
-          const __ = `[${w.reason}] ${w.field}: ${w.message}`;
-        }
-        const __ = JSON.stringify(ctx.observation.translation.nativeSummary);
-      }
-    }).not.toThrow();
+    const { renderPolicyText } = require("../../src/commands/inspection-renderers.js");
+    const output: string = renderPolicyText(context);
+    const lines = output.split("\n");
+    // Each role block must start with the summary line (role + adapter)
+    const proposerHeader = lines.findIndex((l: string) => l.includes("proposer") && l.includes("claude"));
+    const clampHeader = lines.findIndex((l: string) => l.includes("Clamp"));
+    const warningHeader = lines.findIndex((l: string) => l.includes("Warning"));
+    // Summary always before details (if details exist)
+    if (clampHeader !== -1) expect(proposerHeader).toBeLessThan(clampHeader);
+    if (warningHeader !== -1) expect(proposerHeader).toBeLessThan(warningHeader);
+  });
+
+  it("renderPolicyText: preset source is displayed", () => {
+    const context = buildInspectionContext(testConfig, {});
+    const { renderPolicyText } = require("../../src/commands/inspection-renderers.js");
+    const output: string = renderPolicyText(context);
+    expect(output).toContain("config");  // preset source
+    expect(output).toContain("guarded"); // preset value for proposer
+  });
+
+  it("renderToolsText: completeness is displayed per role", () => {
+    const context = buildInspectionContext(testConfig, {});
+    const { renderToolsText } = require("../../src/commands/inspection-renderers.js");
+    const output: string = renderToolsText(context);
+    expect(output).toContain("partial"); // Claude completeness
+  });
+
+  it("renderToolsText: tool status indicators present", () => {
+    const context = buildInspectionContext(testConfig, {});
+    const { renderToolsText } = require("../../src/commands/inspection-renderers.js");
+    const output: string = renderToolsText(context);
+    // research preset (challenger) blocks Bash — the blocked tool should appear
+    expect(output).toContain("Bash");
+    expect(output).toContain("blocked");
+  });
+
+  it("renderPolicyText: error roles render error message, not crash", () => {
+    const errorContext: RoleInspectionContext[] = [
+      {
+        role: "proposer",
+        adapter: "claude",
+        preset: { value: "guarded", source: "config" },
+        error: { message: "adapter init failed" },
+      },
+    ];
+    const { renderPolicyText } = require("../../src/commands/inspection-renderers.js");
+    const output: string = renderPolicyText(errorContext);
+    expect(output).toContain("ERROR");
+    expect(output).toContain("adapter init failed");
   });
 });
 ```
@@ -2392,40 +2453,85 @@ export function buildInspectionContext(
 
 - [ ] **Step 4: Implement inspect-policy command**
 
+First, extract renderers into a testable module:
+
+```ts
+// packages/cli/src/commands/inspection-renderers.ts
+import type { RoleInspectionContext } from "./inspection-context.js";
+
+export function renderPolicyText(contexts: RoleInspectionContext[]): string {
+  const lines: string[] = [];
+  for (const ctx of contexts) {
+    if (ctx.error) {
+      lines.push(`\n[${ctx.role}] ERROR: ${ctx.error.message}`);
+      continue;
+    }
+    lines.push(`\n=== ${ctx.role} (${ctx.adapter}) ===`);
+    lines.push(`  Preset: ${ctx.preset.value} (${ctx.preset.source})`);
+    lines.push(`  Model: ${ctx.model ?? "(default)"}`);
+    if (ctx.clamps.length > 0) {
+      lines.push("  Clamps:");
+      for (const c of ctx.clamps) {
+        lines.push(`    ${c.field}: ${c.before} → ${c.after} (${c.reason})`);
+      }
+    }
+    if (ctx.observation.warnings.length > 0) {
+      lines.push("  Warnings:");
+      for (const w of ctx.observation.warnings) {
+        lines.push(`    [${w.reason}] ${w.field}: ${w.message}`);
+      }
+    }
+    const t = ctx.observation.translation;
+    lines.push(`  Translation: ${JSON.stringify(t.nativeSummary)}`);
+  }
+  return lines.join("\n");
+}
+
+export function renderToolsText(contexts: RoleInspectionContext[]): string {
+  const lines: string[] = [];
+  for (const ctx of contexts) {
+    if (ctx.error) {
+      lines.push(`\n[${ctx.role}] ERROR: ${ctx.error.message}`);
+      continue;
+    }
+    lines.push(`\n=== ${ctx.role} (${ctx.adapter}) ===`);
+    lines.push(`  Preset: ${ctx.preset.value} (${ctx.preset.source})`);
+    lines.push(`  Completeness: ${ctx.observation.completeness}`);
+    if (ctx.observation.capabilityEffects.length > 0) {
+      lines.push("  Capability Effects:");
+      for (const e of ctx.observation.capabilityEffects) {
+        lines.push(`    [${e.status}] ${e.field}: ${e.details ?? ""}`);
+      }
+    }
+    if (ctx.observation.toolView.length > 0) {
+      lines.push("  Tools:");
+      for (const t of ctx.observation.toolView) {
+        const suffix = t.capabilityField ? ` (${t.capabilityField})` : "";
+        lines.push(
+          `    ${t.status === "allowed" ? "✓" : "✗"} ${t.name} [${t.source}] ${t.status} — ${t.reason}${suffix}`,
+        );
+      }
+    }
+    if (ctx.observation.warnings.length > 0) {
+      lines.push("  Warnings:");
+      for (const w of ctx.observation.warnings) {
+        lines.push(`    [${w.reason}] ${w.field}: ${w.message}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+```
+
+Then the inspect-policy command imports the renderer:
+
 ```ts
 // packages/cli/src/commands/inspect-policy.ts
 import { Command } from "commander";
 import { loadConfig } from "../config/loader.js";
-import { buildInspectionContext, type RoleInspectionContext } from "./inspection-context.js";
+import { buildInspectionContext } from "./inspection-context.js";
+import { renderPolicyText } from "./inspection-renderers.js";
 import { collectOptionValues } from "./preset-options.js";
-
-function renderPolicyText(contexts: RoleInspectionContext[]): void {
-  for (const ctx of contexts) {
-    if (ctx.error) {
-      console.log(`\n[${ctx.role}] ERROR: ${ctx.error.message}`);
-      continue;
-    }
-    console.log(`\n=== ${ctx.role} (${ctx.adapter}) ===`);
-    console.log(`  Preset: ${ctx.preset.value} (${ctx.preset.source})`);
-    console.log(`  Model: ${ctx.model ?? "(default)"}`);
-    if (ctx.clamps.length > 0) {
-      console.log("  Clamps:");
-      for (const c of ctx.clamps) {
-        console.log(`    ${c.field}: ${c.before} → ${c.after} (${c.reason})`);
-      }
-    }
-    if (ctx.observation.warnings.length > 0) {
-      console.log("  Warnings:");
-      for (const w of ctx.observation.warnings) {
-        console.log(`    [${w.reason}] ${w.field}: ${w.message}`);
-      }
-    }
-    const t = ctx.observation.translation;
-    console.log(
-      `  Translation: ${JSON.stringify(t.nativeSummary)}`,
-    );
-  }
-}
 
 export const inspectPolicyCommand = new Command("inspect-policy")
   .description("Inspect effective policy for each role before execution")
@@ -2466,52 +2572,22 @@ export const inspectPolicyCommand = new Command("inspect-policy")
     if (options.format === "json") {
       console.log(JSON.stringify({ roles: filtered }, null, 2));
     } else {
-      renderPolicyText(filtered);
+      console.log(renderPolicyText(filtered));
     }
   });
 ```
 
 - [ ] **Step 5: Implement inspect-tools command**
 
+The `renderToolsText` function was already extracted to `inspection-renderers.ts` in Step 4.
+
 ```ts
 // packages/cli/src/commands/inspect-tools.ts
 import { Command } from "commander";
 import { loadConfig } from "../config/loader.js";
-import { buildInspectionContext, type RoleInspectionContext } from "./inspection-context.js";
+import { buildInspectionContext } from "./inspection-context.js";
+import { renderToolsText } from "./inspection-renderers.js";
 import { collectOptionValues } from "./preset-options.js";
-
-function renderToolsText(contexts: RoleInspectionContext[]): void {
-  for (const ctx of contexts) {
-    if (ctx.error) {
-      console.log(`\n[${ctx.role}] ERROR: ${ctx.error.message}`);
-      continue;
-    }
-    console.log(`\n=== ${ctx.role} (${ctx.adapter}) ===`);
-    console.log(`  Preset: ${ctx.preset.value} (${ctx.preset.source})`);
-    console.log(`  Completeness: ${ctx.observation.completeness}`);
-    if (ctx.observation.capabilityEffects.length > 0) {
-      console.log("  Capability Effects:");
-      for (const e of ctx.observation.capabilityEffects) {
-        console.log(`    [${e.status}] ${e.field}: ${e.details ?? ""}`);
-      }
-    }
-    if (ctx.observation.toolView.length > 0) {
-      console.log("  Tools:");
-      for (const t of ctx.observation.toolView) {
-        const suffix = t.capabilityField ? ` (${t.capabilityField})` : "";
-        console.log(
-          `    ${t.status === "allowed" ? "✓" : "✗"} ${t.name} [${t.source}] ${t.status} — ${t.reason}${suffix}`,
-        );
-      }
-    }
-    if (ctx.observation.warnings.length > 0) {
-      console.log("  Warnings:");
-      for (const w of ctx.observation.warnings) {
-        console.log(`    [${w.reason}] ${w.field}: ${w.message}`);
-      }
-    }
-  }
-}
 
 export const inspectToolsCommand = new Command("inspect-tools")
   .description("Inspect effective tool view for each role before execution")
@@ -2577,7 +2653,7 @@ export const inspectToolsCommand = new Command("inspect-tools")
       };
       console.log(JSON.stringify(report, null, 2));
     } else {
-      renderToolsText(filtered);
+      console.log(renderToolsText(filtered));
     }
   });
 ```
@@ -2620,6 +2696,7 @@ Expected: All PASS
 
 ```bash
 git add packages/cli/src/commands/inspection-context.ts
+git add packages/cli/src/commands/inspection-renderers.ts
 git add packages/cli/src/commands/inspect-policy.ts
 git add packages/cli/src/commands/inspect-tools.ts
 git add packages/cli/src/index.ts
@@ -2763,13 +2840,13 @@ export interface RuntimePolicyState {
 }
 ```
 
-Update the `OrchestratorEvent` union to include new policy events and rename `TurnModeChangedEvent` to `TurnPresetChangedEvent`:
+Update the `OrchestratorEvent` union: remove `TurnModeChangedEvent` entirely (not renamed — replaced by the `policy.*` event family), add the three new policy events:
 
 ```ts
 export type OrchestratorEvent =
   | DebateStartedEvent
   | RoundStartedEvent
-  | TurnPresetChangedEvent  // renamed from TurnModeChangedEvent
+  // TurnModeChangedEvent removed — replaced by policy.turn.override / policy.turn.override.clear
   | RoundCompletedEvent
   | JudgeStartedEvent
   | JudgeCompletedEvent
@@ -2791,9 +2868,15 @@ export type OrchestratorEvent =
   | PolicyTurnOverrideClearEvent;
 ```
 
+Also delete the `TurnModeChangedEvent` interface definition and any related type exports. There is no `TurnPresetChangedEvent` — the `policy.*` events fully replace the old `turn.mode.changed` path.
+
 - [ ] **Step 2: Update runner.ts to emit policy events**
 
-In `packages/orchestrator/src/runner.ts`, after each `adapter.startSession()`, emit a `policy.baseline` event. Replace the `turn.mode.changed` event push (lines 518-527) with a `policy.turn.override` event carrying the full ResolvedPolicy. After `waitForTurnCompleted`, emit `policy.turn.override.clear` if a turn override was active.
+In `packages/orchestrator/src/runner.ts`:
+- After each `adapter.startSession()`, emit a `policy.baseline` event with the full `ResolvedPolicy`, clamp notes, preset source, translation summary, and warnings.
+- Delete the `turn.mode.changed` event push (lines 518-527). Replace it with a `policy.turn.override` event carrying the full `ResolvedPolicy` for that turn.
+- After `waitForTurnCompleted`, emit `policy.turn.override.clear` if a turn override was active.
+- Remove any imports of `TurnModeChangedEvent`.
 
 - [ ] **Step 3: Write event-derived state reconstruction tests**
 
