@@ -258,6 +258,48 @@ Current implementation delegates to TUI replay logic, but the command itself is 
 
 Reads `index.json` and prints summary information. Current special-casing for truly in-progress debates is limited.
 
+### `crossfire inspect-policy`
+
+Inspects the effective policy for each role before execution. This command compiles policy from presets, applies role ceilings, and shows provider-translated native parameters.
+
+Key behavior:
+
+- requires `--config <path>` to the unified config file
+- supports `--format text|json` for output format (default: text)
+- supports `--role <proposer|challenger|judge>` to filter to a single role
+- supports CLI preset overrides: `--preset`, `--proposer-preset`, `--challenger-preset`, `--judge-preset`
+- rejects `--turn-preset` (inspection shows baseline role-level policy, not per-turn views)
+
+Output includes:
+
+- preset value and source (config, CLI override, or default)
+- model name or "(default)"
+- policy clamp notes (field, before/after values, reason)
+- provider observation warnings
+- native translation summary
+
+### `crossfire inspect-tools`
+
+Inspects the effective tool view for each role before execution. This command shows which tools are allowed/blocked, capability effects, and completeness level.
+
+Key behavior:
+
+- requires `--config <path>` to the unified config file
+- supports `--format text|json` for output format (default: text)
+- supports `--role <proposer|challenger|judge>` to filter to a single role
+- supports CLI preset overrides: `--preset`, `--proposer-preset`, `--challenger-preset`, `--judge-preset`
+- rejects `--turn-preset` (inspection shows baseline role-level policy, not per-turn views)
+
+Output includes:
+
+- preset value and source
+- completeness level (full, partial, minimal)
+- capability effects (allowed, blocked, limited) for filesystem, shell, network dimensions
+- per-tool inspection records: name, source (baseline/allowlist/blocklist), status (allowed/blocked), reason, linked capability field
+- provider observation warnings
+
+Text format uses `✓` for allowed tools and `✗` for blocked tools. JSON format provides structured output suitable for programmatic analysis.
+
 ## Wiring Modules
 
 ### createAdapters()

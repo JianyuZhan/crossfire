@@ -7,3 +7,4 @@ export {
 } from "./resume-manager.js";
 export { buildStatelessPrompt, type HistoryEntry } from "./prompt-builder.js";
 export { mapGeminiEvent, type GeminiMapContext } from "./event-mapper.js";
+export { inspectPolicy as inspectGeminiPolicy } from "./policy-observation.js";
