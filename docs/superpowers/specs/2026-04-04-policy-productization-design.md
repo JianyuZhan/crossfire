@@ -166,6 +166,7 @@ Show the current effective runtime tool surface for each active role.
 - When an active override exists, `/status tools` reflects the override-derived tool view; otherwise it reflects baseline
 - Explicitly labeled as best-effort observation, not an execution guarantee
 - Shares rendering logic with `inspect-tools` (same view model), differing only in data source (runtime state vs pre-execution inspection)
+- Data comes from the observation payload stored in `RuntimePolicyState`, not by re-running adapter observation at query time (see Observation in runtime events below)
 
 ### View model requirements
 
@@ -174,6 +175,45 @@ Status renderers must be factored independently from TUI command handler and TUI
 - `/status` TUI live commands (Phase D)
 - Future replay from event logs
 - Future side panels or web UI
+
+### Observation in runtime events
+
+`/status tools` must render from event-derived state, not by re-running adapter observation logic inside the TUI process. This requires that the observation payload be captured at emission time and stored in `RuntimePolicyState`.
+
+#### Event enrichment
+
+Phase D enriches `PolicyBaselineEvent` and `PolicyTurnOverrideEvent` to include the observation result:
+
+```ts
+interface PolicyBaselineEvent {
+  // ... existing fields (policy, clamps, preset, translationSummary, warnings) ...
+  observation: ProviderObservationResult; // NEW: tool view, capability effects, completeness
+}
+
+interface PolicyTurnOverrideEvent {
+  // ... existing fields (policy, preset, translationSummary, warnings) ...
+  observation: ProviderObservationResult; // NEW
+}
+```
+
+The `observation` field is computed by the orchestrator at event emission time using the same adapter observation function that `inspect-tools` uses. This ensures `/status tools` reflects the same observation that would have been produced by pre-execution inspection for that policy.
+
+#### RuntimePolicyState enrichment
+
+```ts
+interface RuntimePolicyState {
+  baseline: {
+    // ... existing fields ...
+    observation: ProviderObservationResult; // NEW
+  };
+  currentTurnOverride?: {
+    // ... existing fields ...
+    observation: ProviderObservationResult; // NEW
+  };
+}
+```
+
+This keeps `/status tools` purely event-derived: the TUI store projects events into `RuntimePolicyState`, and the status view model reads from that projection without requiring access to adapter internals.
 
 ---
 
@@ -213,13 +253,16 @@ Phase D only exposes `evidence.bar`. The `EvidencePolicy` type leaves room for f
 
 ### Precedence
 
-Evidence bar follows the same resolution precedence as other policy inputs:
+Evidence resolution is separate from preset resolution. Presets do not carry evidence defaults; they control capabilities and interaction only. Evidence defaults come exclusively from role contracts.
 
-1. CLI direct override
-2. Role inline fields
-3. Role template
-4. Role explicit preset (which carries its own evidence default)
-5. Role contract default
+Evidence bar precedence (highest to lowest):
+
+1. CLI direct override (`--evidence-bar`)
+2. Role inline config field (`roles.proposer.evidence.bar`)
+3. Role template override (`templates[].overrides.evidence.bar`)
+4. Role contract default (proposer=medium, challenger=high, judge=high)
+
+Presets are not in this chain. A role's `preset` field determines capabilities and interaction defaults; the role contract determines the evidence default. These are independent resolution paths that merge at compilation time.
 
 ### Provenance
 
@@ -303,11 +346,21 @@ type RoleConfig = {
 
 ### Resolution precedence
 
+The overall policy resolution merges two independent chains:
+
+**Preset/capabilities/interaction chain** (determines capabilities and interaction):
 ```
-CLI direct override > role inline fields > role template > role preset > role default
+CLI preset override > role template basePreset > role preset field > role default preset
 ```
 
-Role `preset` and role `template` are composable only through precedence, not merged as dual bases. When a template is present, its `basePreset` becomes the template's base policy input. The role's `preset` field acts as fallback only when no template is present.
+**Evidence chain** (determines evidence bar):
+```
+CLI evidence override > role inline evidence > role template evidence override > role contract default
+```
+
+These chains are independent. A template that only overrides `evidence.bar` still needs a base preset for capabilities and interaction. That base comes from the template's `basePreset` field; if absent, from the role's `preset` field; if absent, from the role default preset.
+
+Concretely: when a template is present, its `basePreset` (if set) takes priority over the role's `preset` field for capabilities/interaction. If the template omits `basePreset`, the role's `preset` field (or the role default) provides the base. Templates and role preset are never merged as dual bases.
 
 ### Provenance
 
@@ -435,7 +488,7 @@ turn end      → policy.turn.override.clear                    → currentTurnO
 
 Baseline events are emitted once per active role at session start. They are not re-emitted per round.
 
-State is rebuilt by a projection function from the event stream. TUI store and `/status` commands consume the same projection.
+State is rebuilt by a projection function from the event stream. TUI store and `/status` commands consume the same projection. Both `/status policy` (which reads policy, clamps, warnings) and `/status tools` (which reads the observation payload) are served from this single projected state.
 
 ---
 
@@ -450,7 +503,8 @@ Phase D extends the Phase B and C harness. It does not introduce a separate test
 | `/status policy` rendering | Given RuntimePolicyState → verify text output includes baseline, override, warnings, clamps, evidence |
 | `/status tools` rendering | Given RuntimePolicyState + observation → verify tool view, completeness, override annotation |
 | TUI store policy tracking | Send baseline/override/clear event sequences → verify RuntimePolicyState correctly updated per role |
-| Event reconstruction | Given emitted events only, runtime policy state can be reconstructed without adapter-local state |
+| Event reconstruction | Given emitted events only, runtime policy state (including observation) can be reconstructed without adapter-local state |
+| Observation in events | Baseline and override events carry observation payload; `/status tools` renders from stored observation, not re-computed |
 | View model isolation | View model does not directly import TUI store internals |
 | Live command integration | `/status policy` and `/status tools` registered, parsed, and dispatched correctly |
 
