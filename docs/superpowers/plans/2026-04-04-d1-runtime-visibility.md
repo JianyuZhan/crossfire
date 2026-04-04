@@ -943,13 +943,14 @@ describe("renderStatusPolicy", () => {
   });
 
   it("renders evidence section when present on resolved policy (forward-compat for D2)", () => {
-    // D2 will add ResolvedPolicy.evidence as a top-level section.
-    // This test verifies the renderer is forward-compatible: when evidence
-    // fields appear, they are displayed. Until D2 lands, ResolvedPolicy has
-    // no evidence section, so this test uses a cast to simulate D2 shape.
+    // D2 will add ResolvedPolicy.evidence with a minimal field surface.
+    // The approved spec defines only evidence.bar (low | medium | high).
+    // This test verifies the renderer is forward-compatible: when the
+    // evidence section appears, it renders bar. Until D2 lands,
+    // ResolvedPolicy has no evidence section, so this test uses a cast.
     const policyWithEvidence = {
       ...basePolicyView.baseline.policy,
-      evidence: { bar: "high", requiresCitation: true },
+      evidence: { bar: "high" },
     };
     const viewWithEvidence: StatusPolicyView = {
       ...basePolicyView,
@@ -1228,74 +1229,7 @@ case "/status": {
 Run: `cd packages/tui && pnpm vitest run __tests__/command-input.test.tsx`
 Expected: PASS
 
-- [ ] **Step 6: Wire /status into live command handler**
-
-In `packages/cli/src/wiring/live-command-handler.ts`, add handling for the status command. The handler reads from the TUI store's `policySession` and projects view models using adapter metadata for model/adapter ID.
-
-In the command handler function, add the status case:
-
-```ts
-case "status": {
-  const session = store.getState().policySession;
-  if (!session) {
-    store.pushCommandOutput("Policy state not yet available (no active session).");
-    break;
-  }
-  const roleEntries = Object.entries(session.roles);
-
-  if (cmd.target === "policy") {
-    const views = roleEntries.map(([role, state]) => {
-      const adapterEntry = adapters[role as keyof typeof adapters];
-      const adapterId = adapterEntry?.session?.adapterId ?? "unknown";
-      const model = adapterEntry?.session?.model ?? "unknown";
-      return buildStatusPolicyView(role, adapterId, model, state);
-    });
-    const text = renderStatusPolicy(views);
-    store.pushCommandOutput(text);
-  } else {
-    const views = roleEntries.map(([role, state]) => {
-      const adapterId = adapters[role as keyof typeof adapters]?.session?.adapterId ?? "unknown";
-      return buildStatusToolsView(role, adapterId, state);
-    });
-    const text = renderStatusTools(views);
-    store.pushCommandOutput(text);
-  }
-  break;
-}
-```
-
-Add imports for view models and renderers at the top:
-
-```ts
-import {
-  buildStatusPolicyView,
-  buildStatusToolsView,
-  renderStatusPolicy,
-  renderStatusTools,
-} from "@crossfire/tui/status";
-```
-
-- [ ] **Step 7: Add pushCommandOutput method to TuiStore**
-
-In `packages/tui/src/state/tui-store.ts`, add a method to push command output text to the TUI display:
-
-```ts
-pushCommandOutput(text: string): void {
-  this.state.command.lastOutput = text;
-  this.notify();
-}
-```
-
-In `packages/tui/src/state/types.ts`, add to `CommandState`:
-
-```ts
-export interface CommandState {
-  mode: string;
-  lastOutput?: string;
-}
-```
-
-- [ ] **Step 8: Write failing dispatch-path tests for /status commands**
+- [ ] **Step 6: Write failing dispatch-path tests for /status commands**
 
 In `packages/cli/__tests__/live-command-handler.test.ts`, add tests that exercise the full dispatch: session-scoped store state → handler receives status command → builds view model → pushes rendered output to store. These tests use the existing mock patterns in the file:
 
@@ -1408,15 +1342,82 @@ it("/status policy before session shows not-available message", () => {
 });
 ```
 
-- [ ] **Step 9: Run dispatch-path tests to verify they fail**
+- [ ] **Step 7: Run dispatch-path tests to verify they fail**
 
 Run: `cd packages/cli && pnpm vitest run __tests__/live-command-handler.test.ts`
-Expected: FAIL — status case not yet implemented (or handler does not handle type "status").
+Expected: FAIL — status case not yet implemented (handler does not handle type "status").
+
+- [ ] **Step 8: Wire /status into live command handler**
+
+In `packages/cli/src/wiring/live-command-handler.ts`, add handling for the status command. The handler reads from the TUI store's `policySession` and projects view models using adapter metadata for model/adapter ID.
+
+In the command handler function, add the status case:
+
+```ts
+case "status": {
+  const session = store.getState().policySession;
+  if (!session) {
+    store.pushCommandOutput("Policy state not yet available (no active session).");
+    break;
+  }
+  const roleEntries = Object.entries(session.roles);
+
+  if (cmd.target === "policy") {
+    const views = roleEntries.map(([role, state]) => {
+      const adapterEntry = adapters[role as keyof typeof adapters];
+      const adapterId = adapterEntry?.session?.adapterId ?? "unknown";
+      const model = adapterEntry?.session?.model ?? "unknown";
+      return buildStatusPolicyView(role, adapterId, model, state);
+    });
+    const text = renderStatusPolicy(views);
+    store.pushCommandOutput(text);
+  } else {
+    const views = roleEntries.map(([role, state]) => {
+      const adapterId = adapters[role as keyof typeof adapters]?.session?.adapterId ?? "unknown";
+      return buildStatusToolsView(role, adapterId, state);
+    });
+    const text = renderStatusTools(views);
+    store.pushCommandOutput(text);
+  }
+  break;
+}
+```
+
+Add imports for view models and renderers at the top:
+
+```ts
+import {
+  buildStatusPolicyView,
+  buildStatusToolsView,
+  renderStatusPolicy,
+  renderStatusTools,
+} from "@crossfire/tui/status";
+```
+
+- [ ] **Step 9: Add pushCommandOutput method to TuiStore**
+
+In `packages/tui/src/state/tui-store.ts`, add a method to push command output text to the TUI display:
+
+```ts
+pushCommandOutput(text: string): void {
+  this.state.command.lastOutput = text;
+  this.notify();
+}
+```
+
+In `packages/tui/src/state/types.ts`, add to `CommandState`:
+
+```ts
+export interface CommandState {
+  mode: string;
+  lastOutput?: string;
+}
+```
 
 - [ ] **Step 10: Run build and all tests**
 
 Run: `pnpm build && pnpm test`
-Expected: PASS (dispatch-path tests now pass because Step 6 added the implementation)
+Expected: PASS (dispatch-path tests now pass because Step 8 added the implementation)
 
 - [ ] **Step 11: Update TUI-CLI architecture doc for /status commands**
 
