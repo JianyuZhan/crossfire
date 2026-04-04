@@ -265,14 +265,26 @@ describe("runner policy flow (real runDebate path)", () => {
 			const proposer = createScriptedAdapter(
 				"claude",
 				{
-					"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", defaultMeta),
+					"p-1": turnEvents(
+						"p-1",
+						"claude",
+						"claude-s1",
+						"Proposer r1",
+						defaultMeta,
+					),
 				},
 				[],
 			);
 			const challenger = createScriptedAdapter(
 				"codex",
 				{
-					"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", defaultMeta),
+					"c-1": turnEvents(
+						"c-1",
+						"codex",
+						"codex-s1",
+						"Challenger r1",
+						defaultMeta,
+					),
 				},
 				[],
 			);
@@ -298,10 +310,19 @@ describe("runner policy flow (real runDebate path)", () => {
 					unsupportedFields: [],
 				},
 				toolView: [
-					{ name: "Read", source: "builtin", status: "allowed", reason: "capability_policy" },
+					{
+						name: "Read",
+						source: "builtin",
+						status: "allowed",
+						reason: "capability_policy",
+					},
 				],
 				capabilityEffects: [
-					{ field: "capabilities.filesystem", status: "applied", details: "write level" },
+					{
+						field: "capabilities.filesystem",
+						status: "applied",
+						details: "write level",
+					},
 				],
 				warnings: [],
 				completeness: "full",
@@ -348,7 +369,9 @@ describe("runner policy flow (real runDebate path)", () => {
 					expect(event.observation.toolView).toHaveLength(1);
 					expect(event.observation.toolView[0].name).toBe("Read");
 					expect(event.observation.capabilityEffects).toHaveLength(1);
-					expect(event.observation.capabilityEffects[0].field).toBe("capabilities.filesystem");
+					expect(event.observation.capabilityEffects[0].field).toBe(
+						"capabilities.filesystem",
+					);
 					expect(event.observation.completeness).toBe("full");
 					expect(event.observation.translation).toBeDefined();
 				}
@@ -359,14 +382,26 @@ describe("runner policy flow (real runDebate path)", () => {
 			const proposer = createScriptedAdapter(
 				"claude",
 				{
-					"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", defaultMeta),
+					"p-1": turnEvents(
+						"p-1",
+						"claude",
+						"claude-s1",
+						"Proposer r1",
+						defaultMeta,
+					),
 				},
 				[],
 			);
 			const challenger = createScriptedAdapter(
 				"codex",
 				{
-					"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", defaultMeta),
+					"c-1": turnEvents(
+						"c-1",
+						"codex",
+						"codex-s1",
+						"Challenger r1",
+						defaultMeta,
+					),
 				},
 				[],
 			);
@@ -388,7 +423,12 @@ describe("runner policy flow (real runDebate path)", () => {
 					unsupportedFields: [],
 				},
 				toolView: [
-					{ name: "Read", source: "builtin", status: "allowed", reason: "capability_policy" },
+					{
+						name: "Read",
+						source: "builtin",
+						status: "allowed",
+						reason: "capability_policy",
+					},
 				],
 				capabilityEffects: [
 					{ field: "capabilities.filesystem", status: "applied" },

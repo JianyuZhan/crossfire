@@ -167,7 +167,8 @@ function emitBaselinePolicyEvents(
 			policy: entry.baselinePolicy,
 			clamps: [...(entry.baselineClamps ?? [])],
 			preset: entry.baselinePreset,
-			translationSummary: observation?.translation ?? fallbackObservation.translation,
+			translationSummary:
+				observation?.translation ?? fallbackObservation.translation,
 			warnings: [...(observation?.warnings ?? [])],
 			observation: observation ?? fallbackObservation,
 			timestamp: Date.now(),
@@ -618,7 +619,8 @@ export async function runDebate(
 				turnId,
 				policy: overridePolicy,
 				preset: turnOverridePreset,
-				translationSummary: observation?.translation ?? fallbackObservation.translation,
+				translationSummary:
+					observation?.translation ?? fallbackObservation.translation,
 				warnings: [...(observation?.warnings ?? [])],
 				observation: observation ?? fallbackObservation,
 				timestamp: Date.now(),
