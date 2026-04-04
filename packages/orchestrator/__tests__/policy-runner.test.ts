@@ -260,6 +260,197 @@ describe("runner policy flow (real runDebate path)", () => {
 				expect(overrideEvent.warnings.length).toBeGreaterThan(0);
 			}
 		});
+
+		it("emits baseline events with full observation payload", async () => {
+			const proposer = createScriptedAdapter(
+				"claude",
+				{
+					"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", defaultMeta),
+				},
+				[],
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{
+					"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", defaultMeta),
+				},
+				[],
+			);
+
+			const proposerBaseline = compilePolicy({
+				preset: "guarded",
+				role: "proposer",
+			});
+			const challengerBaseline = compilePolicy({
+				preset: "guarded",
+				role: "challenger",
+			});
+
+			const makeObservation = (
+				adapter: "claude" | "codex",
+				policy: ReturnType<typeof compilePolicy>,
+			): ProviderObservationResult => ({
+				translation: {
+					adapter,
+					nativeSummary: { preset: policy.preset },
+					exactFields: ["interaction.approval"],
+					approximateFields: [],
+					unsupportedFields: [],
+				},
+				toolView: [
+					{ name: "Read", source: "builtin", status: "allowed", reason: "capability_policy" },
+				],
+				capabilityEffects: [
+					{ field: "capabilities.filesystem", status: "applied", details: "write level" },
+				],
+				warnings: [],
+				completeness: "full",
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: proposerBaseline,
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineObservation: makeObservation("claude", proposerBaseline),
+					observePolicy: (policy) => makeObservation("claude", policy),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: challengerBaseline,
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineObservation: makeObservation("codex", challengerBaseline),
+					observePolicy: (policy) => makeObservation("codex", policy),
+				},
+			};
+
+			const bus = new DebateEventBus();
+			await runDebate(debateConfig, adapters, { bus });
+
+			const baselineEvents = bus
+				.getEvents()
+				.filter((event) => event.kind === "policy.baseline");
+			expect(baselineEvents).toHaveLength(2);
+
+			for (const event of baselineEvents) {
+				if (event.kind === "policy.baseline") {
+					expect(event.observation).toBeDefined();
+					expect(event.observation.toolView).toHaveLength(1);
+					expect(event.observation.toolView[0].name).toBe("Read");
+					expect(event.observation.capabilityEffects).toHaveLength(1);
+					expect(event.observation.capabilityEffects[0].field).toBe("capabilities.filesystem");
+					expect(event.observation.completeness).toBe("full");
+					expect(event.observation.translation).toBeDefined();
+				}
+			}
+		});
+
+		it("emits override events with full observation payload", async () => {
+			const proposer = createScriptedAdapter(
+				"claude",
+				{
+					"p-1": turnEvents("p-1", "claude", "claude-s1", "Proposer r1", defaultMeta),
+				},
+				[],
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{
+					"c-1": turnEvents("c-1", "codex", "codex-s1", "Challenger r1", defaultMeta),
+				},
+				[],
+			);
+
+			const proposerBaseline = compilePolicy({
+				preset: "guarded",
+				role: "proposer",
+			});
+
+			const makeObservation = (
+				adapter: "claude" | "codex",
+				policy: ReturnType<typeof compilePolicy>,
+			): ProviderObservationResult => ({
+				translation: {
+					adapter,
+					nativeSummary: { preset: policy.preset },
+					exactFields: ["interaction.approval"],
+					approximateFields: [],
+					unsupportedFields: [],
+				},
+				toolView: [
+					{ name: "Read", source: "builtin", status: "allowed", reason: "capability_policy" },
+				],
+				capabilityEffects: [
+					{ field: "capabilities.filesystem", status: "applied" },
+				],
+				warnings: [],
+				completeness: "partial",
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: proposerBaseline,
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineObservation: makeObservation("claude", proposerBaseline),
+					observePolicy: (policy) => makeObservation("claude", policy),
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: compilePolicy({
+						preset: "guarded",
+						role: "challenger",
+					}),
+				},
+			};
+
+			const bus = new DebateEventBus();
+			await runDebate(
+				{
+					...debateConfig,
+					turnPresets: { "p-1": "research" },
+				},
+				adapters,
+				{ bus },
+			);
+
+			const overrideEvent = bus
+				.getEvents()
+				.find(
+					(event) =>
+						event.kind === "policy.turn.override" && event.turnId === "p-1",
+				);
+			expect(overrideEvent).toBeDefined();
+			if (overrideEvent?.kind === "policy.turn.override") {
+				expect(overrideEvent.observation).toBeDefined();
+				expect(overrideEvent.observation.toolView).toHaveLength(1);
+				expect(overrideEvent.observation.toolView[0].name).toBe("Read");
+				expect(overrideEvent.observation.capabilityEffects).toHaveLength(1);
+				expect(overrideEvent.observation.completeness).toBe("partial");
+				expect(overrideEvent.observation.translation.nativeSummary).toEqual({
+					preset: "research",
+				});
+			}
+		});
 	});
 
 	describe("per-turn policy forwarding", () => {

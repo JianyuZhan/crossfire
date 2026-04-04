@@ -1,3 +1,4 @@
+import type { ProviderObservationResult } from "@crossfire/adapter-core";
 import { makeResolvedPolicy } from "@crossfire/adapter-core/testing";
 import { describe, expect, it } from "vitest";
 import type {
@@ -22,6 +23,7 @@ function reconstructState(
 					preset: e.preset,
 					translationSummary: e.translationSummary,
 					warnings: e.warnings,
+					observation: e.observation,
 				},
 			};
 		} else if (e.kind === "policy.turn.override" && state) {
@@ -33,6 +35,7 @@ function reconstructState(
 					preset: e.preset,
 					translationSummary: e.translationSummary,
 					warnings: e.warnings,
+					observation: e.observation,
 				},
 			};
 		} else if (e.kind === "policy.turn.override.clear" && state) {
@@ -51,6 +54,27 @@ describe("event-derived RuntimePolicyState", () => {
 		unsupportedFields: [],
 	};
 
+	const stubObservation: ProviderObservationResult = {
+		translation: emptyTranslationSummary,
+		toolView: [
+			{
+				name: "Read",
+				source: "builtin",
+				status: "allowed",
+				reason: "capability_policy",
+			},
+		],
+		capabilityEffects: [
+			{
+				field: "capabilities.filesystem",
+				status: "applied",
+				details: "write level",
+			},
+		],
+		warnings: [],
+		completeness: "full",
+	};
+
 	it("reconstructs baseline from single event", () => {
 		const policy = makeResolvedPolicy({ preset: "guarded", role: "proposer" });
 		const events: PolicyBaselineEvent[] = [
@@ -62,6 +86,7 @@ describe("event-derived RuntimePolicyState", () => {
 				preset: { value: "guarded", source: "config" },
 				translationSummary: emptyTranslationSummary,
 				warnings: [],
+				observation: stubObservation,
 				timestamp: Date.now(),
 			},
 		];
@@ -69,6 +94,30 @@ describe("event-derived RuntimePolicyState", () => {
 		expect(state).toBeDefined();
 		expect(state?.baseline.policy).toEqual(policy);
 		expect(state?.currentTurnOverride).toBeUndefined();
+	});
+
+	it("includes full observation payload in baseline event", () => {
+		const policy = makeResolvedPolicy({ preset: "guarded", role: "proposer" });
+		const events: PolicyBaselineEvent[] = [
+			{
+				kind: "policy.baseline",
+				role: "proposer",
+				policy,
+				clamps: [],
+				preset: { value: "guarded", source: "config" },
+				translationSummary: emptyTranslationSummary,
+				warnings: [],
+				observation: stubObservation,
+				timestamp: Date.now(),
+			},
+		];
+		const state = reconstructState(events);
+		expect(state).toBeDefined();
+		expect(state?.baseline.observation).toEqual(stubObservation);
+		expect(state?.baseline.observation.toolView).toHaveLength(1);
+		expect(state?.baseline.observation.toolView[0].name).toBe("Read");
+		expect(state?.baseline.observation.capabilityEffects).toHaveLength(1);
+		expect(state?.baseline.observation.completeness).toBe("full");
 	});
 
 	it("turn override does not overwrite baseline", () => {
@@ -80,6 +129,10 @@ describe("event-derived RuntimePolicyState", () => {
 			preset: "dangerous",
 			role: "proposer",
 		});
+		const overrideObservation: ProviderObservationResult = {
+			...stubObservation,
+			completeness: "partial",
+		};
 		const events = [
 			{
 				kind: "policy.baseline" as const,
@@ -89,6 +142,7 @@ describe("event-derived RuntimePolicyState", () => {
 				preset: { value: "guarded" as const, source: "config" as const },
 				translationSummary: emptyTranslationSummary,
 				warnings: [],
+				observation: stubObservation,
 				timestamp: Date.now(),
 			},
 			{
@@ -99,6 +153,7 @@ describe("event-derived RuntimePolicyState", () => {
 				preset: "dangerous" as const,
 				translationSummary: emptyTranslationSummary,
 				warnings: [],
+				observation: overrideObservation,
 				timestamp: Date.now(),
 			},
 		];
@@ -127,6 +182,7 @@ describe("event-derived RuntimePolicyState", () => {
 				preset: { value: "guarded" as const, source: "config" as const },
 				translationSummary: emptyTranslationSummary,
 				warnings: [],
+				observation: stubObservation,
 				timestamp: Date.now(),
 			},
 			{
@@ -137,6 +193,7 @@ describe("event-derived RuntimePolicyState", () => {
 				preset: "dangerous" as const,
 				translationSummary: emptyTranslationSummary,
 				warnings: [],
+				observation: stubObservation,
 				timestamp: Date.now(),
 			},
 			{

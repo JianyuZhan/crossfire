@@ -148,20 +148,28 @@ function emitBaselinePolicyEvents(
 		const entry = adapters[role];
 		if (!entry?.baselinePolicy || !entry.baselinePreset) continue;
 		const observation = getObservationForPolicy(entry, entry.baselinePolicy);
-		bus.push({
-			kind: "policy.baseline",
-			role,
-			policy: entry.baselinePolicy,
-			clamps: [...(entry.baselineClamps ?? [])],
-			preset: entry.baselinePreset,
-			translationSummary: observation?.translation ?? {
+		const fallbackObservation: ProviderObservationResult = {
+			translation: {
 				adapter: entry.session.adapterId ?? "unknown",
 				nativeSummary: {},
 				exactFields: [],
 				approximateFields: [],
 				unsupportedFields: [],
 			},
+			toolView: [],
+			capabilityEffects: [],
+			warnings: [],
+			completeness: "minimal",
+		};
+		bus.push({
+			kind: "policy.baseline",
+			role,
+			policy: entry.baselinePolicy,
+			clamps: [...(entry.baselineClamps ?? [])],
+			preset: entry.baselinePreset,
+			translationSummary: observation?.translation ?? fallbackObservation.translation,
 			warnings: [...(observation?.warnings ?? [])],
+			observation: observation ?? fallbackObservation,
 			timestamp: Date.now(),
 		});
 	}
@@ -591,20 +599,28 @@ export async function runDebate(
 				legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
 			});
 			const observation = getObservationForPolicy(adapterEntry, overridePolicy);
-			bus.push({
-				kind: "policy.turn.override",
-				role: role as "proposer" | "challenger",
-				turnId,
-				policy: overridePolicy,
-				preset: turnOverridePreset,
-				translationSummary: observation?.translation ?? {
+			const fallbackObservation: ProviderObservationResult = {
+				translation: {
 					adapter: adapterEntry.session.adapterId ?? "unknown",
 					nativeSummary: {},
 					exactFields: [],
 					approximateFields: [],
 					unsupportedFields: [],
 				},
+				toolView: [],
+				capabilityEffects: [],
+				warnings: [],
+				completeness: "minimal",
+			};
+			bus.push({
+				kind: "policy.turn.override",
+				role: role as "proposer" | "challenger",
+				turnId,
+				policy: overridePolicy,
+				preset: turnOverridePreset,
+				translationSummary: observation?.translation ?? fallbackObservation.translation,
 				warnings: [...(observation?.warnings ?? [])],
+				observation: observation ?? fallbackObservation,
 				timestamp: Date.now(),
 			});
 		}

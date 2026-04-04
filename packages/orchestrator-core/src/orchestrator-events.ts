@@ -4,6 +4,7 @@ import type {
 	PolicyTranslationSummary,
 	PolicyTranslationWarning,
 	PresetSource,
+	ProviderObservationResult,
 	ResolvedPolicy,
 } from "@crossfire/adapter-core";
 import type { DirectorAction, DirectorSignal } from "./director/types.js";
@@ -49,6 +50,7 @@ export interface PolicyBaselineEvent {
 	};
 	translationSummary: PolicyTranslationSummary;
 	warnings: PolicyTranslationWarning[];
+	observation: ProviderObservationResult;
 	timestamp: number;
 }
 
@@ -60,6 +62,7 @@ export interface PolicyTurnOverrideEvent {
 	preset: PolicyPreset;
 	translationSummary: PolicyTranslationSummary;
 	warnings: PolicyTranslationWarning[];
+	observation: ProviderObservationResult;
 	timestamp: number;
 }
 
@@ -79,6 +82,7 @@ export interface RuntimePolicyState {
 		};
 		translationSummary: PolicyTranslationSummary;
 		warnings: PolicyTranslationWarning[];
+		observation: ProviderObservationResult;
 	};
 	currentTurnOverride?: {
 		turnId: string;
@@ -86,6 +90,7 @@ export interface RuntimePolicyState {
 		preset: PolicyPreset;
 		translationSummary: PolicyTranslationSummary;
 		warnings: PolicyTranslationWarning[];
+		observation: ProviderObservationResult;
 	};
 }
 
