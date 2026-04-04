@@ -88,7 +88,7 @@ The resolver returns:
 - `effectiveMode`
 - `source` (`debate-default`, `role-baseline`, or `turn-override`)
 
-The runner emits `turn.mode.changed` before each proposer / challenger turn so the TUI and event log can show which mode actually governed that turn.
+The runner emits `policy.turn.override` before a proposer / challenger turn when a turn-level override is active, and `policy.turn.override.clear` after the turn completes. When no override is active, no policy event is emitted for that turn.
 Judge turns are treated differently: Crossfire sends them in `plan` mode and judge prompts explicitly instruct the model not to start a fresh tool-driven investigation.
 
 ## Provider Translation
@@ -196,7 +196,7 @@ Relevant surfaces:
 
 - adapter-core: `StartSessionInput.policy`, `TurnInput.policy` (new); `StartSessionInput.executionMode`, `TurnInput.executionMode` (deprecated, legacy fallback)
 - adapter-core: `ResolvedPolicy`, `compilePolicy()`, `translatePolicy()` per adapter
-- orchestrator-core: `DebateConfig.executionModes`, `resolveExecutionMode()`, `resolveExecutionModeAsPolicy()`, `turn.mode.changed`
+- orchestrator-core: `DebateConfig.executionModes`, `resolveExecutionMode()`, `resolveExecutionModeAsPolicy()`, `policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`
 - TUI: live panels show the current effective mode in the header/status text
 - Translation warnings are emitted as `run.warning` events when policy intent is approximated during provider translation
 

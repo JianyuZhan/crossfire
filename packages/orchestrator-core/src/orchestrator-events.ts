@@ -1,5 +1,12 @@
+import type {
+	PolicyClampNote,
+	PolicyPreset,
+	PolicyTranslationSummary,
+	PolicyTranslationWarning,
+	PresetSource,
+	ResolvedPolicy,
+} from "@crossfire/adapter-core";
 import type { DirectorAction, DirectorSignal } from "./director/types.js";
-import type { ResolvedExecutionMode } from "./execution-modes.js";
 import type {
 	DebateConfig,
 	DebateRole,
@@ -31,15 +38,55 @@ export interface RoundStartedEvent {
 	timestamp: number;
 }
 
-export interface TurnModeChangedEvent {
-	kind: "turn.mode.changed";
-	roundNumber: number;
-	speaker: DebateRole;
-	turnId: string;
-	executionMode: ResolvedExecutionMode["effectiveMode"];
-	baselineMode: ResolvedExecutionMode["baselineMode"];
-	source: ResolvedExecutionMode["source"];
+export interface PolicyBaselineEvent {
+	kind: "policy.baseline";
+	role: "proposer" | "challenger" | "judge";
+	policy: ResolvedPolicy;
+	clamps: PolicyClampNote[];
+	preset: {
+		value: PolicyPreset;
+		source: PresetSource;
+	};
+	translationSummary: PolicyTranslationSummary;
+	warnings: PolicyTranslationWarning[];
 	timestamp: number;
+}
+
+export interface PolicyTurnOverrideEvent {
+	kind: "policy.turn.override";
+	role: "proposer" | "challenger";
+	turnId: string;
+	policy: ResolvedPolicy;
+	preset: PolicyPreset;
+	translationSummary: PolicyTranslationSummary;
+	warnings: PolicyTranslationWarning[];
+	timestamp: number;
+}
+
+export interface PolicyTurnOverrideClearEvent {
+	kind: "policy.turn.override.clear";
+	turnId: string;
+	timestamp: number;
+}
+
+export interface RuntimePolicyState {
+	baseline: {
+		policy: ResolvedPolicy;
+		clamps: PolicyClampNote[];
+		preset: {
+			value: PolicyPreset;
+			source: PresetSource;
+		};
+		translationSummary: PolicyTranslationSummary;
+		warnings: PolicyTranslationWarning[];
+	};
+	currentTurnOverride?: {
+		turnId: string;
+		policy: ResolvedPolicy;
+		preset: PolicyPreset;
+		translationSummary: PolicyTranslationSummary;
+		warnings: PolicyTranslationWarning[];
+	};
 }
 
 export interface RoundCompletedEvent {
@@ -169,7 +216,6 @@ export interface SynthesisErrorEvent {
 export type OrchestratorEvent =
 	| DebateStartedEvent
 	| RoundStartedEvent
-	| TurnModeChangedEvent
 	| RoundCompletedEvent
 	| JudgeStartedEvent
 	| JudgeCompletedEvent
@@ -185,4 +231,7 @@ export type OrchestratorEvent =
 	| DirectorActionEvent
 	| SynthesisStartedEvent
 	| SynthesisCompletedEvent
-	| SynthesisErrorEvent;
+	| SynthesisErrorEvent
+	| PolicyBaselineEvent
+	| PolicyTurnOverrideEvent
+	| PolicyTurnOverrideClearEvent;

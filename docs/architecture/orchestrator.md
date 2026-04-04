@@ -37,7 +37,9 @@ Packages:
 - `debate.extended`
 - `turn.interrupt.requested`
 - `round.started`
-- `turn.mode.changed`
+- `policy.baseline`
+- `policy.turn.override`
+- `policy.turn.override.clear`
 - `round.completed`
 - `judge.started`
 - `judge.completed`
@@ -183,7 +185,7 @@ Important notes:
 - it waits for `turn.completed` on the bus
 - it resolves effective turn mode before each proposer / challenger turn using `debate default < role baseline < turn override`
 - system prompt resolution is handled at the CLI layer: the runner receives pre-resolved system prompts from `config.proposerSystemPrompt` / `config.challengerSystemPrompt` / `config.judgeSystemPrompt`, falling back to `defaultSystemPrompt(role)` inside `buildInitialPrompt()`
-- it emits `turn.mode.changed` before sending the turn to the adapter
+- it emits `policy.turn.override` before sending the turn (only when a turn-level override is active) and `policy.turn.override.clear` after the turn completes
 - it blocks on projected pause state between turns and before judge invocations
 - it can now route `/interrupt` requests to the active provider turn and terminates the debate with `debate.completed(reason="interrupted")` when the adapter reports `turn.completed(status="interrupted")`
 - it tracks schema refresh cadence for incremental prompts

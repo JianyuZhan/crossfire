@@ -515,16 +515,30 @@ export async function runDebate(
 			role,
 			turnId,
 		);
-		bus.push({
-			kind: "turn.mode.changed",
-			roundNumber: round,
-			speaker: role,
-			turnId,
-			executionMode: executionModeResult.effectiveMode,
-			baselineMode: executionModeResult.baselineMode,
-			source: executionModeResult.source,
-			timestamp: Date.now(),
-		});
+		// Only emit policy.turn.override when there IS a turn-level override
+		if (executionModeResult.source === "turn-override") {
+			const overridePolicy = compilePolicy({
+				preset: executionModeResult.effectiveMode as PolicyPreset,
+				role: role as "proposer" | "challenger",
+				legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
+			});
+			bus.push({
+				kind: "policy.turn.override",
+				role: role as "proposer" | "challenger",
+				turnId,
+				policy: overridePolicy,
+				preset: executionModeResult.effectiveMode as PolicyPreset,
+				translationSummary: {
+					adapter: adapterEntry.session.adapterId ?? "unknown",
+					nativeSummary: {},
+					exactFields: [],
+					approximateFields: [],
+					unsupportedFields: [],
+				},
+				warnings: [],
+				timestamp: Date.now(),
+			});
+		}
 
 		// Step 6: Compile per-turn policy if baseline exists
 		const turnPolicy = adapterEntry.baselinePolicy
@@ -553,6 +567,13 @@ export async function runDebate(
 		// Step 7: Await waitForTurnCompleted, clear activeTurn
 		const turnResult = await waitForTurnCompleted(bus, turnId);
 		activeTurn = undefined;
+		if (executionModeResult.source === "turn-override") {
+			bus.push({
+				kind: "policy.turn.override.clear",
+				turnId,
+				timestamp: Date.now(),
+			});
+		}
 		if (turnResult === "interrupted") {
 			return { status: "interrupted", consecutiveFailures };
 		}

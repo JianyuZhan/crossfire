@@ -367,7 +367,7 @@ describe("runDebate", () => {
 		expect(challengerTurns[0]?.executionMode).toBe("dangerous");
 	});
 
-	it("lets per-turn overrides win over role baselines and emits turn.mode.changed", async () => {
+	it("lets per-turn overrides win over role baselines and emits policy.turn.override", async () => {
 		const bus = new DebateEventBus();
 		const collected: AnyEvent[] = [];
 		bus.subscribe((event) => collected.push(event));
@@ -424,14 +424,12 @@ describe("runDebate", () => {
 
 		expect(proposerTurns[0]?.executionMode).toBe("plan");
 		expect(
-			collected.find((event) => event.kind === "turn.mode.changed"),
+			collected.find((event) => event.kind === "policy.turn.override"),
 		).toMatchObject({
-			kind: "turn.mode.changed",
+			kind: "policy.turn.override",
 			turnId: "p-1",
-			speaker: "proposer",
-			executionMode: "plan",
-			baselineMode: "research",
-			source: "turn-override",
+			role: "proposer",
+			preset: "plan",
 		});
 	});
 

@@ -80,7 +80,9 @@ export function projectState(events: AnyEvent[]): DebateState {
 				currentSpeaker = undefined;
 				break;
 
-			case "turn.mode.changed":
+			case "policy.turn.override":
+			case "policy.turn.override.clear":
+			case "policy.baseline":
 				break;
 
 			case "judge.started":

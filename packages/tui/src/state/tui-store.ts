@@ -777,14 +777,18 @@ export class TuiStore {
 				this.activeSpeaker = undefined;
 				break;
 			}
-			case "turn.mode.changed": {
+			case "policy.turn.override": {
 				const e = event as {
-					speaker: "proposer" | "challenger";
-					executionMode: string;
+					role: "proposer" | "challenger";
+					preset: string;
 				};
-				this.state[e.speaker].executionMode = e.executionMode;
+				this.state[e.role].executionMode = e.preset;
 				break;
 			}
+			case "policy.turn.override.clear":
+				break;
+			case "policy.baseline":
+				break;
 			case "thinking.delta": {
 				const p = this.panel();
 				if (!p) break;

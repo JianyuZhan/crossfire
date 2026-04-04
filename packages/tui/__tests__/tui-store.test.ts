@@ -313,13 +313,13 @@ describe("TuiStore", () => {
 			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
 		);
 		store.handleEvent(
-			ev("turn.mode.changed", {
-				roundNumber: 1,
-				speaker: "proposer",
+			ev("policy.turn.override", {
+				role: "proposer",
 				turnId: "p-1",
-				executionMode: "plan",
-				baselineMode: "research",
-				source: "turn-override",
+				preset: "plan",
+				policy: {},
+				translationSummary: {},
+				warnings: [],
 			}),
 		);
 		expect(store.getState().proposer.executionMode).toBe("plan");
