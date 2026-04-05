@@ -67,6 +67,25 @@ The resolution function (`resolveRolePreset()` in `@crossfire/cli/config/policy-
 
 This preset resolution feeds into the runtime turn-level precedence system described below.
 
+## Evidence Policy
+
+Evidence policy controls the strength of citation requirements in role contracts. Evidence thresholds are resolved through an independent chain from preset resolution:
+
+```text
+CLI --evidence-bar > config inline > template override > role-contract default
+```
+
+- **CLI --evidence-bar**: `crossfire start --evidence-bar high` applies to all roles
+- **Config inline**: `roles.proposer.evidence.bar` in `crossfire.config.json`
+- **Template override**: `templates[].overrides.evidence.bar` for roles using that template
+- **Role-contract default**: each role's contract has a built-in default (currently `undefined` for all roles, meaning no evidence requirement)
+
+Valid evidence bar values: `low`, `medium`, `high`
+
+The resolution function (`resolveRoleEvidence()` in `@crossfire/cli/config/evidence-resolution`) returns both the resolved bar value and its source (`cli`, `config`, `template:name`, or `role-default`) for provenance tracking.
+
+Evidence policy is passed to `compilePolicyWithDiagnostics()` via the `evidenceOverride` parameter and merged into the role contract during compilation. The baseline evidence source is stored on the adapter entry for event provenance (Task 5).
+
 ## Custom Templates
 
 The config file supports optional custom templates that bundle a base preset with evidence and interaction policy overrides. Templates are defined in the `templates` array and can be referenced by roles via the `template` field.

@@ -45,6 +45,12 @@ export async function createAdapters(
 		const diagnostics = compilePolicyWithDiagnostics({
 			preset: resolved.preset.value,
 			role: resolved.role,
+			...(resolved.evidence.bar !== undefined
+				? { evidenceOverride: { bar: resolved.evidence.bar } }
+				: {}),
+			...(resolved.interactionOverrides
+				? { interactionOverride: resolved.interactionOverrides }
+				: {}),
 		});
 		const policy = diagnostics.policy;
 		const observation = observePolicyForAdapter(
@@ -72,6 +78,9 @@ export async function createAdapters(
 			baselinePolicy: policy,
 			baselineClamps: diagnostics.clamps,
 			baselinePreset: resolved.preset,
+			baselineEvidenceSource: resolved.evidence.source,
+			baselineTemplateName: resolved.templateName,
+			baselineTemplateBasePreset: resolved.templateBasePreset,
 			baselineObservation: observation,
 			legacyToolPolicyInput: undefined,
 			observePolicy: (nextPolicy: ResolvedPolicy): ProviderObservationResult =>

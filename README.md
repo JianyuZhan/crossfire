@@ -263,6 +263,7 @@ Start a new debate.
 | `--challenger-preset <preset>`| Challenger baseline policy preset                        | —                        |
 | `--judge-preset <preset>`     | Judge baseline policy preset                             | —                        |
 | `--turn-preset <turnId=preset>` | Repeatable per-turn override; supports `plan`         | —                        |
+| `--evidence-bar <bar>`        | Evidence threshold for all roles (`low`, `medium`, `high`) | —                      |
 | `--template <family>`         | Prompt template family for all roles (`auto`, `general`, `code`) | `auto` |
 | `--proposer-template <family>` | Proposer prompt template override                      | inherited from `--template` |
 | `--challenger-template <family>` | Challenger prompt template override                 | inherited from `--template` |
@@ -439,6 +440,7 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
 | ----- | ----------- | -------- |
 | `mcpServers` | Shared MCP server definition registry | no |
 | `providerBindings` | Provider binding list | yes |
+| `templates` | Policy template definitions (optional) | no |
 | `roles.proposer` | Proposer role config | yes |
 | `roles.challenger` | Challenger role config | yes |
 | `roles.judge` | Judge role config (optional) | no |
@@ -450,6 +452,8 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
 | `binding` | Provider binding name | yes | — |
 | `model` | Model override for this role | no | binding default |
 | `preset` | Policy preset (`research`, `guarded`, `dangerous`, `plan`) | no | role default (`guarded` for proposer/challenger, `plan` for judge) |
+| `template` | Policy template name (overrides preset resolution) | no | — |
+| `evidence` | Evidence policy override (`{ bar: "low" \| "medium" \| "high" }`) | no | — |
 | `systemPrompt` | Role-specific system prompt override | no | binding / built-in default |
 
 **Provider binding fields:**

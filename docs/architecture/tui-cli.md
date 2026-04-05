@@ -229,6 +229,7 @@ Policy preset CLI entry points:
 - `--preset <research|guarded|dangerous|plan>` sets the debate default
 - `--proposer-preset`, `--challenger-preset`, `--judge-preset` set per-role presets
 - repeatable `--turn-preset <turnId=preset>` applies a static per-turn override
+- `--evidence-bar <low|medium|high>` sets the evidence threshold for all roles
 - `--config <path>` loads a `crossfire.json` config file (new config-file path)
 - `--template <auto|general|code>` sets the default prompt-template family
 - `--proposer-template`, `--challenger-template`, and `--judge-template` override the family per role

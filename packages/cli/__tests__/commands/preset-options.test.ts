@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildInspectionCliOverrides,
 	buildPresetConfig,
+	parseEvidenceBarValue,
 	parsePresetValue,
 	parseTurnPresets,
 	toCliPresetOverrides,
@@ -86,5 +87,43 @@ describe("buildInspectionCliOverrides", () => {
 				turnPreset: ["p-1=plan"],
 			}),
 		).toThrow(/--turn-preset is not supported/);
+	});
+});
+
+describe("parseEvidenceBarValue", () => {
+	it("parses valid evidence bar values", () => {
+		expect(parseEvidenceBarValue("low", "--evidence-bar")).toBe("low");
+		expect(parseEvidenceBarValue("medium", "--evidence-bar")).toBe("medium");
+		expect(parseEvidenceBarValue("high", "--evidence-bar")).toBe("high");
+	});
+
+	it("throws for invalid evidence bar value", () => {
+		expect(() => parseEvidenceBarValue("extreme", "--evidence-bar")).toThrow(
+			"--evidence-bar must be one of: low, medium, high",
+		);
+	});
+});
+
+describe("buildPresetConfig with evidenceBar", () => {
+	it("includes evidenceBar when provided", () => {
+		const config = buildPresetConfig({ evidenceBar: "high" });
+		expect(config?.evidenceBar).toBe("high");
+	});
+
+	it("returns undefined when only evidenceBar is absent", () => {
+		const config = buildPresetConfig({});
+		expect(config).toBeUndefined();
+	});
+});
+
+describe("toCliPresetOverrides with evidenceBar", () => {
+	it("maps evidenceBar to cliEvidenceBar", () => {
+		const overrides = toCliPresetOverrides({ evidenceBar: "low" });
+		expect(overrides.cliEvidenceBar).toBe("low");
+	});
+
+	it("omits cliEvidenceBar when not set", () => {
+		const overrides = toCliPresetOverrides({});
+		expect(overrides.cliEvidenceBar).toBeUndefined();
 	});
 });

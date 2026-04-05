@@ -1,5 +1,5 @@
 // packages/cli/src/commands/preset-options.ts
-import type { PolicyPreset } from "@crossfire/adapter-core";
+import type { EvidenceBar, PolicyPreset } from "@crossfire/adapter-core";
 import type { CliPresetOverrides } from "../config/resolver.js";
 
 const VALID_PRESETS = new Set<PolicyPreset>([
@@ -9,6 +9,8 @@ const VALID_PRESETS = new Set<PolicyPreset>([
 	"plan",
 ]);
 
+const VALID_EVIDENCE_BARS = new Set<EvidenceBar>(["low", "medium", "high"]);
+
 export function parsePresetValue(value: string, label: string): PolicyPreset {
 	if (VALID_PRESETS.has(value as PolicyPreset)) {
 		return value as PolicyPreset;
@@ -16,6 +18,16 @@ export function parsePresetValue(value: string, label: string): PolicyPreset {
 	throw new Error(
 		`${label} must be one of: research, guarded, dangerous, plan`,
 	);
+}
+
+export function parseEvidenceBarValue(
+	value: string,
+	label: string,
+): EvidenceBar {
+	if (VALID_EVIDENCE_BARS.has(value as EvidenceBar)) {
+		return value as EvidenceBar;
+	}
+	throw new Error(`${label} must be one of: low, medium, high`);
 }
 
 export function parseTurnPresets(
@@ -40,6 +52,7 @@ export interface PresetConfig {
 		Record<"proposer" | "challenger" | "judge", PolicyPreset>
 	>;
 	turnPresets?: Record<string, PolicyPreset>;
+	evidenceBar?: EvidenceBar;
 }
 
 export function toCliPresetOverrides(
@@ -58,6 +71,9 @@ export function toCliPresetOverrides(
 		...(presetConfig?.rolePresets?.judge
 			? { cliJudgePreset: presetConfig.rolePresets.judge }
 			: {}),
+		...(presetConfig?.evidenceBar
+			? { cliEvidenceBar: presetConfig.evidenceBar }
+			: {}),
 	};
 }
 
@@ -67,6 +83,7 @@ export function buildPresetConfig(options: {
 	challengerPreset?: string;
 	judgePreset?: string;
 	turnPreset?: string[];
+	evidenceBar?: string;
 }): PresetConfig | undefined {
 	const globalPreset = options.preset
 		? parsePresetValue(options.preset, "--preset")
@@ -83,13 +100,17 @@ export function buildPresetConfig(options: {
 	const turnPresets = options.turnPreset?.length
 		? parseTurnPresets(options.turnPreset)
 		: undefined;
+	const evidenceBar = options.evidenceBar
+		? parseEvidenceBarValue(options.evidenceBar, "--evidence-bar")
+		: undefined;
 
 	if (
 		!globalPreset &&
 		!proposerPreset &&
 		!challengerPreset &&
 		!judgePreset &&
-		!turnPresets
+		!turnPresets &&
+		!evidenceBar
 	) {
 		return undefined;
 	}
@@ -106,6 +127,7 @@ export function buildPresetConfig(options: {
 				}
 			: {}),
 		...(turnPresets ? { turnPresets } : {}),
+		...(evidenceBar ? { evidenceBar } : {}),
 	};
 }
 
@@ -115,6 +137,7 @@ export function buildInspectionCliOverrides(options: {
 	challengerPreset?: string;
 	judgePreset?: string;
 	turnPreset?: string[];
+	evidenceBar?: string;
 }): CliPresetOverrides {
 	const presetConfig = buildPresetConfig(options);
 	if (presetConfig?.turnPresets) {

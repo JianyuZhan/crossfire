@@ -38,6 +38,13 @@ function makeResolvedRole(
 			value: role === "judge" ? ("plan" as const) : ("guarded" as const),
 			source: "role-default" as const,
 		},
+		evidence: {
+			bar: undefined,
+			source: "role-default" as const,
+		},
+		interactionOverrides: undefined,
+		templateName: undefined,
+		templateBasePreset: undefined,
 		systemPrompt: undefined,
 		providerOptions: undefined,
 		mcpServers: undefined,

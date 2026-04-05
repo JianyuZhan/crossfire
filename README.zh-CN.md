@@ -263,6 +263,7 @@ crossfire start \
 | `--challenger-preset <preset>`| challenger baseline 策略预设        | —                        |
 | `--judge-preset <preset>`     | judge baseline 策略预设             | —                        |
 | `--turn-preset <turnId=preset>` | 可重复的按 turn 覆盖，支持 `plan` | —                        |
+| `--evidence-bar <bar>`        | 所有角色的证据阈值（`low`、`medium`、`high`） | —                      |
 | `--template <family>`         | 所有角色的提示词模板族（`auto`、`general`、`code`） | `auto` |
 | `--proposer-template <family>` | proposer 提示词模板覆盖            | 继承 `--template` |
 | `--challenger-template <family>` | challenger 提示词模板覆盖       | 继承 `--template` |
@@ -439,6 +440,7 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 | ---- | ---- | ---- |
 | `mcpServers` | 共享 MCP 服务器定义注册表 | 否 |
 | `providerBindings` | Provider 绑定列表 | 是 |
+| `templates` | 策略模板定义（可选） | 否 |
 | `roles.proposer` | 提议者角色配置 | 是 |
 | `roles.challenger` | 挑战者角色配置 | 是 |
 | `roles.judge` | 裁判角色配置（可选） | 否 |
@@ -450,6 +452,8 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 | `binding` | Provider 绑定名 | 是 | — |
 | `model` | 当前角色的模型覆盖 | 否 | binding 默认 |
 | `preset` | 策略预设（`research`、`guarded`、`dangerous`、`plan`） | 否 | 角色默认（proposer/challenger 为 `guarded`，judge 为 `plan`） |
+| `template` | 策略模板名（覆盖 preset 解析） | 否 | — |
+| `evidence` | 证据策略覆盖（`{ bar: "low" \| "medium" \| "high" }`） | 否 | — |
 | `systemPrompt` | 角色级 system prompt 覆盖 | 否 | binding / 内置默认值 |
 
 **Provider 绑定字段：**

@@ -111,6 +111,13 @@ function makeResolvedRole(
 		bindingName: `test-${role}`,
 		model: undefined,
 		preset: { value: preset, source: "role-default" as const },
+		evidence: {
+			bar: undefined,
+			source: "role-default" as const,
+		},
+		interactionOverrides: undefined,
+		templateName: undefined,
+		templateBasePreset: undefined,
 		systemPrompt: "test",
 		providerOptions: undefined,
 		mcpServers: undefined,

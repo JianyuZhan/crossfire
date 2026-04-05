@@ -94,6 +94,7 @@ export const startCommand = new Command("start")
 		collectOptionValues,
 		[],
 	)
+	.option("--evidence-bar <bar>", "Evidence threshold: low, medium, or high")
 	.option("--headless", "Run without TUI", false)
 	.option("-v, --verbose", "Verbose output", false)
 	.action(async (options) => {
@@ -151,6 +152,7 @@ export const startCommand = new Command("start")
 				challengerPreset: options.challengerPreset,
 				judgePreset: options.judgePreset,
 				turnPreset: options.turnPreset,
+				evidenceBar: options.evidenceBar,
 			});
 
 			// Generate debate ID and output directory

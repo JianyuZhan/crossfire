@@ -18,6 +18,7 @@ export const inspectToolsCommand = new Command("inspect-tools")
 	.option("--proposer-preset <preset>", "Proposer preset override")
 	.option("--challenger-preset <preset>", "Challenger preset override")
 	.option("--judge-preset <preset>", "Judge preset override")
+	.option("--evidence-bar <bar>", "Evidence threshold: low, medium, or high")
 	.option(
 		"--turn-preset <turnId=preset>",
 		"REJECTED: inspect commands do not accept turn-level overrides",
@@ -32,6 +33,7 @@ export const inspectToolsCommand = new Command("inspect-tools")
 				proposerPreset: options.proposerPreset,
 				challengerPreset: options.challengerPreset,
 				judgePreset: options.judgePreset,
+				evidenceBar: options.evidenceBar,
 				turnPreset: options.turnPreset,
 			});
 			const contexts = buildInspectionContext(config, cliOverrides);

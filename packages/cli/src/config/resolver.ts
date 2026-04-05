@@ -1,8 +1,18 @@
 // packages/cli/src/config/resolver.ts
-import type { PolicyPreset } from "@crossfire/adapter-core";
+import type {
+	ApprovalLevel,
+	EvidenceBar,
+	PolicyPreset,
+} from "@crossfire/adapter-core";
+import type {
+	EvidenceSource,
+	ResolvedEvidence,
+} from "./evidence-resolution.js";
+import { resolveRoleEvidence } from "./evidence-resolution.js";
 import type { PresetSource } from "./policy-resolution.js";
 import { resolveRolePreset } from "./policy-resolution.js";
 import type { CrossfireConfig, McpServerConfig } from "./schema.js";
+import { resolveTemplate } from "./template-resolution.js";
 
 export type AdapterType = "claude" | "codex" | "gemini";
 
@@ -15,6 +25,13 @@ export interface ResolvedRoleRuntimeConfig {
 		value: PolicyPreset;
 		source: PresetSource;
 	};
+	evidence: ResolvedEvidence;
+	interactionOverrides?: {
+		approval?: ApprovalLevel;
+		limits?: { maxTurns?: number };
+	};
+	templateName?: string;
+	templateBasePreset?: string;
 	systemPrompt?: string;
 	providerOptions?: Record<string, unknown>;
 	mcpServers?: Record<string, McpServerConfig>;
@@ -31,6 +48,7 @@ export interface CliPresetOverrides {
 	cliProposerPreset?: PolicyPreset;
 	cliChallengerPreset?: PolicyPreset;
 	cliJudgePreset?: PolicyPreset;
+	cliEvidenceBar?: EvidenceBar;
 }
 
 export function resolveAllRoles(
@@ -53,6 +71,17 @@ export function resolveAllRoles(
 			);
 		}
 
+		// Resolve template if referenced
+		const template = roleConfig.template
+			? resolveTemplate(roleConfig.template, config.templates)
+			: undefined;
+
+		if (roleConfig.template && !template) {
+			throw new Error(
+				`Role "${roleName}" references template "${roleConfig.template}" which does not exist.`,
+			);
+		}
+
 		const cliRolePreset =
 			roleName === "proposer"
 				? cliOverrides.cliProposerPreset
@@ -60,12 +89,36 @@ export function resolveAllRoles(
 					? cliOverrides.cliChallengerPreset
 					: cliOverrides.cliJudgePreset;
 
+		// Template basePreset takes priority over role config preset
+		const configOrTemplatePreset = template?.basePreset ?? roleConfig.preset;
+
 		const preset = resolveRolePreset({
 			role: roleName,
-			configPreset: roleConfig.preset,
+			configPreset: configOrTemplatePreset,
 			cliRolePreset,
 			cliGlobalPreset: cliOverrides.cliGlobalPreset,
 		});
+
+		// Resolve evidence with independent chain
+		const evidence = resolveRoleEvidence({
+			role: roleName,
+			cliEvidenceBar: cliOverrides.cliEvidenceBar,
+			configEvidence: roleConfig.evidence,
+			templateEvidence: template?.overrides?.evidence,
+			templateName: template?.name,
+		});
+
+		// Extract interaction overrides from template
+		const interactionOverrides = template?.overrides?.interaction
+			? {
+					...(template.overrides.interaction.approval !== undefined
+						? { approval: template.overrides.interaction.approval }
+						: {}),
+					...(template.overrides.interaction.limits
+						? { limits: template.overrides.interaction.limits }
+						: {}),
+				}
+			: undefined;
 
 		const resolvedMcpServers = binding.mcpServers
 			? Object.fromEntries(
@@ -87,6 +140,10 @@ export function resolveAllRoles(
 			bindingName: binding.name,
 			model: roleConfig.model ?? binding.model,
 			preset: { value: preset.preset, source: preset.source },
+			evidence,
+			interactionOverrides,
+			templateName: template?.name,
+			templateBasePreset: template?.basePreset,
 			systemPrompt: roleConfig.systemPrompt,
 			providerOptions: binding.providerOptions,
 			mcpServers: resolvedMcpServers,
