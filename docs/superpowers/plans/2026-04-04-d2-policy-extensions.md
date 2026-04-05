@@ -2126,8 +2126,8 @@ Update tui-cli architecture docs for inspection changes."
 ## Task 7: Status Surface Updates and Documentation
 
 **Files:**
-- Modify: `packages/tui/src/status/status-renderers.ts` — Replace forward-compatible cast with typed access
-- Modify: `packages/tui/src/status/status-view-models.ts` — Add evidence source to view model
+- Modify: `packages/tui/src/status/status-renderers.ts` — Replace forward-compatible cast with typed access, add template provenance
+- Modify: `packages/tui/src/status/status-view-models.ts` — Add evidence source and template provenance to view model
 - Modify: `docs/architecture/orchestrator.md` — Evidence in policy events
 - Modify: `docs/architecture/tui-cli.md` — Evidence in inspection + status
 - Modify: `docs/architecture/execution-modes.md` — Evidence section, templates
@@ -2198,7 +2198,36 @@ describe("status renderers evidence", () => {
 		});
 		const view = buildStatusPolicyView("proposer", "claude", "test-model", state);
 		const output = renderStatusPolicy([view]);
-		expect(output).toContain("Evidence:");
+		expect(output).toContain("Evidence Source: config");
+	});
+});
+
+describe("status renderers template provenance", () => {
+	it("renderStatusPolicy shows template name and basePreset when present", () => {
+		const state = makeRuntimeState({
+			template: { name: "strict", basePreset: "guarded" },
+		});
+		const view = buildStatusPolicyView("proposer", "claude", "test-model", state);
+		const output = renderStatusPolicy([view]);
+		expect(output).toContain("Template: strict");
+		expect(output).toContain("(basePreset: guarded)");
+	});
+
+	it("renderStatusPolicy shows template name without basePreset", () => {
+		const state = makeRuntimeState({
+			template: { name: "ev-only" },
+		});
+		const view = buildStatusPolicyView("proposer", "claude", "test-model", state);
+		const output = renderStatusPolicy([view]);
+		expect(output).toContain("Template: ev-only");
+		expect(output).not.toContain("basePreset");
+	});
+
+	it("renderStatusPolicy omits template section when no template used", () => {
+		const state = makeRuntimeState();
+		const view = buildStatusPolicyView("proposer", "claude", "test-model", state);
+		const output = renderStatusPolicy([view]);
+		expect(output).not.toContain("Template:");
 	});
 });
 ```
@@ -2232,6 +2261,7 @@ export interface StatusPolicyView {
 		translationSummary: PolicyTranslationSummary;
 		warnings: readonly PolicyTranslationWarning[];
 		evidenceSource?: EvidenceSource;
+		template?: { name: string; basePreset?: string };
 	};
 	override?: {
 		turnId: string;
@@ -2263,6 +2293,7 @@ export function buildStatusPolicyView(
 			translationSummary: state.baseline.translationSummary,
 			warnings: state.baseline.warnings,
 			evidenceSource: state.baseline.evidence?.source,
+			template: state.baseline.template,
 		},
 	};
 	if (state.currentTurnOverride) {
@@ -2315,10 +2346,17 @@ function renderPolicySummary(policy: ResolvedPolicy): string[] {
 }
 ```
 
-In `renderStatusPolicy`, add evidence source display after the evidence section from policy:
+In `renderStatusPolicy`, add template provenance and evidence source display after the policy summary:
 
 ```typescript
 lines.push(...renderPolicySummary(view.baseline.policy));
+
+if (view.baseline.template) {
+	const base = view.baseline.template.basePreset
+		? ` (basePreset: ${view.baseline.template.basePreset})`
+		: "";
+	lines.push(`  Template: ${view.baseline.template.name}${base}`);
+}
 
 if (view.baseline.evidenceSource) {
 	lines.push(`  Evidence Source: ${view.baseline.evidenceSource}`);
@@ -2368,10 +2406,11 @@ Expected: All PASS.
 
 ```bash
 git add packages/tui/src/status/status-renderers.ts packages/tui/src/status/status-view-models.ts packages/tui/__tests__/status docs/architecture/orchestrator.md docs/architecture/tui-cli.md docs/architecture/execution-modes.md
-git commit -m "feat(status): typed evidence in status + documentation
+git commit -m "feat(status): typed evidence + template provenance in status
 
 Replace forward-compatible evidence cast with typed ResolvedPolicy access.
-Add evidence source provenance to StatusPolicyView.
+Add evidence source and template provenance to StatusPolicyView.
+/status policy now shows template name + basePreset when a template shaped policy.
 Update architecture docs for evidence pipeline and custom templates."
 ```
 
@@ -2387,7 +2426,8 @@ Update architecture docs for evidence pipeline and custom templates."
 - Template preset + evidence resolution: Task 4
 - Evidence provenance in events: Task 5
 - Inspection surface updates: Task 6
-- Status surface updates: Task 7
+- Status surface updates (evidence source + template provenance in /status policy): Task 7
+- Template provenance in inspect and status output (spec requirement): Task 5 events → Task 6 inspection → Task 7 status
 - Documentation: distributed across tasks (Task 1: orchestrator.md, Task 3: execution-modes.md, Task 4: execution-modes.md + tui-cli.md + READMEs, Task 5: orchestrator.md, Task 6: tui-cli.md, Task 7: remaining)
 
 **2. Placeholder scan:** No TBD/TODO/placeholders found.
