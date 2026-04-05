@@ -1,4 +1,4 @@
-# Policy Model
+# Policy Surface
 
 > Crossfire's policy compilation pipeline, presets, precedence rules, and provider translation.
 
@@ -187,7 +187,7 @@ Each adapter has a `translatePolicy(policy: ResolvedPolicy): ProviderTranslation
 - `interaction.limits.maxTurns` -> `maxTurns` (defaults to 12 for on-failure/dontAsk modes)
 - `capabilities.legacyToolOverrides.deny` -> `disallowedTools`; `.allow` -> `allowedTools`
 
-Intentional semantic delta: `research` preset now maps to `on-failure` approval (Claude `dontAsk`) rather than combining it with a hard-coded tool allowlist. Tool restrictions are driven by `capabilities.legacyToolOverrides` instead, making execution mode and tool policy independent knobs.
+Intentional semantic delta: `research` preset now maps to `on-failure` approval (Claude `dontAsk`) rather than combining it with a hard-coded tool allowlist. Tool restrictions are driven by `capabilities.legacyToolOverrides` instead, making preset and tool policy independent knobs.
 
 Recovery path: the Claude adapter reapplies the same translated policy options when falling back to transcript recovery, so permission mode, tool restrictions, and turn limits survive partial failures.
 
@@ -252,7 +252,7 @@ Relevant surfaces:
 - TUI: live panels show the current effective preset in the header; full policy provenance is available via `/status policy`
 - Translation warnings are emitted as `run.warning` events when policy intent is approximated during provider translation
 
-This keeps the event log explicit about mode decisions instead of forcing operators to infer them from provider-side behavior.
+This keeps the event log explicit about policy decisions instead of forcing operators to infer them from provider-side behavior.
 
 ## Policy Regression Harness
 

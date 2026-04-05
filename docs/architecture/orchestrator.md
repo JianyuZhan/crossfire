@@ -7,7 +7,7 @@ Back to the overview: [overview.md](./overview.md)
 See also:
 
 - [Adapter Layer](./adapter-layer.md)
-- [Execution Modes](./execution-modes.md)
+- [Policy Surface](./policy-surface.md)
 - [Action Plan Synthesis](./synthesis.md)
 - [TUI and CLI](./tui-cli.md)
 

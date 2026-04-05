@@ -27,7 +27,7 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 - [适用场景](#适用场景)
 - [你将得到什么](#你将得到什么)
 - [快速开始](#快速开始)
-- [执行模式](#执行模式)
+- [策略预设](#策略预设)
 - [终端 UI](#终端-ui)
 - [CLI 参考](#cli-参考)
 - [运行时命令](#运行时命令)
@@ -144,9 +144,9 @@ crossfire start \
 
 - Crossfire 负责定义 turn 的交互强度
 - 各 adapter 负责把它映射到底层 provider 真正支持的官方原语
-- event log 和 TUI 会记录每个 turn 实际生效的是哪一档模式
+- event log 和 TUI 会记录每个 turn 实际生效的是哪一档预设
 
-当前有三档 baseline 模式，以及一个特殊的 per-turn override：
+当前有三档 baseline 预设，以及一个特殊的 per-turn override：
 
 - `research`
   低打扰研究模式。优先走安全或只读倾向的行为，尽量减少审批噪音。

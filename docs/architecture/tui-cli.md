@@ -7,7 +7,7 @@ Back to the overview: [overview.md](./overview.md)
 See also:
 
 - [System Overview](./overview.md)
-- [Execution Modes](./execution-modes.md)
+- [Policy Surface](./policy-surface.md)
 - [Orchestrator](./orchestrator.md)
 
 ## TUI Purpose
@@ -218,7 +218,7 @@ Resolution rules:
 Key behavior:
 
 - validates topic flags and numeric options
-- parses debate / role / per-turn execution mode options
+- parses debate / role / per-turn policy preset options
 - infers a judge profile from proposer adapter type when not provided
 - creates `run_output/${debateId}` by default
 - writes the initial `index.json`

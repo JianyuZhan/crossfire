@@ -17,7 +17,7 @@ This page covers the parts of the system that span multiple layers:
 Subsystem details live in:
 
 - [Adapter Layer](./adapter-layer.md)
-- [Execution Modes](./execution-modes.md)
+- [Policy Surface](./policy-surface.md)
 - [Orchestrator](./orchestrator.md)
 - [Action Plan Synthesis](./synthesis.md)
 - [TUI and CLI](./tui-cli.md)
@@ -115,7 +115,7 @@ crossfire/
 │   ├── architecture/
 │   │   ├── overview.md
 │   │   ├── adapter-layer.md
-│   │   ├── execution-modes.md
+│   │   ├── policy-surface.md
 │   │   ├── orchestrator.md
 │   │   ├── synthesis.md
 │   │   └── tui-cli.md

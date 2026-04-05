@@ -6,7 +6,7 @@ Back to the overview: [overview.md](./overview.md)
 
 See also:
 
-- [Execution Modes](./execution-modes.md)
+- [Policy Surface](./policy-surface.md)
 - [Orchestrator](./orchestrator.md)
 - [TUI and CLI](./tui-cli.md)
 
@@ -302,7 +302,7 @@ interface StartSessionInput {
 - in-process SDK `query()` stream
 - `startSession()` creates only the adapter handle; `providerSessionId` becomes known when the first `system/init` event arrives
 - session state is tracked in a local query-context map keyed by `adapterSessionId`
-- Crossfire execution modes map directly onto Claude permission modes per turn: `research` → `dontAsk` + allowlist + bounded `maxTurns`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
+- Crossfire policy presets map directly onto Claude permission modes per turn: `research` → `dontAsk` + allowlist + bounded `maxTurns`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
 - the Claude query function type signature accepts SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; the adapter's built-in execution-mode mapping currently only sets `maxTurns` (for research mode) to cap research-mode Claude turns before they sprawl indefinitely
 - tool and subagent lifecycle visibility comes from SDK hooks: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, and `SubagentStop`
 - approval support is bridged through `canUseTool(toolName, input, options)`, which emits `approval.request` and blocks until `approve()` resolves it
@@ -320,7 +320,7 @@ interface StartSessionInput {
 - subprocess + bidirectional JSON-RPC over stdio
 - `startSession()` performs `initialize`, sends `initialized`, then calls `thread/start`
 - `session.started` is emitted directly from `startSession()`, so Codex knows its `providerSessionId` before the first turn
-- Crossfire execution modes map onto Codex approval and sandbox policy combinations instead of a single provider mode field; the policy path forwards `sandboxPolicy` verbatim from `translatePolicy()` and threads `networkDisabled` into `thread/start` and `turn/start` requests
+- Crossfire policy presets map onto Codex approval and sandbox policy combinations instead of a single provider mode field; the policy path forwards `sandboxPolicy` verbatim from `translatePolicy()` and threads `networkDisabled` into `thread/start` and `turn/start` requests
 - `sendTurn()` uses `turn/start`
 - the current adapter effectively assumes one live active session per adapter instance because event routing uses one shared JSON-RPC client plus a wildcard notification handler
 - approval requests are normalized as `command`, `file-change`, or `user-input`
@@ -341,7 +341,7 @@ interface StartSessionInput {
 
 - new subprocess per turn
 - `startSession()` creates adapter-side bookkeeping only; `providerSessionId` remains `undefined` until the first successful `init` event
-- Crossfire execution modes currently map only to CLI approval-mode arguments: `dangerous` → `yolo`, `plan` → `plan`, `research` currently reuses `plan`, and `guarded` leaves the CLI default in place
+- Crossfire policy presets currently map only to CLI approval-mode arguments: `dangerous` → `yolo`, `plan` → `plan`, `research` currently reuses `plan`, and `guarded` leaves the CLI default in place
 - resume is attempted through CLI arguments managed by `ResumeManager`
 - `session.started` is emitted from the first successful `init` event and is not re-emitted on later turns or fallback retries
 - current CLI normalization reads assistant text from `content` or `text` fields on the event, tool metadata from `tool_id` / `tool_use_id` / `tool_name` / `name` / `parameters` / `input`, tool results from `tool_id` / `tool_use_id` plus `success` or `status` with `output`, and usage from `event.usage` (with fallback to `event.stats`)

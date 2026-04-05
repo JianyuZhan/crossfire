@@ -27,7 +27,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 - [Best For](#best-for)
 - [What You Get](#what-you-get)
 - [Quick Start](#quick-start)
-- [Execution Modes](#execution-modes)
+- [Policy Presets](#policy-presets)
 - [TUI](#tui)
 - [CLI Reference](#cli-reference)
 - [Runtime Commands](#runtime-commands)
@@ -144,9 +144,9 @@ Think of them as an orchestration-level policy layer:
 
 - Crossfire decides how interactive a turn should be
 - each adapter maps that decision to the strongest official primitive the provider actually exposes
-- the event log and TUI record which mode was really used for each turn
+- the event log and TUI record which preset was really used for each turn
 
-There are three baseline modes and one special override:
+There are three baseline presets and one special override:
 
 - `research`
   Low-interaction research. Prefer safe or read-oriented behavior and reduce approval noise.
@@ -156,7 +156,7 @@ There are three baseline modes and one special override:
 - `dangerous`
   High-trust execution. Minimize approval interruptions and accept higher risk.
 - `plan`
-  Per-turn special mode. Use it when you want an agent to outline what it intends to do before giving it a more permissive execution mode.
+  Per-turn special mode. Use it when you want an agent to outline what it intends to do before giving it a more permissive preset.
 
 Why `plan` is not a normal baseline:
 
