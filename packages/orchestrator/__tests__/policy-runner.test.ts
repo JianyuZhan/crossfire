@@ -138,6 +138,103 @@ const defaultMeta = {
 
 describe("runner policy flow (real runDebate path)", () => {
 	describe("policy runtime events", () => {
+		it("policy.baseline event carries evidence provenance source", async () => {
+			const proposerTurns: TurnInput[] = [];
+			const challengerTurns: TurnInput[] = [];
+			const proposer = createScriptedAdapter(
+				"claude",
+				{
+					"p-1": turnEvents(
+						"p-1",
+						"claude",
+						"claude-s1",
+						"Proposer r1",
+						defaultMeta,
+					),
+				},
+				proposerTurns,
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{
+					"c-1": turnEvents(
+						"c-1",
+						"codex",
+						"codex-s1",
+						"Challenger r1",
+						defaultMeta,
+					),
+				},
+				challengerTurns,
+			);
+
+			const proposerBaseline = compilePolicy({
+				preset: "guarded",
+				role: "proposer",
+			});
+			const challengerBaseline = compilePolicy({
+				preset: "guarded",
+				role: "challenger",
+			});
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: proposerBaseline,
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineEvidenceSource: "config",
+					baselineTemplateName: "test-template",
+					baselineTemplateBasePreset: "base-preset",
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: challengerBaseline,
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "role-default" },
+					baselineEvidenceSource: "role-default",
+				},
+			};
+
+			const bus = new DebateEventBus();
+			await runDebate(debateConfig, adapters, { bus });
+
+			const baselineEvents = bus
+				.getEvents()
+				.filter((event) => event.kind === "policy.baseline");
+			expect(baselineEvents).toHaveLength(2);
+
+			const proposerBaselineEvent = baselineEvents.find(
+				(e) => e.kind === "policy.baseline" && e.role === "proposer",
+			);
+			expect(proposerBaselineEvent).toBeDefined();
+			if (proposerBaselineEvent?.kind === "policy.baseline") {
+				expect(proposerBaselineEvent.evidence).toBeDefined();
+				expect(proposerBaselineEvent.evidence?.source).toBe("config");
+				expect(proposerBaselineEvent.template).toBeDefined();
+				expect(proposerBaselineEvent.template?.name).toBe("test-template");
+				expect(proposerBaselineEvent.template?.basePreset).toBe("base-preset");
+			}
+
+			const challengerBaselineEvent = baselineEvents.find(
+				(e) => e.kind === "policy.baseline" && e.role === "challenger",
+			);
+			expect(challengerBaselineEvent).toBeDefined();
+			if (challengerBaselineEvent?.kind === "policy.baseline") {
+				expect(challengerBaselineEvent.evidence).toBeDefined();
+				expect(challengerBaselineEvent.evidence?.source).toBe("role-default");
+				expect(challengerBaselineEvent.template).toBeUndefined();
+			}
+		});
+
 		it("emits reconstructible baseline and override events with real summaries", async () => {
 			const proposerTurns: TurnInput[] = [];
 			const challengerTurns: TurnInput[] = [];

@@ -88,3 +88,12 @@ export type PresetSource =
 	| "cli-global"
 	| "config"
 	| "role-default";
+
+/**
+ * Evidence source provenance — independent from PresetSource.
+ */
+export type EvidenceSource =
+	| "cli"
+	| "config"
+	| `template:${string}`
+	| "role-default";

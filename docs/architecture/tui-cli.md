@@ -36,7 +36,7 @@ It tracks:
 - command state
 - projected `DebateState`
 - synthesis summary state
-- session-scoped per-role `RuntimePolicyState` (event-derived from `policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`)
+- session-scoped per-role `RuntimePolicyState` (event-derived from `policy.baseline`, `policy.turn.override`, `policy.turn.override.clear`; includes evidence provenance and template provenance fields)
 
 Important implementation notes:
 

@@ -797,6 +797,8 @@ export class TuiStore {
 						policy: e.policy,
 						clamps: [...e.clamps],
 						preset: { ...e.preset },
+						evidence: e.evidence,
+						template: e.template,
 						translationSummary: e.translationSummary,
 						warnings: [...e.warnings],
 						observation: e.observation,

@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	type AgentAdapter,
+	type EvidenceSource,
 	type LegacyToolPolicyInput,
 	type NormalizedEvent,
 	type PolicyClampNote,
@@ -61,6 +62,9 @@ export interface AdapterMap {
 			value: PolicyPreset;
 			source: PresetSource;
 		};
+		baselineEvidenceSource?: EvidenceSource;
+		baselineTemplateName?: string;
+		baselineTemplateBasePreset?: string;
 		baselineObservation?: ProviderObservationResult;
 		legacyToolPolicyInput?: LegacyToolPolicyInput;
 		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
@@ -74,6 +78,9 @@ export interface AdapterMap {
 			value: PolicyPreset;
 			source: PresetSource;
 		};
+		baselineEvidenceSource?: EvidenceSource;
+		baselineTemplateName?: string;
+		baselineTemplateBasePreset?: string;
 		baselineObservation?: ProviderObservationResult;
 		legacyToolPolicyInput?: LegacyToolPolicyInput;
 		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
@@ -87,6 +94,9 @@ export interface AdapterMap {
 			value: PolicyPreset;
 			source: PresetSource;
 		};
+		baselineEvidenceSource?: EvidenceSource;
+		baselineTemplateName?: string;
+		baselineTemplateBasePreset?: string;
 		baselineObservation?: ProviderObservationResult;
 		legacyToolPolicyInput?: LegacyToolPolicyInput;
 		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
@@ -167,6 +177,17 @@ function emitBaselinePolicyEvents(
 			policy: entry.baselinePolicy,
 			clamps: [...(entry.baselineClamps ?? [])],
 			preset: entry.baselinePreset,
+			...(entry.baselineEvidenceSource
+				? { evidence: { source: entry.baselineEvidenceSource } }
+				: {}),
+			...(entry.baselineTemplateName
+				? {
+						template: {
+							name: entry.baselineTemplateName,
+							basePreset: entry.baselineTemplateBasePreset,
+						},
+					}
+				: {}),
 			translationSummary:
 				observation?.translation ?? fallbackObservation.translation,
 			warnings: [...(observation?.warnings ?? [])],

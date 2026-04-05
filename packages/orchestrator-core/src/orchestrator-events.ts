@@ -1,4 +1,5 @@
 import type {
+	EvidenceSource,
 	PolicyClampNote,
 	PolicyPreset,
 	PolicyTranslationSummary,
@@ -48,6 +49,13 @@ export interface PolicyBaselineEvent {
 		value: PolicyPreset;
 		source: PresetSource;
 	};
+	evidence?: {
+		source: EvidenceSource;
+	};
+	template?: {
+		name: string;
+		basePreset?: string;
+	};
 	translationSummary: PolicyTranslationSummary;
 	warnings: PolicyTranslationWarning[];
 	observation: ProviderObservationResult;
@@ -79,6 +87,13 @@ export interface RuntimePolicyState {
 		preset: {
 			value: PolicyPreset;
 			source: PresetSource;
+		};
+		evidence?: {
+			source: EvidenceSource;
+		};
+		template?: {
+			name: string;
+			basePreset?: string;
 		};
 		translationSummary: PolicyTranslationSummary;
 		warnings: PolicyTranslationWarning[];
