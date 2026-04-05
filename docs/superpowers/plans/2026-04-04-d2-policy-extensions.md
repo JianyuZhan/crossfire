@@ -965,6 +965,7 @@ Update execution-modes docs for template schema."
 - Modify: `packages/cli/src/wiring/create-adapters.ts`
 - Create: `packages/cli/__tests__/config/evidence-resolution.test.ts`
 - Create: `packages/cli/__tests__/config/template-resolution.test.ts`
+- Create: `packages/cli/__tests__/commands/preset-options.test.ts`
 
 Add `resolveRoleEvidence()` with its own resolution chain, template expansion in `resolveAllRoles()`, the `--evidence-bar` CLI option, and wiring evidence into `compilePolicyWithDiagnostics` calls.
 
@@ -1159,6 +1160,7 @@ export interface ResolvedRoleRuntimeConfig {
 		limits?: { maxTurns?: number };
 	};
 	templateName?: string;
+	templateBasePreset?: string;
 	systemPrompt?: string;
 	providerOptions?: Record<string, unknown>;
 	mcpServers?: Record<string, McpServerConfig>;
@@ -1263,6 +1265,7 @@ export function resolveAllRoles(
 			evidence,
 			interactionOverrides,
 			templateName: template?.name,
+			templateBasePreset: template?.basePreset,
 			systemPrompt: roleConfig.systemPrompt,
 			providerOptions: binding.providerOptions,
 			mcpServers: resolvedMcpServers,
@@ -1283,7 +1286,63 @@ export function resolveAllRoles(
 }
 ```
 
-- [ ] **Step 9: Add --evidence-bar CLI option**
+- [ ] **Step 9: Write failing tests for preset-options evidence parsing**
+
+Create or add to `packages/cli/__tests__/commands/preset-options.test.ts`:
+
+```typescript
+import { describe, expect, it } from "vitest";
+import {
+	buildPresetConfig,
+	parseEvidenceBarValue,
+	toCliPresetOverrides,
+} from "../../src/commands/preset-options.js";
+
+describe("parseEvidenceBarValue", () => {
+	it("parses valid evidence bar values", () => {
+		expect(parseEvidenceBarValue("low", "--evidence-bar")).toBe("low");
+		expect(parseEvidenceBarValue("medium", "--evidence-bar")).toBe("medium");
+		expect(parseEvidenceBarValue("high", "--evidence-bar")).toBe("high");
+	});
+
+	it("throws for invalid evidence bar value", () => {
+		expect(() => parseEvidenceBarValue("extreme", "--evidence-bar")).toThrow(
+			"--evidence-bar must be one of: low, medium, high",
+		);
+	});
+});
+
+describe("buildPresetConfig with evidenceBar", () => {
+	it("includes evidenceBar when provided", () => {
+		const config = buildPresetConfig({ evidenceBar: "high" });
+		expect(config?.evidenceBar).toBe("high");
+	});
+
+	it("returns undefined when only evidenceBar is absent", () => {
+		const config = buildPresetConfig({});
+		expect(config).toBeUndefined();
+	});
+});
+
+describe("toCliPresetOverrides with evidenceBar", () => {
+	it("maps evidenceBar to cliEvidenceBar", () => {
+		const overrides = toCliPresetOverrides({ evidenceBar: "low" });
+		expect(overrides.cliEvidenceBar).toBe("low");
+	});
+
+	it("omits cliEvidenceBar when not set", () => {
+		const overrides = toCliPresetOverrides({});
+		expect(overrides.cliEvidenceBar).toBeUndefined();
+	});
+});
+```
+
+- [ ] **Step 10: Run tests to verify they fail**
+
+Run: `cd /Users/jyzhan/code/crossfire && pnpm vitest run packages/cli/__tests__/commands/preset-options.test.ts`
+Expected: FAIL — `parseEvidenceBarValue` is not exported.
+
+- [ ] **Step 11: Add --evidence-bar CLI option**
 
 In `packages/cli/src/commands/preset-options.ts`:
 
@@ -1402,7 +1461,7 @@ export function toCliPresetOverrides(
 }
 ```
 
-- [ ] **Step 10: Wire evidence into create-adapters.ts**
+- [ ] **Step 12: Wire evidence into create-adapters.ts**
 
 In `packages/cli/src/wiring/create-adapters.ts`, update `startResolvedRole` to pass evidence and interaction overrides:
 
@@ -1421,12 +1480,12 @@ async function startResolvedRole(resolved: ResolvedRoleRuntimeConfig) {
 	// ... rest unchanged
 ```
 
-- [ ] **Step 11: Build and run all tests**
+- [ ] **Step 13: Build and run all tests**
 
 Run: `cd /Users/jyzhan/code/crossfire && pnpm build && pnpm test`
 Expected: All PASS. Full monorepo builds and tests pass.
 
-- [ ] **Step 12: Update docs and README**
+- [ ] **Step 14: Update docs and README**
 
 Update `docs/architecture/execution-modes.md` to add an "Evidence Policy" section describing the evidence resolution chain (CLI --evidence-bar > config inline > template override > role-contract default), default values per role, and the `approximate` adapter warning contract.
 
@@ -1437,10 +1496,10 @@ Update `README.md` and `README.zh-CN.md` to document:
 - Template config under the configuration section
 - A brief mention of evidence policy as a configurable dimension
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 15: Commit**
 
 ```bash
-git add packages/cli/src/config/evidence-resolution.ts packages/cli/src/config/template-resolution.ts packages/cli/src/config/resolver.ts packages/cli/src/commands/preset-options.ts packages/cli/src/wiring/create-adapters.ts packages/cli/__tests__/config/evidence-resolution.test.ts packages/cli/__tests__/config/template-resolution.test.ts docs/architecture/execution-modes.md docs/architecture/tui-cli.md README.md README.zh-CN.md
+git add packages/cli/src/config/evidence-resolution.ts packages/cli/src/config/template-resolution.ts packages/cli/src/config/resolver.ts packages/cli/src/commands/preset-options.ts packages/cli/src/wiring/create-adapters.ts packages/cli/__tests__/config/evidence-resolution.test.ts packages/cli/__tests__/config/template-resolution.test.ts packages/cli/__tests__/commands/preset-options.test.ts docs/architecture/execution-modes.md docs/architecture/tui-cli.md README.md README.zh-CN.md
 git commit -m "feat(cli): add evidence resolution, template expansion, --evidence-bar
 
 Add resolveRoleEvidence() with independent resolution chain:
@@ -1535,6 +1594,10 @@ export interface PolicyBaselineEvent {
 	evidence?: {
 		source: EvidenceSource;
 	};
+	template?: {
+		name: string;
+		basePreset?: string;
+	};
 	translationSummary: PolicyTranslationSummary;
 	warnings: PolicyTranslationWarning[];
 	observation: ProviderObservationResult;
@@ -1551,7 +1614,7 @@ import type {
 } from "@crossfire/adapter-core";
 ```
 
-Update `RuntimePolicyState.baseline` to include evidence source:
+Update `RuntimePolicyState.baseline` to include evidence source and template provenance:
 
 ```typescript
 export interface RuntimePolicyState {
@@ -1564,6 +1627,10 @@ export interface RuntimePolicyState {
 		};
 		evidence?: {
 			source: EvidenceSource;
+		};
+		template?: {
+			name: string;
+			basePreset?: string;
 		};
 		translationSummary: PolicyTranslationSummary;
 		warnings: PolicyTranslationWarning[];
@@ -1586,6 +1653,8 @@ In `packages/orchestrator/src/runner.ts`, add to the `AdapterMap` entry type (fo
 
 ```typescript
 baselineEvidenceSource?: EvidenceSource;
+baselineTemplateName?: string;
+baselineTemplateBasePreset?: string;
 ```
 
 Add `EvidenceSource` to imports:
@@ -1627,6 +1696,14 @@ function emitBaselinePolicyEvents(
 			...(entry.baselineEvidenceSource
 				? { evidence: { source: entry.baselineEvidenceSource } }
 				: {}),
+			...(entry.baselineTemplateName
+				? {
+						template: {
+							name: entry.baselineTemplateName,
+							basePreset: entry.baselineTemplateBasePreset,
+						},
+					}
+				: {}),
 			translationSummary:
 				observation?.translation ?? fallbackObservation.translation,
 			warnings: [...(observation?.warnings ?? [])],
@@ -1647,6 +1724,8 @@ return {
 	session,
 	baselinePolicy: policy,
 	baselineClamps: diagnostics.clamps,
+	baselineTemplateName: resolved.templateName,
+	baselineTemplateBasePreset: resolved.templateBasePreset,
 	baselinePreset: resolved.preset,
 	baselineObservation: observation,
 	baselineEvidenceSource: resolved.evidence.source,
@@ -1690,16 +1769,24 @@ baseline: {
 Run: `cd /Users/jyzhan/code/crossfire && pnpm build && pnpm test`
 Expected: All PASS. Evidence provenance flows through the full pipeline.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 9: Update architecture docs for evidence in events**
+
+Update `docs/architecture/orchestrator.md` to document:
+- `PolicyBaselineEvent` now carries `evidence?: { source: EvidenceSource }` and `template?: { name, basePreset? }`
+- `RuntimePolicyState.baseline` includes evidence provenance and template provenance fields
+- Evidence provenance is independent from preset provenance — it tracks the source of `evidence.bar` through its own resolution chain
+
+- [ ] **Step 10: Commit**
 
 ```bash
-git add packages/adapter-core/src/policy/observation-types.ts packages/orchestrator-core/src/orchestrator-events.ts packages/orchestrator/src/runner.ts packages/cli/src/wiring/create-adapters.ts packages/tui/src/state/tui-store.ts packages/orchestrator/__tests__/policy-runner.test.ts
+git add packages/adapter-core/src/policy/observation-types.ts packages/orchestrator-core/src/orchestrator-events.ts packages/orchestrator/src/runner.ts packages/cli/src/wiring/create-adapters.ts packages/tui/src/state/tui-store.ts packages/orchestrator/__tests__/policy-runner.test.ts docs/architecture/orchestrator.md
 git commit -m "feat(events): add evidence provenance to policy events
 
 Add EvidenceSource type to observation-types.
 PolicyBaselineEvent and RuntimePolicyState now carry evidence source.
 Runner emits evidence provenance from adapter wiring.
-TUI store projects evidence source into session state."
+TUI store projects evidence source into session state.
+Update orchestrator architecture docs for evidence in events."
 ```
 
 ---
@@ -1780,6 +1867,30 @@ describe("renderPolicyText", () => {
 		expect(output).toContain("Evidence:");
 		expect(output).toContain("template:strict");
 	});
+
+	it("shows template provenance with name and basePreset", () => {
+		const ctx = makeInspectionContext({
+			template: { name: "strict", basePreset: "guarded" },
+		});
+		const output = renderPolicyText([ctx]);
+		expect(output).toContain("Template: strict");
+		expect(output).toContain("basePreset: guarded");
+	});
+
+	it("shows template provenance without basePreset when absent", () => {
+		const ctx = makeInspectionContext({
+			template: { name: "ev-only" },
+		});
+		const output = renderPolicyText([ctx]);
+		expect(output).toContain("Template: ev-only");
+		expect(output).not.toContain("basePreset");
+	});
+
+	it("omits template line when no template used", () => {
+		const ctx = makeInspectionContext();
+		const output = renderPolicyText([ctx]);
+		expect(output).not.toContain("Template:");
+	});
 });
 ```
 
@@ -1788,17 +1899,18 @@ describe("renderPolicyText", () => {
 Run: `cd /Users/jyzhan/code/crossfire && pnpm vitest run packages/cli/__tests__/commands/inspection-renderers.test.ts`
 Expected: FAIL — `evidence` property not on `RoleInspectionContext`, renderer doesn't output evidence section.
 
-- [ ] **Step 3: Add evidence to inspection-context.ts**
+- [ ] **Step 3: Update inspection-context.ts — compile path + metadata**
 
 In `packages/cli/src/commands/inspection-context.ts`:
 
-Add import:
+Add imports:
 
 ```typescript
 import type { EvidenceSource } from "../config/evidence-resolution.js";
+import type { EvidenceBar } from "@crossfire/adapter-core";
 ```
 
-Add evidence to `RoleInspectionBase`:
+Add evidence and template provenance to `RoleInspectionBase`:
 
 ```typescript
 interface RoleInspectionBase {
@@ -1813,19 +1925,29 @@ interface RoleInspectionBase {
 		bar: EvidenceBar | undefined;
 		source: EvidenceSource;
 	};
+	template?: {
+		name: string;
+		basePreset?: string;
+	};
 }
 ```
 
-Add import for `EvidenceBar`:
+**Critical:** Update the `compilePolicyWithDiagnostics` call inside `buildInspectionContext` to pass the same overrides as the execution path in `create-adapters.ts`. Without this, `inspect-policy` would show the un-overridden compiled policy while runtime uses the overridden one:
 
 ```typescript
-import type {
-	// ... existing
-	EvidenceBar,
-} from "@crossfire/adapter-core";
+const diagnostics = compilePolicyWithDiagnostics({
+	preset: resolved.preset.value,
+	role: roleName,
+	...(resolved.evidence.bar !== undefined
+		? { evidenceOverride: { bar: resolved.evidence.bar } }
+		: {}),
+	...(resolved.interactionOverrides
+		? { interactionOverride: resolved.interactionOverrides }
+		: {}),
+});
 ```
 
-In `buildInspectionContext`, pass evidence from resolved roles:
+Pass evidence, template provenance, and the correctly-compiled policy into results:
 
 ```typescript
 results.push({
@@ -1834,6 +1956,9 @@ results.push({
 	model: resolved.model,
 	preset: resolved.preset,
 	evidence: resolved.evidence,
+	template: resolved.templateName
+		? { name: resolved.templateName, basePreset: resolved.templateBasePreset }
+		: undefined,
 	resolvedPolicy: diagnostics.policy,
 	clamps: diagnostics.clamps,
 	observation,
@@ -1849,13 +1974,16 @@ results.push({
 	model: resolved.model,
 	preset: resolved.preset,
 	evidence: resolved.evidence,
+	template: resolved.templateName
+		? { name: resolved.templateName, basePreset: resolved.templateBasePreset }
+		: undefined,
 	error: {
 		message: err instanceof Error ? err.message : String(err),
 	},
 });
 ```
 
-- [ ] **Step 4: Add evidence display to inspection-renderers.ts**
+- [ ] **Step 4: Add evidence + template display to inspection-renderers.ts**
 
 In `packages/cli/src/commands/inspection-renderers.ts`, add evidence section in `renderPolicyText`:
 
@@ -1870,6 +1998,14 @@ export function renderPolicyText(contexts: RoleInspectionContext[]): string {
 		lines.push(`\n=== ${ctx.role} (${ctx.adapter}) ===`);
 		lines.push(`  Preset: ${ctx.preset.value} (${ctx.preset.source})`);
 		lines.push(`  Model: ${ctx.model ?? "(default)"}`);
+
+		// Template provenance
+		if (ctx.template) {
+			const base = ctx.template.basePreset
+				? ` (basePreset: ${ctx.template.basePreset})`
+				: "";
+			lines.push(`  Template: ${ctx.template.name}${base}`);
+		}
 
 		// Evidence section
 		if (ctx.evidence) {
@@ -1913,6 +2049,10 @@ export interface RolePolicyInspection {
 		bar: string | undefined;
 		source: string;
 	};
+	template?: {
+		name: string;
+		basePreset?: string;
+	};
 	resolvedPolicy?: ResolvedPolicy;
 	clamps?: readonly PolicyClampNote[];
 	translation?: PolicyTranslationSummary;
@@ -1921,7 +2061,7 @@ export interface RolePolicyInspection {
 }
 ```
 
-Update `buildPolicyInspectionReport` to include evidence:
+Update `buildPolicyInspectionReport` to include evidence and template:
 
 ```typescript
 return {
@@ -1930,6 +2070,7 @@ return {
 	model: ctx.model,
 	preset: ctx.preset,
 	evidence: ctx.evidence,
+	template: ctx.template,
 	resolvedPolicy: ctx.resolvedPolicy,
 	clamps: ctx.clamps,
 	translation: ctx.observation.translation,
@@ -1946,6 +2087,7 @@ return {
 	model: ctx.model,
 	preset: ctx.preset,
 	evidence: ctx.evidence,
+	template: ctx.template,
 	error: ctx.error,
 };
 ```
@@ -1960,15 +2102,23 @@ Expected: All PASS.
 Run: `cd /Users/jyzhan/code/crossfire && pnpm test`
 Expected: All PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Update architecture docs for inspection changes**
+
+Update `docs/architecture/tui-cli.md` to document:
+- `crossfire inspect` output now includes evidence provenance (bar value + source) per role
+- JSON inspection report includes `evidence` and `template` fields
+- Evidence source tracks resolution chain independently from preset source
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add packages/cli/src/commands/inspection-context.ts packages/cli/src/commands/inspection-renderers.ts packages/cli/src/commands/inspection-reports.ts packages/cli/__tests__/commands/inspection-renderers.test.ts
+git add packages/cli/src/commands/inspection-context.ts packages/cli/src/commands/inspection-renderers.ts packages/cli/src/commands/inspection-reports.ts packages/cli/__tests__/commands/inspection-renderers.test.ts docs/architecture/tui-cli.md
 git commit -m "feat(inspection): add evidence provenance to inspect output
 
 Inspection text output shows evidence bar and source per role.
 JSON inspection report includes evidence field.
-Evidence provenance flows from resolver through inspection context."
+Evidence provenance flows from resolver through inspection context.
+Update tui-cli architecture docs for inspection changes."
 ```
 
 ---
