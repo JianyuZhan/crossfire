@@ -36,6 +36,7 @@ import {
 	buildJudgeIncrementalPrompt,
 	buildJudgeInitialPrompt,
 	computeReferenceScores,
+	defaultSystemPrompt,
 	draftToAuditReport,
 	generateSummary,
 	renderActionPlanHtml,
@@ -130,6 +131,54 @@ export function getSchemaRefreshMode(
 function appendOperationalGuidance(prompt: string, guidance?: string): string {
 	if (!guidance) return prompt;
 	return `${prompt}\n\n[ADDITIONAL GUIDANCE]\n${guidance}`;
+}
+
+function getEvidenceGuidance(
+	role: "proposer" | "challenger" | "judge",
+	policy: ResolvedPolicy | undefined,
+): string | undefined {
+	const bar = policy?.evidence.bar;
+	if (!bar) return undefined;
+
+	if (role === "judge") {
+		switch (bar) {
+			case "low":
+				return "Evidence requirement: low. Prefer concrete support when available, but do not over-penalize lightweight exploratory claims.";
+			case "medium":
+				return "Evidence requirement: medium. Weigh concrete references and tool-verified evidence meaningfully when assessing argument quality.";
+			case "high":
+				return "Evidence requirement: high. Treat evidence quality as a primary criterion; unsupported claims should count strongly against a side.";
+		}
+	}
+
+	switch (bar) {
+		case "low":
+			return "Evidence requirement: low. Prioritize progress, and add concrete references when they materially strengthen a claim.";
+		case "medium":
+			return "Evidence requirement: medium. Support important claims with concrete references or tool-verified evidence when available.";
+		case "high":
+			return "Evidence requirement: high. Treat unsupported claims as weak; back significant assertions with concrete references, citations, or tool-verified evidence.";
+	}
+}
+
+function appendEvidenceGuidance(
+	prompt: string,
+	role: "proposer" | "challenger" | "judge",
+	policy: ResolvedPolicy | undefined,
+): string {
+	const guidance = getEvidenceGuidance(role, policy);
+	if (!guidance) return prompt;
+	return `${prompt}\n\n[EVIDENCE POLICY]\n${guidance}`;
+}
+
+function resolveRecoverySystemPrompt(
+	role: "proposer" | "challenger" | "judge",
+	systemPrompt: string | undefined,
+	policy: ResolvedPolicy | undefined,
+): string {
+	const basePrompt = systemPrompt ?? defaultSystemPrompt(role);
+	const guidance = getEvidenceGuidance(role, policy);
+	return guidance ? `${basePrompt} ${guidance}` : basePrompt;
 }
 
 function getObservationForPolicy(
@@ -430,6 +479,11 @@ export async function runDebate(
 					),
 			});
 		}
+		prompt = appendEvidenceGuidance(
+			prompt,
+			"judge",
+			adapters.judge?.baselinePolicy,
+		);
 		if (suffix) {
 			prompt = `${prompt}\n\n${suffix}`;
 		}
@@ -571,7 +625,49 @@ export async function runDebate(
 			timestamp: Date.now(),
 		});
 
-		// Step 2: Snapshot state, sync recovery max rounds (on first turn)
+		// Step 2: Resolve turn preset override and effective policy
+		const turnId = `${role[0]}-${round}`;
+		const turnOverridePreset = config.turnPresets?.[turnId];
+		const hasTurnOverride = turnOverridePreset !== undefined;
+		const turnPolicy = hasTurnOverride
+			? compilePolicy({
+					preset: turnOverridePreset,
+					role: role as "proposer" | "challenger" | "judge",
+					legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
+				})
+			: adapterEntry.baselinePolicy;
+
+		// Only emit policy.turn.override when there IS a turn-level override
+		if (hasTurnOverride && turnPolicy) {
+			const observation = getObservationForPolicy(adapterEntry, turnPolicy);
+			const fallbackObservation: ProviderObservationResult = {
+				translation: {
+					adapter: adapterEntry.session.adapterId ?? "unknown",
+					nativeSummary: {},
+					exactFields: [],
+					approximateFields: [],
+					unsupportedFields: [],
+				},
+				toolView: [],
+				capabilityEffects: [],
+				warnings: [],
+				completeness: "minimal",
+			};
+			bus.push({
+				kind: "policy.turn.override",
+				role: role as "proposer" | "challenger",
+				turnId,
+				policy: turnPolicy,
+				preset: turnOverridePreset,
+				translationSummary:
+					observation?.translation ?? fallbackObservation.translation,
+				warnings: [...(observation?.warnings ?? [])],
+				observation: observation ?? fallbackObservation,
+				timestamp: Date.now(),
+			});
+		}
+
+		// Step 3: Snapshot state, sync recovery max rounds, and build prompt
 		const currentState = bus.snapshot();
 		let prompt: string;
 		if (turnCount === 1) {
@@ -602,62 +698,15 @@ export async function runDebate(
 				),
 			});
 		}
+		prompt = appendEvidenceGuidance(prompt, role, turnPolicy);
 
-		// Step 3: Append operational guidance from director
+		// Step 4: Append operational guidance from director
 		prompt = appendOperationalGuidance(prompt, director.getGuidance(role));
 
-		// Step 4: Clear lastJudgeText
+		// Step 5: Clear lastJudgeText
 		lastJudgeText = undefined;
 
-		// Step 5: Resolve turn preset override
-		const turnId = `${role[0]}-${round}`;
-		const turnOverridePreset = config.turnPresets?.[turnId];
-		const hasTurnOverride = turnOverridePreset !== undefined;
-		// Only emit policy.turn.override when there IS a turn-level override
-		if (hasTurnOverride) {
-			const overridePolicy = compilePolicy({
-				preset: turnOverridePreset,
-				role: role as "proposer" | "challenger",
-				legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
-			});
-			const observation = getObservationForPolicy(adapterEntry, overridePolicy);
-			const fallbackObservation: ProviderObservationResult = {
-				translation: {
-					adapter: adapterEntry.session.adapterId ?? "unknown",
-					nativeSummary: {},
-					exactFields: [],
-					approximateFields: [],
-					unsupportedFields: [],
-				},
-				toolView: [],
-				capabilityEffects: [],
-				warnings: [],
-				completeness: "minimal",
-			};
-			bus.push({
-				kind: "policy.turn.override",
-				role: role as "proposer" | "challenger",
-				turnId,
-				policy: overridePolicy,
-				preset: turnOverridePreset,
-				translationSummary:
-					observation?.translation ?? fallbackObservation.translation,
-				warnings: [...(observation?.warnings ?? [])],
-				observation: observation ?? fallbackObservation,
-				timestamp: Date.now(),
-			});
-		}
-
-		// Step 6: Compile per-turn policy if baseline exists
-		const turnPolicy = hasTurnOverride
-			? compilePolicy({
-					preset: turnOverridePreset,
-					role: role as "proposer" | "challenger" | "judge",
-					legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
-				})
-			: adapterEntry.baselinePolicy;
-
-		// Step 7: Set activeTurn, call sendTurn
+		// Step 6: Set activeTurn, call sendTurn
 		activeTurn = {
 			role,
 			turnId,
@@ -1088,7 +1137,11 @@ function populateRecoveryContext(
 
 	for (const { entry, role, systemPrompt, schemaType } of roles) {
 		entry.session.recoveryContext = {
-			systemPrompt: systemPrompt ?? "",
+			systemPrompt: resolveRecoverySystemPrompt(
+				role,
+				systemPrompt,
+				entry.baselinePolicy,
+			),
 			topic: config.topic,
 			role,
 			maxRounds: config.maxRounds,
@@ -1098,7 +1151,11 @@ function populateRecoveryContext(
 
 	if (adapters.judge) {
 		adapters.judge.session.recoveryContext = {
-			systemPrompt: config.judgeSystemPrompt ?? "",
+			systemPrompt: resolveRecoverySystemPrompt(
+				"judge",
+				config.judgeSystemPrompt,
+				adapters.judge.baselinePolicy,
+			),
 			topic: config.topic,
 			role: "judge",
 			maxRounds: config.maxRounds,

@@ -63,6 +63,7 @@ export function buildInspectionContext(
 		const resolved = roles[roleName];
 		if (!resolved) continue;
 
+		let effectiveEvidenceBar: EvidenceBar | undefined = resolved.evidence.bar;
 		try {
 			const diagnostics = compilePolicyWithDiagnostics({
 				preset: resolved.preset.value,
@@ -74,6 +75,7 @@ export function buildInspectionContext(
 					? { interactionOverride: resolved.interactionOverrides }
 					: {}),
 			});
+			effectiveEvidenceBar = diagnostics.policy.evidence.bar;
 
 			const observation = observePolicyForAdapter(
 				resolved.adapter,
@@ -86,7 +88,10 @@ export function buildInspectionContext(
 				adapter: resolved.adapter,
 				model: resolved.model,
 				preset: resolved.preset,
-				evidence: resolved.evidence,
+				evidence: {
+					bar: effectiveEvidenceBar,
+					source: resolved.evidence.source,
+				},
 				template: resolved.templateName
 					? {
 							name: resolved.templateName,
@@ -103,7 +108,10 @@ export function buildInspectionContext(
 				adapter: resolved.adapter,
 				model: resolved.model,
 				preset: resolved.preset,
-				evidence: resolved.evidence,
+				evidence: {
+					bar: effectiveEvidenceBar,
+					source: resolved.evidence.source,
+				},
 				template: resolved.templateName
 					? {
 							name: resolved.templateName,

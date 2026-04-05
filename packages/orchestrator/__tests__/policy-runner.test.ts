@@ -235,6 +235,77 @@ describe("runner policy flow (real runDebate path)", () => {
 			}
 		});
 
+		it("threads effective evidence bar into runtime prompts", async () => {
+			const proposerTurns: TurnInput[] = [];
+			const challengerTurns: TurnInput[] = [];
+			const proposer = createScriptedAdapter(
+				"claude",
+				{
+					"p-1": turnEvents(
+						"p-1",
+						"claude",
+						"claude-s1",
+						"Proposer r1",
+						defaultMeta,
+					),
+				},
+				proposerTurns,
+			);
+			const challenger = createScriptedAdapter(
+				"codex",
+				{
+					"c-1": turnEvents(
+						"c-1",
+						"codex",
+						"codex-s1",
+						"Challenger r1",
+						defaultMeta,
+					),
+				},
+				challengerTurns,
+			);
+
+			const adapters: AdapterMap = {
+				proposer: {
+					adapter: proposer,
+					session: await proposer.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: compilePolicy({
+						preset: "guarded",
+						role: "proposer",
+						evidenceOverride: { bar: "low" },
+					}),
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineEvidenceSource: "config",
+				},
+				challenger: {
+					adapter: challenger,
+					session: await challenger.startSession({
+						profile: "test",
+						workingDirectory: "/tmp",
+					}),
+					baselinePolicy: compilePolicy({
+						preset: "guarded",
+						role: "challenger",
+					}),
+					baselineClamps: [],
+					baselinePreset: { value: "guarded", source: "config" },
+					baselineEvidenceSource: "role-default",
+				},
+			};
+
+			const bus = new DebateEventBus();
+			await runDebate(debateConfig, adapters, { bus });
+
+			expect(proposerTurns[0]?.prompt).toContain("Evidence requirement: low.");
+			expect(challengerTurns[0]?.prompt).toContain(
+				"Evidence requirement: high.",
+			);
+		});
+
 		it("emits reconstructible baseline and override events with real summaries", async () => {
 			const proposerTurns: TurnInput[] = [];
 			const challengerTurns: TurnInput[] = [];

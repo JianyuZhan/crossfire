@@ -185,6 +185,7 @@ Important notes:
 - it waits for `turn.completed` on the bus
 - it resolves effective turn mode before each proposer / challenger turn using `debate default < role baseline < turn override`
 - system prompt resolution is handled at the CLI layer: the runner receives pre-resolved system prompts from `config.proposerSystemPrompt` / `config.challengerSystemPrompt` / `config.judgeSystemPrompt`, falling back to `defaultSystemPrompt(role)` inside `buildInitialPrompt()`
+- it appends evidence-policy guidance derived from the effective `ResolvedPolicy.evidence.bar` to live prompts and recovery context, so evidence settings shape runtime behavior even though adapters only expose them as approximate observation warnings
 - it emits `policy.baseline` for each started role immediately after `debate.started`, carrying the full baseline `ResolvedPolicy`, clamp notes, preset provenance, evidence provenance (`evidence?: { source: EvidenceSource }`), template provenance (`template?: { name, basePreset? }`), translation summary, warnings, and the full `ProviderObservationResult` (tool view, capability effects, completeness) so that downstream consumers can reconstruct runtime policy state from events alone
 - it emits `policy.turn.override` before sending the turn (only when a turn-level override is active) with the same observation payload, and `policy.turn.override.clear` after the turn completes
 - baseline and override policy state is intentionally reconstructed from those events rather than from hidden mutable runner state

@@ -44,10 +44,11 @@ describe("renderPolicyText", () => {
 
 	it("shows role-default evidence when no explicit override", () => {
 		const ctx = makeInspectionContext({
-			evidence: { bar: undefined, source: "role-default" },
+			evidence: { bar: "medium", source: "role-default" },
 		});
 		const output = renderPolicyText([ctx]);
 		expect(output).toContain("Evidence:");
+		expect(output).toContain("bar: medium");
 		expect(output).toContain("(role-default)");
 	});
 

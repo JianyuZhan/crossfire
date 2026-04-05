@@ -207,6 +207,36 @@ describe("CrossfireConfigSchema", () => {
 			});
 			expect(result.success).toBe(true);
 		});
+
+		it("rejects template with unsupported capability overrides", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...MINIMAL_CONFIG,
+				templates: [
+					{
+						name: "bad",
+						overrides: {
+							capabilities: { shell: "exec" },
+						},
+					},
+				],
+			});
+			expect(result.success).toBe(false);
+		});
+
+		it("rejects template with unsupported interaction limit fields", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...MINIMAL_CONFIG,
+				templates: [
+					{
+						name: "bad",
+						overrides: {
+							interaction: { limits: { timeoutMs: 1000 } },
+						},
+					},
+				],
+			});
+			expect(result.success).toBe(false);
+		});
 	});
 
 	describe("role evidence field", () => {
@@ -260,6 +290,37 @@ describe("CrossfireConfigSchema", () => {
 				},
 			});
 			expect(result.success).toBe(true);
+		});
+	});
+
+	describe("strict schema enforcement", () => {
+		it("rejects legacy role-level provider bag fields", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...validConfig,
+				roles: {
+					...validConfig.roles,
+					proposer: {
+						binding: "claude-default",
+						preset: "guarded",
+						allowed_tools: ["Bash"],
+					},
+				},
+			});
+			expect(result.success).toBe(false);
+		});
+
+		it("rejects legacy binding mcp_servers field", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...validConfig,
+				providerBindings: [
+					{
+						name: "claude-default",
+						adapter: "claude",
+						mcp_servers: ["github"],
+					},
+				],
+			});
+			expect(result.success).toBe(false);
 		});
 	});
 });

@@ -85,6 +85,16 @@ describe("buildInspectionContext", () => {
 		expect(proposer).not.toHaveProperty("observation");
 	});
 
+	it("reports effective evidence bar even when source is role-default", () => {
+		const context = buildInspectionContext(testConfig, {});
+		const report = buildPolicyInspectionReport(context);
+		const proposer = report.roles.find((r) => r.role === "proposer");
+		expect(proposer?.evidence).toEqual({
+			bar: "medium",
+			source: "role-default",
+		});
+	});
+
 	it("per-role failure isolation: mixed adapters all resolve", () => {
 		const mixedConfig: CrossfireConfig = {
 			providerBindings: [

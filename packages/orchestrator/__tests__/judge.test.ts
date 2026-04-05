@@ -3,6 +3,7 @@ import type {
 	NormalizedEvent,
 	SessionHandle,
 } from "@crossfire/adapter-core";
+import { CLAUDE_CAPABILITIES } from "@crossfire/adapter-core";
 import { describe, expect, it, vi } from "vitest";
 import { DebateEventBus } from "../src/event-bus.js";
 import { runJudgeTurn } from "../src/judge.js";
@@ -20,7 +21,7 @@ function makeMockAdapter(scriptedEvents: NormalizedEvent[]): AgentAdapter {
 	});
 	return {
 		id: "claude",
-		capabilities: {} as any,
+		capabilities: CLAUDE_CAPABILITIES,
 		async startSession() {
 			return {
 				adapterSessionId: "js1",
@@ -206,7 +207,7 @@ describe("runJudgeTurn", () => {
 		}));
 		const adapter: AgentAdapter = {
 			id: "claude",
-			capabilities: {} as any,
+			capabilities: CLAUDE_CAPABILITIES,
 			async startSession() {
 				return {
 					adapterSessionId: "js1",
@@ -281,7 +282,7 @@ describe("runJudgeTurn", () => {
 		});
 		const adapter: AgentAdapter = {
 			id: "claude",
-			capabilities: {} as any,
+			capabilities: CLAUDE_CAPABILITIES,
 			async startSession() {
 				return handle;
 			},
@@ -299,9 +300,9 @@ describe("runJudgeTurn", () => {
 					exploration: "forbidden" as const,
 					factCheck: "minimal" as const,
 					mayIntroduceNewProposal: false,
-					evidenceBar: "high" as const,
 				},
 				ceilings: {},
+				evidenceDefaults: { bar: "high" as const },
 			},
 			capabilities: {
 				filesystem: "read" as const,
@@ -310,6 +311,7 @@ describe("runJudgeTurn", () => {
 				subagents: "off" as const,
 			},
 			interaction: { approval: "always" as const },
+			evidence: { bar: "high" as const },
 		};
 
 		await runJudgeTurn(adapter, handle, bus, {

@@ -11,68 +11,85 @@ const ApprovalLevelSchema = z.enum([
 	"never",
 ]);
 
-const McpServerConfigSchema = z.object({
-	command: z.string(),
-	args: z.array(z.string()).optional(),
-	env: z.record(z.string()).optional(),
-});
+const McpServerConfigSchema = z
+	.object({
+		command: z.string(),
+		args: z.array(z.string()).optional(),
+		env: z.record(z.string()).optional(),
+	})
+	.strict();
 
-const ProviderBindingConfigSchema = z.object({
-	name: z.string(),
-	adapter: z.enum(["claude", "codex", "gemini"]),
-	model: z.string().optional(),
-	providerOptions: z.record(z.unknown()).optional(),
-	mcpServers: z.array(z.string()).optional(),
-});
+const ProviderBindingConfigSchema = z
+	.object({
+		name: z.string(),
+		adapter: z.enum(["claude", "codex", "gemini"]),
+		model: z.string().optional(),
+		providerOptions: z.record(z.unknown()).optional(),
+		mcpServers: z.array(z.string()).optional(),
+	})
+	.strict();
 
-const PolicyTemplateOverridesSchema = z.object({
-	evidence: z
-		.object({
-			bar: EvidenceBarSchema,
-		})
-		.optional(),
-	interaction: z
-		.object({
-			approval: ApprovalLevelSchema.optional(),
-			limits: z
-				.object({
-					maxTurns: z.number().optional(),
-				})
-				.optional(),
-		})
-		.optional(),
-});
+const PolicyTemplateOverridesSchema = z
+	.object({
+		evidence: z
+			.object({
+				bar: EvidenceBarSchema,
+			})
+			.strict()
+			.optional(),
+		interaction: z
+			.object({
+				approval: ApprovalLevelSchema.optional(),
+				limits: z
+					.object({
+						maxTurns: z.number().optional(),
+					})
+					.strict()
+					.optional(),
+			})
+			.strict()
+			.optional(),
+	})
+	.strict();
 
-const PolicyTemplateConfigSchema = z.object({
-	name: z.string(),
-	basePreset: PolicyPresetSchema.optional(),
-	overrides: PolicyTemplateOverridesSchema.optional(),
-});
+const PolicyTemplateConfigSchema = z
+	.object({
+		name: z.string(),
+		basePreset: PolicyPresetSchema.optional(),
+		overrides: PolicyTemplateOverridesSchema.optional(),
+	})
+	.strict();
 
-const RoleProfileConfigSchema = z.object({
-	binding: z.string(),
-	model: z.string().optional(),
-	preset: PolicyPresetSchema.optional(),
-	systemPrompt: z.string().optional(),
-	template: z.string().optional(),
-	evidence: z
-		.object({
-			bar: EvidenceBarSchema,
-		})
-		.optional(),
-});
+const RoleProfileConfigSchema = z
+	.object({
+		binding: z.string(),
+		model: z.string().optional(),
+		preset: PolicyPresetSchema.optional(),
+		systemPrompt: z.string().optional(),
+		template: z.string().optional(),
+		evidence: z
+			.object({
+				bar: EvidenceBarSchema,
+			})
+			.strict()
+			.optional(),
+	})
+	.strict();
 
 export const CrossfireConfigSchema = z
 	.object({
 		mcpServers: z.record(McpServerConfigSchema).optional(),
 		providerBindings: z.array(ProviderBindingConfigSchema),
 		templates: z.array(PolicyTemplateConfigSchema).optional(),
-		roles: z.object({
-			proposer: RoleProfileConfigSchema,
-			challenger: RoleProfileConfigSchema,
-			judge: RoleProfileConfigSchema.optional(),
-		}),
+		roles: z
+			.object({
+				proposer: RoleProfileConfigSchema,
+				challenger: RoleProfileConfigSchema,
+				judge: RoleProfileConfigSchema.optional(),
+			})
+			.strict(),
 	})
+	.strict()
 	.superRefine((config, ctx) => {
 		// Validate unique template names
 		if (config.templates) {

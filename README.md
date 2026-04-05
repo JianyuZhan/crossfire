@@ -456,6 +456,10 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
 | `evidence` | Evidence policy override (`{ bar: "low" \| "medium" \| "high" }`) | no | — |
 | `systemPrompt` | Role-specific system prompt override | no | binding / built-in default |
 
+Config validation is strict: legacy fields such as `allowed_tools` / `mcp_servers` and unapproved template override keys are rejected instead of being silently ignored.
+
+`--evidence-bar`, role `evidence`, and template evidence overrides affect both inspect/status surfaces and the live debate prompts through evidence-policy guidance; they are not modeled as provider-native enforcement knobs.
+
 **Provider binding fields:**
 
 | Field | Description | Required | Default |

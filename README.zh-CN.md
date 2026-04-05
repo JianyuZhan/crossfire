@@ -456,6 +456,10 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 | `evidence` | 证据策略覆盖（`{ bar: "low" \| "medium" \| "high" }`） | 否 | — |
 | `systemPrompt` | 角色级 system prompt 覆盖 | 否 | binding / 内置默认值 |
 
+配置校验是严格的：`allowed_tools`、`mcp_servers` 这类 legacy 字段，以及未批准的 template override key，会直接报错，不会被静默忽略。
+
+`--evidence-bar`、role `evidence`、template evidence override 不只是影响 inspect/status 展示；它们也会通过 evidence-policy guidance 进入 live debate prompt，但不会伪装成 provider-native enforcement 开关。
+
 **Provider 绑定字段：**
 
 | 字段 | 说明 | 必填 | 默认值 |

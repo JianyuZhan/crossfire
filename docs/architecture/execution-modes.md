@@ -78,13 +78,13 @@ CLI --evidence-bar > config inline > template override > role-contract default
 - **CLI --evidence-bar**: `crossfire start --evidence-bar high` applies to all roles
 - **Config inline**: `roles.proposer.evidence.bar` in `crossfire.config.json`
 - **Template override**: `templates[].overrides.evidence.bar` for roles using that template
-- **Role-contract default**: each role's contract has a built-in default (currently `undefined` for all roles, meaning no evidence requirement)
+- **Role-contract default**: each role's contract has a built-in default (`medium` for proposer, `high` for challenger and judge)
 
 Valid evidence bar values: `low`, `medium`, `high`
 
-The resolution function (`resolveRoleEvidence()` in `@crossfire/cli/config/evidence-resolution`) returns both the resolved bar value and its source (`cli`, `config`, `template:name`, or `role-default`) for provenance tracking.
+The resolution function (`resolveRoleEvidence()` in `@crossfire/cli/config/evidence-resolution`) returns the evidence provenance source (`cli`, `config`, `template:name`, or `role-default`). The compiler then merges that chain with the role-contract defaults to produce the effective `ResolvedPolicy.evidence.bar`.
 
-Evidence policy is passed to `compilePolicyWithDiagnostics()` via the `evidenceOverride` parameter and merged into the role contract during compilation. The baseline evidence source is stored on the adapter entry for event provenance (Task 5).
+Evidence policy is passed to `compilePolicyWithDiagnostics()` via the `evidenceOverride` parameter and merged into the role contract during compilation. The effective evidence bar is surfaced in inspect/status output, while the baseline evidence source is stored on the adapter entry for event provenance. The runner also appends evidence-policy guidance to live prompts and recovery context so evidence settings affect runtime behavior rather than observation only.
 
 ## Custom Templates
 
@@ -153,6 +153,7 @@ Roles can also override evidence directly without using templates:
 - `basePreset` must be a valid preset name if specified
 - Evidence `bar` must be one of `low`, `medium`, `high`
 - Interaction `approval` must be one of `always`, `on-risk`, `on-failure`, `never`
+- The config schema is strict: legacy fields such as `allowed_tools` / `mcp_servers` and unapproved template override keys are rejected rather than silently ignored
 
 Templates are resolved during config loading and their resolved policies are stored in the adapter wiring layer for runtime use.
 
