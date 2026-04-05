@@ -26,6 +26,13 @@ function copyRoleContract(rc: RoleContract): RoleContract {
 	};
 }
 
+const CAPABILITY_CLAMPS = [
+	{ key: "filesystem", clamp: clampFilesystem },
+	{ key: "network", clamp: clampNetwork },
+	{ key: "shell", clamp: clampShell },
+	{ key: "subagents", clamp: clampSubagents },
+] as const;
+
 function clampCapabilitiesWithNotes(
 	base: CapabilityPolicy,
 	ceilings: CapabilityCeilings,
@@ -34,48 +41,22 @@ function clampCapabilitiesWithNotes(
 	clamps: PolicyClampNote[];
 } {
 	const clamps: PolicyClampNote[] = [];
+	const result = {} as Record<string, string>;
 
-	const filesystem = clampFilesystem(base.filesystem, ceilings.filesystem);
-	if (filesystem !== base.filesystem) {
-		clamps.push({
-			field: "capabilities.filesystem",
-			before: base.filesystem,
-			after: filesystem,
-			reason: "role_ceiling",
-		});
+	for (const { key, clamp } of CAPABILITY_CLAMPS) {
+		const clamped = clamp(base[key] as never, ceilings[key] as never);
+		result[key] = clamped;
+		if (clamped !== base[key]) {
+			clamps.push({
+				field: `capabilities.${key}` as PolicyClampNote["field"],
+				before: base[key],
+				after: clamped,
+				reason: "role_ceiling",
+			});
+		}
 	}
 
-	const network = clampNetwork(base.network, ceilings.network);
-	if (network !== base.network) {
-		clamps.push({
-			field: "capabilities.network",
-			before: base.network,
-			after: network,
-			reason: "role_ceiling",
-		});
-	}
-
-	const shell = clampShell(base.shell, ceilings.shell);
-	if (shell !== base.shell) {
-		clamps.push({
-			field: "capabilities.shell",
-			before: base.shell,
-			after: shell,
-			reason: "role_ceiling",
-		});
-	}
-
-	const subagents = clampSubagents(base.subagents, ceilings.subagents);
-	if (subagents !== base.subagents) {
-		clamps.push({
-			field: "capabilities.subagents",
-			before: base.subagents,
-			after: subagents,
-			reason: "role_ceiling",
-		});
-	}
-
-	return { capabilities: { filesystem, network, shell, subagents }, clamps };
+	return { capabilities: result as unknown as CapabilityPolicy, clamps };
 }
 
 function compilePolicyInternal(

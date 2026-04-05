@@ -104,6 +104,38 @@ describe("CodexAdapter", () => {
 		mock.client.close();
 	});
 
+	/** Shared helper: create a session with the default test model */
+	async function setupSession() {
+		const sessionPromise = adapter.startSession({
+			profile: "test",
+			workingDirectory: "/tmp",
+			model: "test-model",
+		});
+		let msg = await mock.readNextMessage();
+		mock.sendResponse(msg.id as number, {});
+		await mock.readNextMessage(); // initialized
+		msg = await mock.readNextMessage();
+		mock.sendResponse(msg.id as number, {
+			thread: { id: "thread-1" },
+		});
+		return sessionPromise;
+	}
+
+	/** Shared helper: create a session and send the first turn */
+	async function setupSessionAndTurn() {
+		const handle = await setupSession();
+		const turnPromise = adapter.sendTurn(handle, {
+			prompt: "test",
+			turnId: "t1",
+		});
+		const turnMsg = await mock.readNextMessage();
+		mock.sendResponse(turnMsg.id as number, {
+			turn: { id: "native-t1", status: "running" },
+		});
+		await turnPromise;
+		return handle;
+	}
+
 	describe("constructor and properties", () => {
 		it("has id 'codex'", () => {
 			expect(adapter.id).toBe("codex");
@@ -263,22 +295,6 @@ describe("CodexAdapter", () => {
 	});
 
 	describe("sendTurn()", () => {
-		async function setupSession() {
-			const sessionPromise = adapter.startSession({
-				profile: "test",
-				workingDirectory: "/tmp",
-				model: "test-model",
-			});
-			let msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {});
-			await mock.readNextMessage(); // initialized
-			msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {
-				thread: { id: "thread-1" },
-			});
-			return sessionPromise;
-		}
-
 		it("sends turn/start and returns TurnHandle with status 'running'", async () => {
 			const handle = await setupSession();
 
@@ -371,36 +387,6 @@ describe("CodexAdapter", () => {
 	});
 
 	describe("event flow via notifications", () => {
-		async function setupSessionAndTurn() {
-			const handle = await setupSessionHelper();
-			const turnPromise = adapter.sendTurn(handle, {
-				prompt: "test",
-				turnId: "t1",
-			});
-			const turnMsg = await mock.readNextMessage();
-			mock.sendResponse(turnMsg.id as number, {
-				turn: { id: "native-t1", status: "running" },
-			});
-			await turnPromise;
-			return handle;
-		}
-
-		async function setupSessionHelper() {
-			const sessionPromise = adapter.startSession({
-				profile: "test",
-				workingDirectory: "/tmp",
-				model: "test-model",
-			});
-			let msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {});
-			await mock.readNextMessage();
-			msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {
-				thread: { id: "thread-1" },
-			});
-			return sessionPromise;
-		}
-
 		it("routes notifications through mapCodexNotification and emits events", async () => {
 			const { events } = collectEvents(adapter);
 			await setupSessionAndTurn();
@@ -468,33 +454,6 @@ describe("CodexAdapter", () => {
 	});
 
 	describe("streaming: message.delta pipeline", () => {
-		async function setupSessionAndTurn() {
-			const sessionPromise = adapter.startSession({
-				profile: "test",
-				workingDirectory: "/tmp",
-				model: "test-model",
-			});
-			let msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {});
-			await mock.readNextMessage();
-			msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {
-				thread: { id: "thread-1" },
-			});
-			const handle = await sessionPromise;
-
-			const turnPromise = adapter.sendTurn(handle, {
-				prompt: "test",
-				turnId: "t1",
-			});
-			const turnMsg = await mock.readNextMessage();
-			mock.sendResponse(turnMsg.id as number, {
-				turn: { id: "native-t1", status: "running" },
-			});
-			await turnPromise;
-			return handle;
-		}
-
 		it("emits multiple message.delta events in order from item/agentMessage/delta", async () => {
 			const { events } = collectEvents(adapter);
 			await setupSessionAndTurn();
@@ -868,25 +827,9 @@ describe("CodexAdapter", () => {
 	});
 
 	describe("transcript tracking", () => {
-		async function setupSessionHelper() {
-			const sessionPromise = adapter.startSession({
-				profile: "test",
-				workingDirectory: "/tmp",
-				model: "test-model",
-			});
-			let msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {});
-			await mock.readNextMessage();
-			msg = await mock.readNextMessage();
-			mock.sendResponse(msg.id as number, {
-				thread: { id: "thread-1" },
-			});
-			return sessionPromise;
-		}
-
 		it("appends to transcript on message.final when turnId matches p-N pattern", async () => {
 			const { events } = collectEvents(adapter);
-			const handle = await setupSessionHelper();
+			const handle = await setupSession();
 
 			const turnPromise = adapter.sendTurn(handle, {
 				prompt: "test",
@@ -918,7 +861,7 @@ describe("CodexAdapter", () => {
 
 		it("uses explicit role and roundNumber from TurnInput", async () => {
 			const { events } = collectEvents(adapter);
-			const handle = await setupSessionHelper();
+			const handle = await setupSession();
 
 			const turnPromise = adapter.sendTurn(handle, {
 				prompt: "test",
@@ -947,7 +890,7 @@ describe("CodexAdapter", () => {
 		});
 
 		it("startSession initializes empty transcript", async () => {
-			const handle = await setupSessionHelper();
+			const handle = await setupSession();
 			expect(handle.transcript).toEqual([]);
 		});
 	});

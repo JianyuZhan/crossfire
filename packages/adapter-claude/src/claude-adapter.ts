@@ -20,7 +20,10 @@ import {
 import { buildTranscriptRecoveryPrompt } from "@crossfire/orchestrator-core";
 import { mapSdkMessage } from "./event-mapper.js";
 import { buildHooks } from "./hooks.js";
-import { translatePolicy } from "./policy-translation.js";
+import {
+	type ClaudeNativeOptions,
+	translatePolicy,
+} from "./policy-translation.js";
 import type {
 	ClaudeCanUseToolOptions,
 	ClaudePermissionMode,
@@ -61,10 +64,23 @@ interface PendingApproval {
 	resolve: (value: ClaudePermissionResult) => void;
 }
 
+/**
+ * Extract the SDK-facing query options from translated native policy options.
+ */
+function toQueryOptions(native: ClaudeNativeOptions): Record<string, unknown> {
+	return {
+		permissionMode: native.permissionMode,
+		maxTurns: native.maxTurns,
+		allowedTools: native.allowedTools,
+		disallowedTools: native.disallowedTools,
+		allowDangerouslySkipPermissions: native.allowDangerouslySkipPermissions,
+	};
+}
+
 let sessionCounter = 0;
 
 function buildApprovalOptions(): ApprovalOption[] {
-	const options: ApprovalOption[] = [
+	return [
 		{
 			id: "allow",
 			label: "Allow once",
@@ -85,7 +101,6 @@ function buildApprovalOptions(): ApprovalOption[] {
 			isDefault: true,
 		},
 	];
-	return options;
 }
 
 function buildApprovalCapabilities(
@@ -249,13 +264,7 @@ export class ClaudeAdapter implements AgentAdapter {
 					timestamp: Date.now(),
 				});
 			}
-			queryOptions = {
-				permissionMode: native.permissionMode,
-				maxTurns: native.maxTurns,
-				allowedTools: native.allowedTools,
-				disallowedTools: native.disallowedTools,
-				allowDangerouslySkipPermissions: native.allowDangerouslySkipPermissions,
-			};
+			queryOptions = toQueryOptions(native);
 		}
 
 		const query = this.queryFn({
@@ -463,14 +472,7 @@ export class ClaudeAdapter implements AgentAdapter {
 				let recoveryOptions: Record<string, unknown> = {};
 				if (recoveryPolicy) {
 					const { native } = translatePolicy(recoveryPolicy);
-					recoveryOptions = {
-						permissionMode: native.permissionMode,
-						maxTurns: native.maxTurns,
-						allowedTools: native.allowedTools,
-						disallowedTools: native.disallowedTools,
-						allowDangerouslySkipPermissions:
-							native.allowDangerouslySkipPermissions,
-					};
+					recoveryOptions = toQueryOptions(native);
 				}
 
 				const recoveryQuery = this.queryFn({

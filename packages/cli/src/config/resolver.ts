@@ -1,9 +1,11 @@
 // packages/cli/src/config/resolver.ts
 import type {
 	ApprovalLevel,
+	CompilePolicyDiagnostics,
 	EvidenceBar,
 	PolicyPreset,
 } from "@crossfire/adapter-core";
+import { compilePolicyWithDiagnostics } from "@crossfire/adapter-core";
 import type {
 	EvidenceSource,
 	ResolvedEvidence,
@@ -82,12 +84,12 @@ export function resolveAllRoles(
 			);
 		}
 
-		const cliRolePreset =
-			roleName === "proposer"
-				? cliOverrides.cliProposerPreset
-				: roleName === "challenger"
-					? cliOverrides.cliChallengerPreset
-					: cliOverrides.cliJudgePreset;
+		const cliRolePresetMap = {
+			proposer: cliOverrides.cliProposerPreset,
+			challenger: cliOverrides.cliChallengerPreset,
+			judge: cliOverrides.cliJudgePreset,
+		};
+		const cliRolePreset = cliRolePresetMap[roleName];
 
 		// Template basePreset takes priority over role config preset
 		const configOrTemplatePreset = template?.basePreset ?? roleConfig.preset;
@@ -161,4 +163,24 @@ export function resolveAllRoles(
 		challenger,
 		judge: resolveRole("judge"),
 	};
+}
+
+/**
+ * Compile policy from a resolved role config. Shared by create-adapters and
+ * inspection-context to avoid duplicating the compilePolicyWithDiagnostics
+ * call-site pattern.
+ */
+export function compilePolicyForRole(
+	resolved: ResolvedRoleRuntimeConfig,
+): CompilePolicyDiagnostics {
+	return compilePolicyWithDiagnostics({
+		preset: resolved.preset.value,
+		role: resolved.role,
+		...(resolved.evidence.bar !== undefined
+			? { evidenceOverride: { bar: resolved.evidence.bar } }
+			: {}),
+		...(resolved.interactionOverrides
+			? { interactionOverride: resolved.interactionOverrides }
+			: {}),
+	});
 }

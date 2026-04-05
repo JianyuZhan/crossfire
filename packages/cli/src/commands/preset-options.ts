@@ -58,22 +58,13 @@ export interface PresetConfig {
 export function toCliPresetOverrides(
 	presetConfig?: PresetConfig,
 ): CliPresetOverrides {
+	if (!presetConfig) return {};
 	return {
-		...(presetConfig?.globalPreset
-			? { cliGlobalPreset: presetConfig.globalPreset }
-			: {}),
-		...(presetConfig?.rolePresets?.proposer
-			? { cliProposerPreset: presetConfig.rolePresets.proposer }
-			: {}),
-		...(presetConfig?.rolePresets?.challenger
-			? { cliChallengerPreset: presetConfig.rolePresets.challenger }
-			: {}),
-		...(presetConfig?.rolePresets?.judge
-			? { cliJudgePreset: presetConfig.rolePresets.judge }
-			: {}),
-		...(presetConfig?.evidenceBar
-			? { cliEvidenceBar: presetConfig.evidenceBar }
-			: {}),
+		cliGlobalPreset: presetConfig.globalPreset,
+		cliProposerPreset: presetConfig.rolePresets?.proposer,
+		cliChallengerPreset: presetConfig.rolePresets?.challenger,
+		cliJudgePreset: presetConfig.rolePresets?.judge,
+		cliEvidenceBar: presetConfig.evidenceBar,
 	};
 }
 
@@ -115,19 +106,20 @@ export function buildPresetConfig(options: {
 		return undefined;
 	}
 
-	return {
-		...(globalPreset ? { globalPreset } : {}),
-		...(proposerPreset || challengerPreset || judgePreset
+	const rolePresets =
+		proposerPreset || challengerPreset || judgePreset
 			? {
-					rolePresets: {
-						...(proposerPreset ? { proposer: proposerPreset } : {}),
-						...(challengerPreset ? { challenger: challengerPreset } : {}),
-						...(judgePreset ? { judge: judgePreset } : {}),
-					},
+					proposer: proposerPreset,
+					challenger: challengerPreset,
+					judge: judgePreset,
 				}
-			: {}),
-		...(turnPresets ? { turnPresets } : {}),
-		...(evidenceBar ? { evidenceBar } : {}),
+			: undefined;
+
+	return {
+		globalPreset,
+		rolePresets,
+		turnPresets,
+		evidenceBar,
 	};
 }
 

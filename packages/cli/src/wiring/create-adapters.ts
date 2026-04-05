@@ -1,18 +1,15 @@
-import type { AgentAdapter, SessionHandle } from "@crossfire/adapter-core";
-import {
-	type PolicyClampNote,
-	type PolicyTranslationSummary,
-	type PolicyTranslationWarning,
-	type PresetSource,
-	type ProviderObservationResult,
-	type ResolvedPolicy,
-	compilePolicyWithDiagnostics,
-} from "@crossfire/adapter-core";
-import type { AdapterId } from "@crossfire/adapter-core";
-import type { AdapterMap } from "@crossfire/orchestrator";
 import type {
-	ResolvedAllRoles,
-	ResolvedRoleRuntimeConfig,
+	AdapterId,
+	AgentAdapter,
+	ProviderObservationResult,
+	ResolvedPolicy,
+	SessionHandle,
+} from "@crossfire/adapter-core";
+import type { AdapterMap } from "@crossfire/orchestrator";
+import {
+	type ResolvedAllRoles,
+	type ResolvedRoleRuntimeConfig,
+	compilePolicyForRole,
 } from "../config/resolver.js";
 import { observePolicyForAdapter } from "./policy-observation.js";
 
@@ -42,16 +39,7 @@ export async function createAdapters(
 	const started: Array<{ adapter: AgentAdapter; session: SessionHandle }> = [];
 
 	async function startResolvedRole(resolved: ResolvedRoleRuntimeConfig) {
-		const diagnostics = compilePolicyWithDiagnostics({
-			preset: resolved.preset.value,
-			role: resolved.role,
-			...(resolved.evidence.bar !== undefined
-				? { evidenceOverride: { bar: resolved.evidence.bar } }
-				: {}),
-			...(resolved.interactionOverrides
-				? { interactionOverride: resolved.interactionOverrides }
-				: {}),
-		});
+		const diagnostics = compilePolicyForRole(resolved);
 		const policy = diagnostics.policy;
 		const observation = observePolicyForAdapter(
 			resolved.adapter,

@@ -7,10 +7,8 @@ import type {
 } from "../state/types.js";
 import {
 	buildToolActivityLabel,
+	buildToolWarnings,
 	selectVisibleLiveTools,
-	summarizeDeniedTools,
-	summarizeRecentFailures,
-	summarizeUnknownOutcomes,
 } from "./tool-status.js";
 
 type AgentRole = "proposer" | "challenger";
@@ -117,25 +115,8 @@ export function liveStateToBlocks(state: LiveAgentPanelState): RenderBlock[] {
 			status: subagent.status,
 		});
 	}
-	const failureSummary = summarizeRecentFailures(state.tools);
-	if (failureSummary) {
-		const toolName = state.tools.find(
-			(tool) => tool.status === "failed",
-		)?.toolName;
-		blocks.push({
-			kind: "warning",
-			text: toolName
-				? `${toolName} failures: ${failureSummary.replace(/^recent failures: /, "")}`
-				: failureSummary,
-		});
-	}
-	const deniedSummary = summarizeDeniedTools(state.tools);
-	if (deniedSummary) {
-		blocks.push({ kind: "warning", text: deniedSummary });
-	}
-	const unknownSummary = summarizeUnknownOutcomes(state.tools);
-	if (unknownSummary) {
-		blocks.push({ kind: "warning", text: unknownSummary });
+	for (const warning of buildToolWarnings(state.tools)) {
+		blocks.push({ kind: "warning", text: warning });
 	}
 	for (const t of selectVisibleLiveTools(state.tools))
 		blocks.push(toolToBlock(t));

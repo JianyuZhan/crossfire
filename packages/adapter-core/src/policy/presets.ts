@@ -1,4 +1,5 @@
 // packages/adapter-core/src/policy/presets.ts
+import { deepFreeze } from "./deep-freeze.js";
 import type {
 	CapabilityPolicy,
 	InteractionPolicy,
@@ -8,15 +9,6 @@ import type {
 export interface PresetExpansion {
 	readonly capabilities: CapabilityPolicy;
 	readonly interaction: InteractionPolicy;
-}
-
-function deepFreeze<T extends object>(obj: T): Readonly<T> {
-	for (const value of Object.values(obj)) {
-		if (value && typeof value === "object") {
-			deepFreeze(value);
-		}
-	}
-	return Object.freeze(obj);
 }
 
 export const PRESET_EXPANSIONS: Readonly<

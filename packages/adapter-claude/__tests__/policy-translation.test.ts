@@ -3,10 +3,8 @@ import {
 	makeResolvedPolicy,
 } from "@crossfire/adapter-core/testing";
 import { describe, expect, it } from "vitest";
-import {
-	CLAUDE_SUBAGENT_TOOLS,
-	translatePolicy,
-} from "../src/policy-translation.js";
+import { CLAUDE_SUBAGENT_TOOLS } from "../src/policy-observation.js";
+import { translatePolicy } from "../src/policy-translation.js";
 
 describe("translatePolicy (Claude)", () => {
 	describe("approval mapping", () => {

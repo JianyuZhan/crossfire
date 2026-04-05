@@ -67,29 +67,31 @@ export function resolveCapabilityEffects(policy: ResolvedPolicy): {
 	});
 
 	if (policy.capabilities.filesystem === "off") {
+		const msg = "Gemini CLI does not support disabling filesystem access";
 		effects.push({
 			field: "capabilities.filesystem",
 			status: "not_implemented",
-			details: "Gemini CLI does not support disabling filesystem access",
+			details: msg,
 		});
 		warnings.push({
 			field: "capabilities.filesystem",
 			adapter: "gemini",
 			reason: "not_implemented",
-			message: "Gemini CLI does not support disabling filesystem access",
+			message: msg,
 		});
 	}
 	if (policy.capabilities.network === "off") {
+		const msg = "Gemini CLI does not support disabling network access";
 		effects.push({
 			field: "capabilities.network",
 			status: "not_implemented",
-			details: "Gemini CLI does not support disabling network access",
+			details: msg,
 		});
 		warnings.push({
 			field: "capabilities.network",
 			adapter: "gemini",
 			reason: "not_implemented",
-			message: "Gemini CLI does not support disabling network access",
+			message: msg,
 		});
 	}
 
@@ -121,22 +123,19 @@ export function inspectPolicy(
 	const capabilities = resolveCapabilityEffects(policy);
 	const limitsWarnings = buildLimitsWarnings(policy.interaction.limits);
 
-	const evidenceWarnings: PolicyTranslationWarning[] = [];
+	const allWarnings = [
+		...approval.warnings,
+		...capabilities.warnings,
+		...limitsWarnings,
+	];
 	if (policy.evidence) {
-		evidenceWarnings.push({
+		allWarnings.push({
 			field: "evidence.bar",
 			adapter: "gemini",
 			reason: "approximate",
 			message: `Gemini cannot natively enforce evidence bar; setting influences prompting only (configured: ${policy.evidence.bar})`,
 		});
 	}
-
-	const allWarnings = [
-		...approval.warnings,
-		...capabilities.warnings,
-		...limitsWarnings,
-		...evidenceWarnings,
-	];
 
 	return {
 		translation: {

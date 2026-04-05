@@ -113,31 +113,21 @@ export function resolveToolPolicy(
 	};
 }
 
+const CAPABILITY_DIMENSIONS = [
+	"filesystem",
+	"shell",
+	"network",
+	"subagents",
+] as const;
+
 export function resolveCapabilityEffects(
 	policy: ResolvedPolicy,
 ): CapabilityEffectRecord[] {
-	const effects: CapabilityEffectRecord[] = [];
-	effects.push({
-		field: "capabilities.filesystem",
-		status: "applied",
-		details: `filesystem=${policy.capabilities.filesystem}`,
-	});
-	effects.push({
-		field: "capabilities.shell",
-		status: "applied",
-		details: `shell=${policy.capabilities.shell}`,
-	});
-	effects.push({
-		field: "capabilities.network",
-		status: "applied",
-		details: `network=${policy.capabilities.network}`,
-	});
-	effects.push({
-		field: "capabilities.subagents",
-		status: "applied",
-		details: `subagents=${policy.capabilities.subagents}`,
-	});
-	return effects;
+	return CAPABILITY_DIMENSIONS.map((dim) => ({
+		field: `capabilities.${dim}`,
+		status: "applied" as const,
+		details: `${dim}=${policy.capabilities[dim]}`,
+	}));
 }
 
 export function resolveToolView(policy: ResolvedPolicy): {
@@ -164,10 +154,7 @@ export function resolveToolView(policy: ResolvedPolicy): {
 
 function inferCapabilityField(toolName: string): string {
 	if (CLAUDE_SHELL_TOOLS.includes(toolName)) return "capabilities.shell";
-	if (
-		CLAUDE_FILESYSTEM_ALL_TOOLS.includes(toolName) ||
-		CLAUDE_FILESYSTEM_WRITE_TOOLS.includes(toolName)
-	)
+	if (CLAUDE_FILESYSTEM_ALL_TOOLS.includes(toolName))
 		return "capabilities.filesystem";
 	if (CLAUDE_NETWORK_TOOLS.includes(toolName)) return "capabilities.network";
 	if (CLAUDE_SUBAGENT_TOOLS.includes(toolName)) return "capabilities.subagents";
@@ -178,33 +165,20 @@ export function classifyCompleteness(): ObservationCompleteness {
 	return "partial";
 }
 
+const UNSUPPORTED_LIMITS = ["maxToolCalls", "timeoutMs", "budgetUsd"] as const;
+
 export function buildLimitsWarnings(
 	limits: ResolvedPolicy["interaction"]["limits"],
 ): PolicyTranslationWarning[] {
-	const warnings: PolicyTranslationWarning[] = [];
-	if (!limits) return warnings;
-	if (limits.maxToolCalls !== undefined)
-		warnings.push({
-			field: "interaction.limits.maxToolCalls",
-			adapter: "claude",
-			reason: "not_implemented",
-			message: "Claude does not support maxToolCalls limit",
-		});
-	if (limits.timeoutMs !== undefined)
-		warnings.push({
-			field: "interaction.limits.timeoutMs",
-			adapter: "claude",
-			reason: "not_implemented",
-			message: "Claude does not support timeoutMs limit",
-		});
-	if (limits.budgetUsd !== undefined)
-		warnings.push({
-			field: "interaction.limits.budgetUsd",
-			adapter: "claude",
-			reason: "not_implemented",
-			message: "Claude does not support budgetUsd limit",
-		});
-	return warnings;
+	if (!limits) return [];
+	return UNSUPPORTED_LIMITS.filter((key) => limits[key] !== undefined).map(
+		(key) => ({
+			field: `interaction.limits.${key}`,
+			adapter: "claude" as const,
+			reason: "not_implemented" as const,
+			message: `Claude does not support ${key} limit`,
+		}),
+	);
 }
 
 // --- inspectPolicy (Layer 3) ---

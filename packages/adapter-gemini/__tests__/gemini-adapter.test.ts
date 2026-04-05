@@ -2,8 +2,8 @@ import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { NormalizedEvent } from "@crossfire/adapter-core";
-import { GEMINI_CAPABILITIES } from "@crossfire/adapter-core";
-import { describe, expect, it, vi } from "vitest";
+import { GEMINI_CAPABILITIES, compilePolicy } from "@crossfire/adapter-core";
+import { describe, expect, it } from "vitest";
 import { GeminiAdapter } from "../src/gemini-adapter.js";
 import { ProcessManager } from "../src/process-manager.js";
 
@@ -238,7 +238,6 @@ describe("GeminiAdapter", () => {
 		});
 
 		it("maps dangerous policy to --approval-mode yolo", async () => {
-			const { compilePolicy } = await import("@crossfire/adapter-core");
 			const { pm, spawnArgs } = createMockProcessManager([
 				{
 					lines: [initLine("s1"), resultLine()],

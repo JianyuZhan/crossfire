@@ -1,127 +1,17 @@
 import type {
-	AgentAdapter,
-	NormalizedEvent,
 	ProviderObservationResult,
-	SessionHandle,
 	TurnInput,
 } from "@crossfire/adapter-core";
-import {
-	CLAUDE_CAPABILITIES,
-	CODEX_CAPABILITIES,
-	compilePolicy,
-} from "@crossfire/adapter-core";
+import { compilePolicy } from "@crossfire/adapter-core";
 import type { DebateConfig } from "@crossfire/orchestrator-core";
 import { describe, expect, it } from "vitest";
 import { DebateEventBus } from "../src/event-bus.js";
 import { type AdapterMap, runDebate } from "../src/runner.js";
-
-function createScriptedAdapter(
-	id: "claude" | "codex" | "gemini",
-	scripts: Record<string, NormalizedEvent[]>,
-	recordedTurns: TurnInput[],
-): AgentAdapter {
-	const listeners: Set<(e: NormalizedEvent) => void> = new Set();
-	const sessionId = `${id}-s1`;
-	return {
-		id,
-		capabilities: id === "claude" ? CLAUDE_CAPABILITIES : CODEX_CAPABILITIES,
-		async startSession() {
-			return {
-				adapterSessionId: sessionId,
-				providerSessionId: `p-${sessionId}`,
-				adapterId: id,
-				transcript: [],
-			};
-		},
-		async sendTurn(_handle: SessionHandle, input: TurnInput) {
-			recordedTurns.push(input);
-			const eventsForTurn = scripts[input.turnId] ?? [
-				{
-					kind: "turn.completed" as const,
-					status: "completed" as const,
-					durationMs: 0,
-					timestamp: Date.now(),
-					adapterId: id,
-					adapterSessionId: sessionId,
-					turnId: input.turnId,
-				},
-			];
-			setTimeout(() => {
-				for (const e of eventsForTurn) {
-					for (const l of listeners) l(e);
-				}
-			}, 0);
-			return { turnId: input.turnId, status: "running" as const };
-		},
-		onEvent(cb: (e: NormalizedEvent) => void) {
-			listeners.add(cb);
-			return () => listeners.delete(cb);
-		},
-		async close() {},
-	};
-}
-
-function turnEvents(
-	turnId: string,
-	adapterId: "claude" | "codex",
-	sessionId: string,
-	content: string,
-	meta: {
-		stance: string;
-		confidence: number;
-		key_points: string[];
-		wants_to_conclude?: boolean;
-	},
-): NormalizedEvent[] {
-	return [
-		{
-			kind: "tool.call",
-			toolUseId: `tu-${turnId}`,
-			toolName: "debate_meta",
-			input: meta,
-			timestamp: Date.now(),
-			adapterId,
-			adapterSessionId: sessionId,
-			turnId,
-		},
-		{
-			kind: "message.final",
-			text: content,
-			role: "assistant",
-			timestamp: Date.now(),
-			adapterId,
-			adapterSessionId: sessionId,
-			turnId,
-		},
-		{
-			kind: "turn.completed",
-			status: "completed",
-			durationMs: 100,
-			timestamp: Date.now(),
-			adapterId,
-			adapterSessionId: sessionId,
-			turnId,
-		},
-	];
-}
-
-function judgeTurnEvents(
-	turnId: string,
-	adapterId: "claude" | "codex" | "gemini",
-	sessionId: string,
-): NormalizedEvent[] {
-	return [
-		{
-			kind: "turn.completed",
-			status: "completed",
-			durationMs: 50,
-			timestamp: Date.now(),
-			adapterId,
-			adapterSessionId: sessionId,
-			turnId,
-		},
-	];
-}
+import {
+	createScriptedAdapter,
+	judgeTurnEvents,
+	turnEvents,
+} from "./test-helpers.js";
 
 const debateConfig: DebateConfig = {
 	topic: "Policy flow test",

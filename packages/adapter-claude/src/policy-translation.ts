@@ -5,14 +5,10 @@ import type {
 	ResolvedPolicy,
 } from "@crossfire/adapter-core";
 import {
-	CLAUDE_SUBAGENT_TOOLS,
 	buildLimitsWarnings,
 	resolveApproval,
 	resolveToolPolicy,
 } from "./policy-observation.js";
-
-// Re-export for backward compatibility
-export { CLAUDE_SUBAGENT_TOOLS };
 
 export interface ClaudeNativeOptions {
 	permissionMode: string;
@@ -31,11 +27,12 @@ export function translatePolicy(
 	warnings.push(...toolPolicy.warnings);
 	const maxTurns = policy.interaction.limits?.maxTurns;
 	warnings.push(...buildLimitsWarnings(policy.interaction.limits));
+	const { warnings: _toolWarnings, ...toolNative } = toolPolicy;
 	return {
 		native: {
 			permissionMode: approval.permissionMode,
 			maxTurns,
-			...toolPolicy,
+			...toolNative,
 			...(approval.allowDangerouslySkipPermissions
 				? { allowDangerouslySkipPermissions: true }
 				: {}),

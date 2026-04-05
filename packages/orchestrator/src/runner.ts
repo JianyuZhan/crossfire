@@ -6,8 +6,6 @@ import {
 	type NormalizedEvent,
 	type PolicyClampNote,
 	type PolicyPreset,
-	type PolicyTranslationSummary,
-	type PolicyTranslationWarning,
 	type PresetSource,
 	type ProviderObservationResult,
 	type ResolvedPolicy,
@@ -52,52 +50,26 @@ import { runJudgeTurn } from "./judge.js";
 import { PlanAccumulator } from "./plan-accumulator.js";
 import type { TranscriptWriter } from "./transcript-writer.js";
 
+export interface RoleAdapterEntry {
+	adapter: AgentAdapter;
+	session: SessionHandle;
+	baselinePolicy?: ResolvedPolicy;
+	baselineClamps?: readonly PolicyClampNote[];
+	baselinePreset?: {
+		value: PolicyPreset;
+		source: PresetSource;
+	};
+	baselineEvidenceSource?: EvidenceSource;
+	baselineTemplateName?: string;
+	baselineTemplateBasePreset?: string;
+	baselineObservation?: ProviderObservationResult;
+	observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
+}
+
 export interface AdapterMap {
-	proposer: {
-		adapter: AgentAdapter;
-		session: SessionHandle;
-		baselinePolicy?: ResolvedPolicy;
-		baselineClamps?: readonly PolicyClampNote[];
-		baselinePreset?: {
-			value: PolicyPreset;
-			source: PresetSource;
-		};
-		baselineEvidenceSource?: EvidenceSource;
-		baselineTemplateName?: string;
-		baselineTemplateBasePreset?: string;
-		baselineObservation?: ProviderObservationResult;
-		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
-	};
-	challenger: {
-		adapter: AgentAdapter;
-		session: SessionHandle;
-		baselinePolicy?: ResolvedPolicy;
-		baselineClamps?: readonly PolicyClampNote[];
-		baselinePreset?: {
-			value: PolicyPreset;
-			source: PresetSource;
-		};
-		baselineEvidenceSource?: EvidenceSource;
-		baselineTemplateName?: string;
-		baselineTemplateBasePreset?: string;
-		baselineObservation?: ProviderObservationResult;
-		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
-	};
-	judge?: {
-		adapter: AgentAdapter;
-		session: SessionHandle;
-		baselinePolicy?: ResolvedPolicy;
-		baselineClamps?: readonly PolicyClampNote[];
-		baselinePreset?: {
-			value: PolicyPreset;
-			source: PresetSource;
-		};
-		baselineEvidenceSource?: EvidenceSource;
-		baselineTemplateName?: string;
-		baselineTemplateBasePreset?: string;
-		baselineObservation?: ProviderObservationResult;
-		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
-	};
+	proposer: RoleAdapterEntry;
+	challenger: RoleAdapterEntry;
+	judge?: RoleAdapterEntry;
 }
 
 export interface RunDebateOptions {
@@ -195,6 +167,24 @@ function getObservationForPolicy(
 	return entry.observePolicy?.(policy);
 }
 
+function buildFallbackObservation(
+	adapterId: string | undefined,
+): ProviderObservationResult {
+	return {
+		translation: {
+			adapter: adapterId ?? "unknown",
+			nativeSummary: {},
+			exactFields: [],
+			approximateFields: [],
+			unsupportedFields: [],
+		},
+		toolView: [],
+		capabilityEffects: [],
+		warnings: [],
+		completeness: "minimal",
+	};
+}
+
 function emitBaselinePolicyEvents(
 	bus: DebateEventBus,
 	adapters: AdapterMap,
@@ -203,19 +193,7 @@ function emitBaselinePolicyEvents(
 		const entry = adapters[role];
 		if (!entry?.baselinePolicy || !entry.baselinePreset) continue;
 		const observation = getObservationForPolicy(entry, entry.baselinePolicy);
-		const fallbackObservation: ProviderObservationResult = {
-			translation: {
-				adapter: entry.session.adapterId ?? "unknown",
-				nativeSummary: {},
-				exactFields: [],
-				approximateFields: [],
-				unsupportedFields: [],
-			},
-			toolView: [],
-			capabilityEffects: [],
-			warnings: [],
-			completeness: "minimal",
-		};
+		const fallback = buildFallbackObservation(entry.session.adapterId);
 		bus.push({
 			kind: "policy.baseline",
 			role,
@@ -233,10 +211,9 @@ function emitBaselinePolicyEvents(
 						},
 					}
 				: {}),
-			translationSummary:
-				observation?.translation ?? fallbackObservation.translation,
+			translationSummary: observation?.translation ?? fallback.translation,
 			warnings: [...(observation?.warnings ?? [])],
-			observation: observation ?? fallbackObservation,
+			observation: observation ?? fallback,
 			timestamp: Date.now(),
 		});
 	}
@@ -634,29 +611,16 @@ export async function runDebate(
 		// Only emit policy.turn.override when there IS a turn-level override
 		if (hasTurnOverride && turnPolicy) {
 			const observation = getObservationForPolicy(adapterEntry, turnPolicy);
-			const fallbackObservation: ProviderObservationResult = {
-				translation: {
-					adapter: adapterEntry.session.adapterId ?? "unknown",
-					nativeSummary: {},
-					exactFields: [],
-					approximateFields: [],
-					unsupportedFields: [],
-				},
-				toolView: [],
-				capabilityEffects: [],
-				warnings: [],
-				completeness: "minimal",
-			};
+			const fallback = buildFallbackObservation(adapterEntry.session.adapterId);
 			bus.push({
 				kind: "policy.turn.override",
 				role: role as "proposer" | "challenger",
 				turnId,
 				policy: turnPolicy,
 				preset: turnOverridePreset,
-				translationSummary:
-					observation?.translation ?? fallbackObservation.translation,
+				translationSummary: observation?.translation ?? fallback.translation,
 				warnings: [...(observation?.warnings ?? [])],
-				observation: observation ?? fallbackObservation,
+				observation: observation ?? fallback,
 				timestamp: Date.now(),
 			});
 		}

@@ -7,7 +7,6 @@ import type {
 import { emptyPlan } from "../src/evolving-plan.js";
 import {
 	type AdaptiveSynthesisInput,
-	type AdaptiveSynthesisResult,
 	type PhaseBlock,
 	type ScoredRound,
 	type SynthesisPromptConfig,
@@ -27,7 +26,7 @@ import {
 	selectCriticalRounds,
 	shrinkToFit,
 } from "../src/synthesis-prompt.js";
-import type { DebateMeta, DebateState, DebateTurn } from "../src/types.js";
+import type { DebateState, DebateTurn } from "../src/types.js";
 
 describe("estimateTokens", () => {
 	it("returns 0 for empty string", () => {
@@ -86,9 +85,6 @@ describe("detectCjkMajority", () => {
 		expect(detectCjkMajority(text)).toBe(true);
 	});
 });
-
-// Removed describe("buildFullTextSynthesisPrompt") block - this wrapper is being removed.
-// Tests for assembleAdaptiveSynthesisPrompt() are the canonical path forward.
 
 describe("assembleAdaptiveSynthesisPrompt - core behavior", () => {
 	const mockConfig: SynthesisPromptConfig = {
@@ -1797,9 +1793,6 @@ describe("assembleAdaptiveSynthesisPrompt", () => {
 		});
 	});
 });
-
-// Removed "buildFullTextSynthesisPrompt (backward-compat wrapper)" tests - wrapper is being removed.
-// Removed "buildInstructions compression note" test that used the wrapper.
 
 describe("buildInstructions no-exploration constraint", () => {
 	it("buildInstructions includes constraint against code exploration", () => {

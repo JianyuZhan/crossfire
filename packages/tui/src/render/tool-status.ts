@@ -15,17 +15,24 @@ function normalizeFailureLabel(summary?: string): string {
 	return summary.length <= 40 ? summary : `${summary.slice(0, 39)}…`;
 }
 
-export function summarizeRecentFailures(
+/**
+ * Count-and-format helper shared by all tool summary functions.
+ * Filters tools by status, groups by keyFn, and formats as "prefix: key1xN, key2xM".
+ */
+function summarizeByStatus(
 	tools: LiveToolEntry[],
+	status: LiveToolEntry["status"],
+	prefix: string,
+	keyFn: (tool: LiveToolEntry) => string,
+	limit?: number,
 ): string | undefined {
-	const recentErrors = tools
-		.filter((tool) => tool.status === "failed")
-		.slice(-RECENT_FAILURE_LIMIT);
-	if (recentErrors.length === 0) return undefined;
+	const filtered = tools.filter((tool) => tool.status === status);
+	const sliced = limit !== undefined ? filtered.slice(-limit) : filtered;
+	if (sliced.length === 0) return undefined;
 
 	const counts = new Map<string, number>();
-	for (const tool of recentErrors) {
-		const key = normalizeFailureLabel(tool.resultSummary);
+	for (const tool of sliced) {
+		const key = keyFn(tool);
 		counts.set(key, (counts.get(key) ?? 0) + 1);
 	}
 
@@ -33,43 +40,58 @@ export function summarizeRecentFailures(
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, FAILURE_GROUP_LIMIT)
 		.map(([label, count]) => `${label}×${count}`);
-	return parts.length > 0 ? `recent failures: ${parts.join(", ")}` : undefined;
+	return parts.length > 0 ? `${prefix}: ${parts.join(", ")}` : undefined;
+}
+
+export function summarizeRecentFailures(
+	tools: LiveToolEntry[],
+): string | undefined {
+	return summarizeByStatus(
+		tools,
+		"failed",
+		"recent failures",
+		(tool) => normalizeFailureLabel(tool.resultSummary),
+		RECENT_FAILURE_LIMIT,
+	);
 }
 
 export function summarizeDeniedTools(
 	tools: LiveToolEntry[],
 ): string | undefined {
-	const deniedTools = tools.filter((tool) => tool.status === "denied");
-	if (deniedTools.length === 0) return undefined;
-
-	const counts = new Map<string, number>();
-	for (const tool of deniedTools) {
-		counts.set(tool.toolName, (counts.get(tool.toolName) ?? 0) + 1);
-	}
-
-	const parts = [...counts.entries()]
-		.sort((a, b) => b[1] - a[1])
-		.slice(0, FAILURE_GROUP_LIMIT)
-		.map(([label, count]) => `${label}×${count}`);
-	return parts.length > 0 ? `denied: ${parts.join(", ")}` : undefined;
+	return summarizeByStatus(tools, "denied", "denied", (tool) => tool.toolName);
 }
 
 export function summarizeUnknownOutcomes(
 	tools: LiveToolEntry[],
 ): string | undefined {
-	const unknownTools = tools.filter((tool) => tool.status === "unknown");
-	if (unknownTools.length === 0) return undefined;
+	return summarizeByStatus(
+		tools,
+		"unknown",
+		"unknown outcomes",
+		(tool) => tool.toolName,
+	);
+}
 
-	const counts = new Map<string, number>();
-	for (const tool of unknownTools) {
-		counts.set(tool.toolName, (counts.get(tool.toolName) ?? 0) + 1);
+/**
+ * Build warning messages for tool failures, denials, and unknown outcomes.
+ * Shared between the Ink AgentPanel and the line-buffer renderer.
+ */
+export function buildToolWarnings(tools: LiveToolEntry[]): string[] {
+	const warnings: string[] = [];
+	const fail = summarizeRecentFailures(tools);
+	if (fail) {
+		const name = tools.find((t) => t.status === "failed")?.toolName;
+		warnings.push(
+			name
+				? `${name} failures: ${fail.replace(/^recent failures: /, "")}`
+				: fail,
+		);
 	}
-
-	const parts = [...counts.entries()]
-		.sort((a, b) => b[1] - a[1])
-		.slice(0, FAILURE_GROUP_LIMIT)
-		.map(([label, count]) => `${label}×${count}`);
-	return parts.length > 0 ? `unknown outcomes: ${parts.join(", ")}` : undefined;
+	const denied = summarizeDeniedTools(tools);
+	if (denied) warnings.push(denied);
+	const unknown = summarizeUnknownOutcomes(tools);
+	if (unknown) warnings.push(unknown);
+	return warnings;
 }
 
 export function selectVisibleLiveTools(
@@ -115,18 +137,18 @@ export function buildToolActivityLabel(tools: LiveToolEntry[]): string {
 export function buildCompactActiveStatus(
 	panel: LiveAgentPanelState,
 ): string | undefined {
-	if (!["thinking", "tool", "speaking", "error"].includes(panel.status)) {
-		return undefined;
-	}
 	const presetSuffix = panel.preset ? ` [${panel.preset}]` : "";
-	if (panel.status === "tool") {
-		return `${roleLabel(panel.role)} ${buildToolActivityLabel(panel.tools)}${presetSuffix}`;
+	const label = roleLabel(panel.role);
+	switch (panel.status) {
+		case "thinking":
+			return `${label} thinking${presetSuffix}`;
+		case "tool":
+			return `${label} ${buildToolActivityLabel(panel.tools)}${presetSuffix}`;
+		case "speaking":
+			return `${label} responding${presetSuffix}`;
+		case "error":
+			return `${label} error${presetSuffix}`;
+		default:
+			return undefined;
 	}
-	if (panel.status === "thinking") {
-		return `${roleLabel(panel.role)} thinking${presetSuffix}`;
-	}
-	if (panel.status === "speaking") {
-		return `${roleLabel(panel.role)} responding${presetSuffix}`;
-	}
-	return `${roleLabel(panel.role)} error${presetSuffix}`;
 }

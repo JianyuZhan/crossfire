@@ -36,7 +36,6 @@ export type ToolStatus = "allowed" | "blocked" | "degraded" | "unknown";
 export type ToolReason =
 	| "capability_policy"
 	| "role_ceiling"
-	| "legacy_override"
 	| "provider_limitation"
 	| "adapter_default"
 	| "unknown";

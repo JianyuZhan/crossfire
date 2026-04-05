@@ -1,10 +1,6 @@
-import type { EvidenceBar } from "@crossfire/adapter-core";
+import type { EvidenceBar, EvidenceSource } from "@crossfire/adapter-core";
 
-export type EvidenceSource =
-	| "cli"
-	| "config"
-	| `template:${string}`
-	| "role-default";
+export type { EvidenceSource };
 
 export interface ResolvedEvidence {
 	bar: EvidenceBar | undefined;

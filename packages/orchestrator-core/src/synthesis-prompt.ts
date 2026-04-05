@@ -3,7 +3,6 @@ import type {
 	RoundAnalysis,
 	RoundSignals,
 } from "./evolving-plan.js";
-import { emptyPlan } from "./evolving-plan.js";
 import { stripInternalBlocks } from "./strip-internal-blocks.js";
 import type { DebateState } from "./types.js";
 

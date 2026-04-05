@@ -82,6 +82,33 @@ judge_verdict '{"leading":"proposer","score":{"proposer":7,"challenger":5},"reas
 
 Pass the complete JSON as a single quoted argument. Do NOT omit any required fields.`;
 
+/** Wire-format policy fields sent in thread/start and turn/start. */
+interface PolicyWireParams {
+	approvalPolicy: string;
+	sandboxPolicy?: Record<string, unknown>;
+	networkDisabled?: boolean;
+}
+
+/**
+ * Translate a ResolvedPolicy into the wire-format parameters for
+ * thread/start and turn/start, emitting warnings as events.
+ */
+function buildPolicyWireParams(
+	policy: ResolvedPolicy | undefined,
+	emitWarning: (field: string, message: string) => void,
+): PolicyWireParams {
+	if (!policy) return { approvalPolicy: "on-failure" };
+	const { native, warnings } = translatePolicy(policy);
+	for (const w of warnings) {
+		emitWarning(w.field, w.message);
+	}
+	return {
+		approvalPolicy: native.approvalPolicy,
+		...(native.sandboxPolicy ? { sandboxPolicy: native.sandboxPolicy } : {}),
+		...(native.networkDisabled ? { networkDisabled: true } : {}),
+	};
+}
+
 let sessionCounter = 0;
 
 function humanizeDecision(decisionId: string): string {
@@ -128,6 +155,15 @@ function mapDecisionScope(
 	return undefined;
 }
 
+function resolveIsDefault(
+	option: Record<string, unknown>,
+	index: number,
+): boolean {
+	if (typeof option.isDefault === "boolean") return option.isDefault;
+	if (typeof option.default === "boolean") return option.default;
+	return index === 0;
+}
+
 function extractApprovalOptions(
 	params: Record<string, unknown>,
 ): ApprovalOption[] | undefined {
@@ -151,14 +187,16 @@ function extractApprovalOptions(
 		const option = rawOption as Record<string, unknown>;
 		const idValue = option.id ?? option.decision ?? option.kind ?? option.name;
 		if (typeof idValue !== "string" || idValue.length === 0) continue;
-		const label =
-			typeof option.label === "string"
-				? option.label
-				: typeof option.title === "string"
-					? option.title
-					: typeof option.name === "string"
-						? option.name
-						: humanizeDecision(idValue);
+		let label: string;
+		if (typeof option.label === "string") {
+			label = option.label;
+		} else if (typeof option.title === "string") {
+			label = option.title;
+		} else if (typeof option.name === "string") {
+			label = option.name;
+		} else {
+			label = humanizeDecision(idValue);
+		}
 		options.push({
 			id: idValue,
 			label,
@@ -167,12 +205,7 @@ function extractApprovalOptions(
 				typeof option.scope === "string"
 					? (option.scope as ApprovalOption["scope"])
 					: mapDecisionScope(idValue),
-			isDefault:
-				typeof option.isDefault === "boolean"
-					? option.isDefault
-					: typeof option.default === "boolean"
-						? option.default
-						: index === 0,
+			isDefault: resolveIsDefault(option, index),
 		});
 	}
 
@@ -300,30 +333,15 @@ export class CodexAdapter implements AgentAdapter {
 		const adapterSessionId = `codex-session-${sessionCounter}-${Date.now()}`;
 		const model = input.model ?? "gpt-5.4";
 
-		let policies: {
-			approvalPolicy: string;
-			sandboxPolicy?: Record<string, unknown>;
-			networkDisabled?: boolean;
-		} = { approvalPolicy: "on-failure" };
-		if (input.policy) {
-			const { native, warnings } = translatePolicy(input.policy);
-			for (const w of warnings) {
-				this.emit({
-					kind: "run.warning",
-					adapterId: "codex",
-					adapterSessionId,
-					message: `[policy] ${w.field}: ${w.message}`,
-					timestamp: Date.now(),
-				});
-			}
-			policies = {
-				approvalPolicy: native.approvalPolicy,
-				...(native.sandboxPolicy
-					? { sandboxPolicy: native.sandboxPolicy }
-					: {}),
-				...(native.networkDisabled ? { networkDisabled: true } : {}),
-			};
-		}
+		const policies = buildPolicyWireParams(input.policy, (field, message) => {
+			this.emit({
+				kind: "run.warning",
+				adapterId: "codex",
+				adapterSessionId,
+				message: `[policy] ${field}: ${message}`,
+				timestamp: Date.now(),
+			});
+		});
 
 		// 1. Send `initialize` request
 		await this.client.request("initialize", {
@@ -342,11 +360,7 @@ export class CodexAdapter implements AgentAdapter {
 		const result = (await this.client.request("thread/start", {
 			model,
 			cwd: input.workingDirectory,
-			approvalPolicy: policies.approvalPolicy,
-			...(policies.sandboxPolicy
-				? { sandboxPolicy: policies.sandboxPolicy }
-				: {}),
-			...(policies.networkDisabled ? { networkDisabled: true } : {}),
+			...policies,
 		})) as { thread: { id: string } };
 
 		const providerSessionId = result.thread.id;
@@ -408,31 +422,16 @@ export class CodexAdapter implements AgentAdapter {
 			session.pendingLocalMetrics = localMetrics;
 		}
 		const activePolicy = input.policy ?? session?.baselinePolicy;
-		let policies: {
-			approvalPolicy: string;
-			sandboxPolicy?: Record<string, unknown>;
-			networkDisabled?: boolean;
-		} = { approvalPolicy: "on-failure" };
-		if (activePolicy) {
-			const { native, warnings } = translatePolicy(activePolicy);
-			for (const w of warnings) {
-				this.emit({
-					kind: "run.warning",
-					adapterId: "codex",
-					adapterSessionId: handle.adapterSessionId,
-					turnId: input.turnId,
-					message: `[policy] ${w.field}: ${w.message}`,
-					timestamp: Date.now(),
-				});
-			}
-			policies = {
-				approvalPolicy: native.approvalPolicy,
-				...(native.sandboxPolicy
-					? { sandboxPolicy: native.sandboxPolicy }
-					: {}),
-				...(native.networkDisabled ? { networkDisabled: true } : {}),
-			};
-		}
+		const policies = buildPolicyWireParams(activePolicy, (field, message) => {
+			this.emit({
+				kind: "run.warning",
+				adapterId: "codex",
+				adapterSessionId: handle.adapterSessionId,
+				turnId: input.turnId,
+				message: `[policy] ${field}: ${message}`,
+				timestamp: Date.now(),
+			});
+		});
 
 		try {
 			await this.startTurnOnThread(
@@ -457,20 +456,12 @@ export class CodexAdapter implements AgentAdapter {
 		prompt: string,
 		session: SessionState | undefined,
 		turnId: string,
-		policies?: {
-			approvalPolicy: string;
-			sandboxPolicy?: Record<string, unknown>;
-			networkDisabled?: boolean;
-		},
+		policies?: PolicyWireParams,
 	): Promise<void> {
 		const result = (await this.client.request("turn/start", {
 			threadId,
 			input: [{ type: "text", text: prompt }],
-			approvalPolicy: policies?.approvalPolicy,
-			...(policies?.sandboxPolicy
-				? { sandboxPolicy: policies.sandboxPolicy }
-				: {}),
-			...(policies?.networkDisabled ? { networkDisabled: true } : {}),
+			...(policies ?? { approvalPolicy: "on-failure" }),
 		})) as { turn: { id: string; status: string } };
 
 		if (session) {
@@ -504,31 +495,16 @@ export class CodexAdapter implements AgentAdapter {
 			message: `turn/start failed (${message}), attempting transcript recovery`,
 		});
 
-		// Create a new thread
+		// Create a new thread (warnings already emitted on original attempt)
 		const recoveryActivePolicy = input.policy ?? session?.baselinePolicy;
-		let recoveryPolicies: {
-			approvalPolicy: string;
-			sandboxPolicy?: Record<string, unknown>;
-			networkDisabled?: boolean;
-		} = { approvalPolicy: "on-failure" };
-		if (recoveryActivePolicy) {
-			const { native } = translatePolicy(recoveryActivePolicy);
-			recoveryPolicies = {
-				approvalPolicy: native.approvalPolicy,
-				...(native.sandboxPolicy
-					? { sandboxPolicy: native.sandboxPolicy }
-					: {}),
-				...(native.networkDisabled ? { networkDisabled: true } : {}),
-			};
-		}
+		const recoveryPolicies = buildPolicyWireParams(
+			recoveryActivePolicy,
+			() => {},
+		);
 		const threadResult = (await this.client.request("thread/start", {
 			model: session?.model ?? "gpt-5.4",
 			cwd: "/tmp",
-			approvalPolicy: recoveryPolicies.approvalPolicy,
-			...(recoveryPolicies.sandboxPolicy
-				? { sandboxPolicy: recoveryPolicies.sandboxPolicy }
-				: {}),
-			...(recoveryPolicies.networkDisabled ? { networkDisabled: true } : {}),
+			...recoveryPolicies,
 		})) as { thread: { id: string } };
 
 		const newThreadId = threadResult.thread.id;

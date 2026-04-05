@@ -9,10 +9,8 @@ import {
 } from "../constants.js";
 import {
 	buildToolActivityLabel,
+	buildToolWarnings,
 	selectVisibleLiveTools,
-	summarizeDeniedTools,
-	summarizeRecentFailures,
-	summarizeUnknownOutcomes,
 } from "../render/tool-status.js";
 import type {
 	AgentTurnSnapshot,
@@ -52,24 +50,6 @@ export type AgentPanelProps =
 
 function agentSuffix(agentType?: string): string {
 	return agentType ? ` [${agentType}]` : "";
-}
-
-function toolWarnings(tools: LiveToolEntry[]): string[] {
-	const warnings: string[] = [];
-	const fail = summarizeRecentFailures(tools);
-	if (fail) {
-		const name = tools.find((t) => t.status === "failed")?.toolName;
-		warnings.push(
-			name
-				? `${name} failures: ${fail.replace(/^recent failures: /, "")}`
-				: fail,
-		);
-	}
-	const denied = summarizeDeniedTools(tools);
-	if (denied) warnings.push(denied);
-	const unknown = summarizeUnknownOutcomes(tools);
-	if (unknown) warnings.push(unknown);
-	return warnings;
 }
 
 function presetSuffix(preset?: string): string {
@@ -127,6 +107,13 @@ function ToolList({ tools }: { tools: LiveToolEntry[] }): React.ReactElement {
 	);
 }
 
+const PLAN_STEP_ICONS: Record<string, string> = {
+	completed: "[x]",
+	in_progress: "[>]",
+	failed: "[!]",
+	pending: "[ ]",
+};
+
 function PlanList({ steps }: { steps: PlanStep[] }): React.ReactElement {
 	return (
 		<>
@@ -136,14 +123,7 @@ function PlanList({ steps }: { steps: PlanStep[] }): React.ReactElement {
 			{steps.map((step) => (
 				<Box key={step.id}>
 					<Text dimColor>
-						{step.status === "completed"
-							? "[x]"
-							: step.status === "in_progress"
-								? "[>]"
-								: step.status === "failed"
-									? "[!]"
-									: "[ ]"}{" "}
-						{step.title}
+						{PLAN_STEP_ICONS[step.status] ?? "[ ]"} {step.title}
 					</Text>
 				</Box>
 			))}
@@ -303,7 +283,7 @@ export function AgentPanel(props: AgentPanelProps): React.ReactElement {
 					<SubagentList subagents={state.subagents} />
 				</Box>
 			)}
-			{toolWarnings(state.tools).map((w, i) => (
+			{buildToolWarnings(state.tools).map((w, i) => (
 				<Box key={`tw-${i}`} marginTop={1}>
 					<Text color="yellow">⚠ {w}</Text>
 				</Box>

@@ -1,12 +1,6 @@
-import type { PolicyPreset } from "@crossfire/adapter-core";
+import type { PolicyPreset, PresetSource } from "@crossfire/adapter-core";
 
-// TODO(Task 4): Import PresetSource from @crossfire/adapter-core/observation-types.ts
-// when it is created. For now, defined locally.
-export type PresetSource =
-	| "cli-role"
-	| "cli-global"
-	| "config"
-	| "role-default";
+export type { PresetSource };
 
 export const DEFAULT_ROLE_PRESETS: Record<
 	"proposer" | "challenger" | "judge",

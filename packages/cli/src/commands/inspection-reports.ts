@@ -59,33 +59,30 @@ export interface ToolInspectionReport {
 	roles: RoleToolInspection[];
 }
 
+function sharedPolicyFields(ctx: RoleInspectionContext) {
+	return {
+		role: ctx.role,
+		adapter: ctx.adapter,
+		model: ctx.model,
+		preset: ctx.preset,
+		evidence: ctx.evidence
+			? { bar: ctx.evidence.bar, source: ctx.evidence.source }
+			: undefined,
+		template: ctx.template,
+	};
+}
+
 export function buildPolicyInspectionReport(
 	contexts: RoleInspectionContext[],
 ): PolicyInspectionReport {
 	return {
 		roles: contexts.map((ctx) => {
+			const shared = sharedPolicyFields(ctx);
 			if (ctx.error) {
-				return {
-					role: ctx.role,
-					adapter: ctx.adapter,
-					model: ctx.model,
-					preset: ctx.preset,
-					evidence: ctx.evidence
-						? { bar: ctx.evidence.bar, source: ctx.evidence.source }
-						: undefined,
-					template: ctx.template,
-					error: ctx.error,
-				};
+				return { ...shared, error: ctx.error };
 			}
 			return {
-				role: ctx.role,
-				adapter: ctx.adapter,
-				model: ctx.model,
-				preset: ctx.preset,
-				evidence: ctx.evidence
-					? { bar: ctx.evidence.bar, source: ctx.evidence.source }
-					: undefined,
-				template: ctx.template,
+				...shared,
 				resolvedPolicy: ctx.resolvedPolicy,
 				clamps: ctx.clamps,
 				translation: ctx.observation.translation,
@@ -100,24 +97,24 @@ export function buildToolInspectionReport(
 ): ToolInspectionReport {
 	return {
 		roles: contexts.map((ctx) => {
-			if (ctx.error) {
-				return {
-					role: ctx.role,
-					adapter: ctx.adapter,
-					model: ctx.model,
-					preset: ctx.preset,
-					tools: [],
-					capabilityEffects: [],
-					completeness: "minimal" as const,
-					warnings: [],
-					error: ctx.error,
-				};
-			}
-			return {
+			const base = {
 				role: ctx.role,
 				adapter: ctx.adapter,
 				model: ctx.model,
 				preset: ctx.preset,
+			};
+			if (ctx.error) {
+				return {
+					...base,
+					tools: [] as ToolInspectionRecord[],
+					capabilityEffects: [] as CapabilityEffectRecord[],
+					completeness: "minimal" as const,
+					warnings: [] as PolicyTranslationWarning[],
+					error: ctx.error,
+				};
+			}
+			return {
+				...base,
 				tools: ctx.observation.toolView,
 				capabilityEffects: ctx.observation.capabilityEffects,
 				completeness: ctx.observation.completeness,

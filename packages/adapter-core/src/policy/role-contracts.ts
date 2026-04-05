@@ -1,15 +1,7 @@
 // packages/adapter-core/src/policy/role-contracts.ts
 import type { DebateRole } from "../types.js";
+import { deepFreeze } from "./deep-freeze.js";
 import type { RoleContract } from "./types.js";
-
-function deepFreeze<T extends object>(obj: T): Readonly<T> {
-	for (const value of Object.values(obj)) {
-		if (value && typeof value === "object") {
-			deepFreeze(value);
-		}
-	}
-	return Object.freeze(obj);
-}
 
 export const DEFAULT_ROLE_CONTRACTS: Readonly<
 	Record<DebateRole, RoleContract>

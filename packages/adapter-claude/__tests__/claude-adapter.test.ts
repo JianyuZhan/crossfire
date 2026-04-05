@@ -720,7 +720,6 @@ describe("ClaudeAdapter", () => {
 		});
 
 		it("clears pending approvals", async () => {
-			let canUseToolCalled = false;
 			const queryFn: QueryFn = (opts) => {
 				async function* approvalGen(): AsyncGenerator<SdkMessage> {
 					yield {
@@ -729,9 +728,7 @@ describe("ClaudeAdapter", () => {
 						model: "haiku",
 						tools: ["bash"],
 					};
-					// Simulate approval request but don't complete it
 					if (opts.canUseTool) {
-						canUseToolCalled = true;
 						// Don't await - leave it pending
 						opts.canUseTool("bash", { command: "test" }, { toolUseID: "tu1" });
 					}

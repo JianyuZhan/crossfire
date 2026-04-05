@@ -1,16 +1,16 @@
 // packages/cli/src/commands/inspection-context.ts
-import {
-	type EvidenceBar,
-	type PolicyClampNote,
-	type PolicyPreset,
-	type ProviderObservationResult,
-	type ResolvedPolicy,
-	compilePolicyWithDiagnostics,
+import type {
+	EvidenceBar,
+	EvidenceSource,
+	PolicyClampNote,
+	PolicyPreset,
+	PresetSource,
+	ProviderObservationResult,
+	ResolvedPolicy,
 } from "@crossfire/adapter-core";
-import type { EvidenceSource } from "../config/evidence-resolution.js";
-import type { PresetSource } from "../config/policy-resolution.js";
 import {
 	type CliPresetOverrides,
+	compilePolicyForRole,
 	resolveAllRoles,
 } from "../config/resolver.js";
 import type { CrossfireConfig } from "../config/schema.js";
@@ -63,19 +63,29 @@ export function buildInspectionContext(
 		const resolved = roles[roleName];
 		if (!resolved) continue;
 
-		let effectiveEvidenceBar: EvidenceBar | undefined = resolved.evidence.bar;
+		const base: RoleInspectionBase = {
+			role: roleName,
+			adapter: resolved.adapter,
+			model: resolved.model,
+			preset: resolved.preset,
+			evidence: {
+				bar: resolved.evidence.bar,
+				source: resolved.evidence.source,
+			},
+			template: resolved.templateName
+				? {
+						name: resolved.templateName,
+						basePreset: resolved.templateBasePreset,
+					}
+				: undefined,
+		};
+
 		try {
-			const diagnostics = compilePolicyWithDiagnostics({
-				preset: resolved.preset.value,
-				role: roleName,
-				...(resolved.evidence.bar !== undefined
-					? { evidenceOverride: { bar: resolved.evidence.bar } }
-					: {}),
-				...(resolved.interactionOverrides
-					? { interactionOverride: resolved.interactionOverrides }
-					: {}),
-			});
-			effectiveEvidenceBar = diagnostics.policy.evidence.bar;
+			const diagnostics = compilePolicyForRole(resolved);
+			base.evidence = {
+				bar: diagnostics.policy.evidence.bar,
+				source: resolved.evidence.source,
+			};
 
 			const observation = observePolicyForAdapter(
 				resolved.adapter,
@@ -84,40 +94,14 @@ export function buildInspectionContext(
 			);
 
 			results.push({
-				role: roleName,
-				adapter: resolved.adapter,
-				model: resolved.model,
-				preset: resolved.preset,
-				evidence: {
-					bar: effectiveEvidenceBar,
-					source: resolved.evidence.source,
-				},
-				template: resolved.templateName
-					? {
-							name: resolved.templateName,
-							basePreset: resolved.templateBasePreset,
-						}
-					: undefined,
+				...base,
 				resolvedPolicy: diagnostics.policy,
 				clamps: diagnostics.clamps,
 				observation,
 			});
 		} catch (err) {
 			results.push({
-				role: roleName,
-				adapter: resolved.adapter,
-				model: resolved.model,
-				preset: resolved.preset,
-				evidence: {
-					bar: effectiveEvidenceBar,
-					source: resolved.evidence.source,
-				},
-				template: resolved.templateName
-					? {
-							name: resolved.templateName,
-							basePreset: resolved.templateBasePreset,
-						}
-					: undefined,
+				...base,
 				error: {
 					message: err instanceof Error ? err.message : String(err),
 				},

@@ -106,12 +106,11 @@ function buildApprovalLines(state: CommandState, width: number): string[] {
 			lines.push(`  ${line}`);
 		}
 		if (approval.options && approval.options.length > 0) {
-			const defaultAllowIndex =
-				approval.options.findIndex(
-					(option) =>
-						option.isDefault &&
-						(option.kind === "allow" || option.kind === "allow-always"),
-				) ?? -1;
+			const defaultAllowIndex = approval.options.findIndex(
+				(option) =>
+					option.isDefault &&
+					(option.kind === "allow" || option.kind === "allow-always"),
+			);
 			const fallbackAllowIndex =
 				defaultAllowIndex >= 0
 					? defaultAllowIndex
@@ -119,10 +118,9 @@ function buildApprovalLines(state: CommandState, width: number): string[] {
 							(option) =>
 								option.kind === "allow" || option.kind === "allow-always",
 						);
-			const defaultDenyIndex =
-				approval.options.findIndex(
-					(option) => option.isDefault && option.kind === "deny",
-				) ?? -1;
+			const defaultDenyIndex = approval.options.findIndex(
+				(option) => option.isDefault && option.kind === "deny",
+			);
 			const fallbackDenyIndex =
 				defaultDenyIndex >= 0
 					? defaultDenyIndex
@@ -197,6 +195,17 @@ export function commandStatusLineHeight(
 	return buildStatusLines(state, width).length;
 }
 
+function approvalLineColor(
+	isApprovalHeader: boolean,
+	isApprovalEntry: boolean,
+	isActionLine: boolean,
+): string | undefined {
+	if (isApprovalHeader) return "black";
+	if (isActionLine) return "green";
+	if (isApprovalEntry) return "cyan";
+	return undefined;
+}
+
 export function CommandStatusLine({
 	state,
 	width,
@@ -221,15 +230,11 @@ export function CommandStatusLine({
 					<Text
 						key={`${index}-${line}`}
 						backgroundColor={isApprovalHeader ? "yellow" : undefined}
-						color={
-							isApprovalHeader
-								? "black"
-								: isActionLine
-									? "green"
-									: isApprovalEntry
-										? "cyan"
-										: undefined
-						}
+						color={approvalLineColor(
+							isApprovalHeader,
+							isApprovalEntry,
+							isActionLine,
+						)}
 						bold={isApprovalHeader || isApprovalEntry}
 						dimColor={!isApprovalHeader && !isApprovalEntry && !isActionLine}
 					>

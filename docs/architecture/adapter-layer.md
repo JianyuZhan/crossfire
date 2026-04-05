@@ -217,11 +217,11 @@ All three adapters emit an `approximate` warning for `evidence.bar` because no p
 
 ### Policy Integration Points
 
-`StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` to derive provider-native parameters. `AdapterMap` entries carry `baselinePolicy` plus baseline clamp notes, preset provenance, and baseline observation output so the orchestrator runner can emit reconstructible runtime policy events without recompiling from scratch.
+`StartSessionInput.policy?` and `TurnInput.policy?` carry an optional `ResolvedPolicy`. When present, adapters call `translatePolicy()` to derive provider-native parameters. Each role in `AdapterMap` is typed as `RoleAdapterEntry`, carrying `baselinePolicy` plus baseline clamp notes, preset provenance, and baseline observation output so the orchestrator runner can emit reconstructible runtime policy events without recompiling from scratch.
 
-The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sendTurn()`. When a policy is present, it calls `translatePolicy()` and emits `run.warning` events for any translation warnings. When no policy is set, it falls back to empty query options.
+The Claude adapter checks `input.policy ?? sessionConfig.baselinePolicy` in `sendTurn()`. When a policy is present, it calls `translatePolicy()` and converts the native result to query options via `toQueryOptions()`. When no policy is set, it falls back to empty query options.
 
-The Codex adapter applies the same pattern in both `startSession()` (for `thread/start` policies) and `sendTurn()` (for per-turn policies), including the transcript recovery path. When no policy is set, it defaults to `{ approvalPolicy: "on-failure" }`.
+The Codex adapter applies the same pattern in both `startSession()` (for `thread/start` policies) and `sendTurn()` (for per-turn policies), including the transcript recovery path. Policy-to-wire-format conversion is centralized in `buildPolicyWireParams()`. When no policy is set, it defaults to `{ approvalPolicy: "on-failure" }`.
 
 The Gemini adapter resolves the approval mode from `input.policy ?? session.baselinePolicy` in `attemptTurn()`, reusing the resolved mode for both the primary and fallback paths. When no policy is set, it defaults to `"default"` approval mode.
 

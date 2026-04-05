@@ -7,7 +7,10 @@ import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
 import { loadConfig } from "../config/loader.js";
-import type { CliPresetOverrides } from "../config/resolver.js";
+import type {
+	CliPresetOverrides,
+	ResolvedRoleRuntimeConfig,
+} from "../config/resolver.js";
 import { resolveAllRoles } from "../config/resolver.js";
 import { createAdapters } from "../wiring/create-adapters.js";
 import { createBus } from "../wiring/create-bus.js";
@@ -180,32 +183,22 @@ export const startCommand = new Command("start")
 				judgeSystemPrompt: resolvedAllRoles.judge?.systemPrompt,
 			};
 
+			const summarizeRole = (r: ResolvedRoleRuntimeConfig) => ({
+				binding: r.bindingName,
+				adapter: r.adapter,
+				model: r.model,
+				preset: r.preset,
+			});
+
 			const initialIndex = {
 				debateId,
 				config,
 				configFile: options.config,
 				roles: {
-					proposer: {
-						binding: resolvedAllRoles.proposer.bindingName,
-						adapter: resolvedAllRoles.proposer.adapter,
-						model: resolvedAllRoles.proposer.model,
-						preset: resolvedAllRoles.proposer.preset,
-					},
-					challenger: {
-						binding: resolvedAllRoles.challenger.bindingName,
-						adapter: resolvedAllRoles.challenger.adapter,
-						model: resolvedAllRoles.challenger.model,
-						preset: resolvedAllRoles.challenger.preset,
-					},
+					proposer: summarizeRole(resolvedAllRoles.proposer),
+					challenger: summarizeRole(resolvedAllRoles.challenger),
 					...(resolvedAllRoles.judge
-						? {
-								judge: {
-									binding: resolvedAllRoles.judge.bindingName,
-									adapter: resolvedAllRoles.judge.adapter,
-									model: resolvedAllRoles.judge.model,
-									preset: resolvedAllRoles.judge.preset,
-								},
-							}
+						? { judge: summarizeRole(resolvedAllRoles.judge) }
 						: {}),
 				},
 				versions: {
