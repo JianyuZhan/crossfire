@@ -69,6 +69,17 @@ export function renderStatusPolicy(views: StatusPolicyView[]): string {
 
 		lines.push(...renderPolicySummary(view.baseline.policy));
 
+		if (view.baseline.template) {
+			const base = view.baseline.template.basePreset
+				? ` (basePreset: ${view.baseline.template.basePreset})`
+				: "";
+			lines.push(`  Template: ${view.baseline.template.name}${base}`);
+		}
+
+		if (view.baseline.evidenceSource) {
+			lines.push(`  Evidence Source: ${view.baseline.evidenceSource}`);
+		}
+
 		if (view.baseline.clamps.length > 0) {
 			lines.push("  Clamps:");
 			for (const c of view.baseline.clamps) {

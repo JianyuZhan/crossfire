@@ -1,5 +1,6 @@
 import type {
 	CapabilityEffectRecord,
+	EvidenceSource,
 	ObservationCompleteness,
 	PolicyClampNote,
 	PolicyPreset,
@@ -21,6 +22,8 @@ export interface StatusPolicyView {
 		clamps: readonly PolicyClampNote[];
 		translationSummary: PolicyTranslationSummary;
 		warnings: readonly PolicyTranslationWarning[];
+		evidenceSource?: EvidenceSource;
+		template?: { name: string; basePreset?: string };
 	};
 	override?: {
 		turnId: string;
@@ -57,6 +60,8 @@ export function buildStatusPolicyView(
 			clamps: state.baseline.clamps,
 			translationSummary: state.baseline.translationSummary,
 			warnings: state.baseline.warnings,
+			evidenceSource: state.baseline.evidence?.source,
+			template: state.baseline.template,
 		},
 	};
 	if (state.currentTurnOverride) {

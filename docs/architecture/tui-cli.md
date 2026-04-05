@@ -113,7 +113,7 @@ Runner-wired commands in `crossfire start`:
 - `/status tools`
 - approval commands (`/approve`, `/deny`, `/approve <index>`, `/deny <index>`, `/approve <index> <option>`, `/deny <index> <option>`, `/approve all`, `/deny all`)
 
-`/status` commands capture a snapshot of the current policy and tool state at invocation time, rendering it through view models defined in `packages/tui/src/status/`. The output reflects the effective policy configuration (baseline and any active turn override), clamps, translation warnings, and the best-effort tool view from provider observation. The command status area renders the most recent live-command output (`CommandState.lastOutput`), so `/status policy` and `/status tools` are visible in the live TUI rather than stored as invisible state.
+`/status` commands capture a snapshot of the current policy and tool state at invocation time, rendering it through view models defined in `packages/tui/src/status/`. The output reflects the effective policy configuration (baseline and any active turn override), clamps, translation warnings, typed evidence with provenance source (cli, config, template, or role-default), template provenance (name and optional basePreset when a template shaped policy), and the best-effort tool view from provider observation. The command status area renders the most recent live-command output (`CommandState.lastOutput`), so `/status policy` and `/status tools` are visible in the live TUI rather than stored as invisible state.
 
 Runner-wired commands in `crossfire resume`:
 

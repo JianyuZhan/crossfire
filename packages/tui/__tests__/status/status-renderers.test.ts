@@ -1,5 +1,7 @@
 import { makeResolvedPolicy } from "@crossfire/adapter-core/testing";
+import type { RuntimePolicyState } from "@crossfire/orchestrator-core";
 import { describe, expect, it } from "vitest";
+import { buildStatusPolicyView } from "../../src/status/index.js";
 import {
 	renderStatusPolicy,
 	renderStatusTools,
@@ -165,5 +167,113 @@ describe("renderStatusTools", () => {
 	it("includes best-effort disclaimer", () => {
 		const text = renderStatusTools([baseToolsView]);
 		expect(text).toMatch(/best.effort/i);
+	});
+});
+
+function makeRuntimeState(
+	overrides: Partial<RuntimePolicyState["baseline"]> = {},
+): RuntimePolicyState {
+	const policy = makeResolvedPolicy({ preset: "guarded", role: "proposer" });
+	return {
+		baseline: {
+			policy,
+			clamps: [],
+			preset: { value: "guarded", source: "config" },
+			translationSummary: {
+				adapter: "claude",
+				nativeSummary: {},
+				exactFields: [],
+				approximateFields: [],
+				unsupportedFields: [],
+			},
+			warnings: [],
+			observation: {
+				translation: {
+					adapter: "claude",
+					nativeSummary: {},
+					exactFields: [],
+					approximateFields: [],
+					unsupportedFields: [],
+				},
+				toolView: [],
+				capabilityEffects: [],
+				warnings: [],
+				completeness: "full",
+			},
+			...overrides,
+		},
+	};
+}
+
+describe("status renderers evidence source", () => {
+	it("renderStatusPolicy shows evidence section from ResolvedPolicy", () => {
+		const state = makeRuntimeState();
+		const view = buildStatusPolicyView(
+			"proposer",
+			"claude",
+			"test-model",
+			state,
+		);
+		const output = renderStatusPolicy([view]);
+		expect(output).toContain("Evidence:");
+		expect(output).toContain("bar:");
+	});
+
+	it("renderStatusPolicy shows evidence source when available", () => {
+		const state = makeRuntimeState({
+			evidence: { source: "config" },
+		});
+		const view = buildStatusPolicyView(
+			"proposer",
+			"claude",
+			"test-model",
+			state,
+		);
+		const output = renderStatusPolicy([view]);
+		expect(output).toContain("Evidence Source: config");
+	});
+});
+
+describe("status renderers template provenance", () => {
+	it("renderStatusPolicy shows template name and basePreset when present", () => {
+		const state = makeRuntimeState({
+			template: { name: "strict", basePreset: "guarded" },
+		});
+		const view = buildStatusPolicyView(
+			"proposer",
+			"claude",
+			"test-model",
+			state,
+		);
+		const output = renderStatusPolicy([view]);
+		expect(output).toContain("Template: strict");
+		expect(output).toContain("(basePreset: guarded)");
+	});
+
+	it("renderStatusPolicy shows template name without basePreset", () => {
+		const state = makeRuntimeState({
+			template: { name: "ev-only" },
+		});
+		const view = buildStatusPolicyView(
+			"proposer",
+			"claude",
+			"test-model",
+			state,
+		);
+		const output = renderStatusPolicy([view]);
+		expect(output).toContain("Template: ev-only");
+		expect(output).not.toContain("basePreset");
+	});
+
+	it("renderStatusPolicy omits template section when no template used", () => {
+		const state = makeRuntimeState();
+		const view = buildStatusPolicyView(
+			"proposer",
+			"claude",
+			"test-model",
+			state,
+		);
+		const output = renderStatusPolicy([view]);
+		expect(output).not.toContain("Template:");
 	});
 });
