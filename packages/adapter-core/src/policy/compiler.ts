@@ -14,7 +14,6 @@ import type {
 	CapabilityCeilings,
 	CapabilityPolicy,
 	CompilePolicyInput,
-	LegacyToolPolicyInput,
 	ResolvedPolicy,
 	RoleContract,
 } from "./types.js";
@@ -28,10 +27,10 @@ function copyRoleContract(rc: RoleContract): RoleContract {
 }
 
 function clampCapabilitiesWithNotes(
-	base: Omit<CapabilityPolicy, "legacyToolOverrides">,
+	base: CapabilityPolicy,
 	ceilings: CapabilityCeilings,
 ): {
-	capabilities: Omit<CapabilityPolicy, "legacyToolOverrides">;
+	capabilities: CapabilityPolicy;
 	clamps: PolicyClampNote[];
 } {
 	const clamps: PolicyClampNote[] = [];
@@ -79,52 +78,17 @@ function clampCapabilitiesWithNotes(
 	return { capabilities: { filesystem, network, shell, subagents }, clamps };
 }
 
-function applyLegacyToolOverrides(
-	capabilities: Omit<CapabilityPolicy, "legacyToolOverrides">,
-	legacyToolPolicy: LegacyToolPolicyInput | undefined,
-): CapabilityPolicy {
-	if (!legacyToolPolicy) return capabilities;
-
-	const hasAllow =
-		legacyToolPolicy.allow !== undefined && legacyToolPolicy.allow.length > 0;
-	const hasDeny =
-		legacyToolPolicy.deny !== undefined && legacyToolPolicy.deny.length > 0;
-
-	if (!hasAllow && !hasDeny) return capabilities;
-
-	return {
-		...capabilities,
-		legacyToolOverrides: {
-			...(hasAllow ? { allow: legacyToolPolicy.allow } : {}),
-			...(hasDeny ? { deny: legacyToolPolicy.deny } : {}),
-			source: "legacy-profile" as const,
-		},
-	};
-}
-
 function compilePolicyInternal(
 	input: CompilePolicyInput,
 ): CompilePolicyDiagnostics {
-	const {
-		preset,
-		role,
-		legacyToolPolicy,
-		evidenceOverride,
-		interactionOverride,
-	} = input;
+	const { preset, role, evidenceOverride, interactionOverride } = input;
 
 	const presetExpansion = PRESET_EXPANSIONS[preset];
 	const roleContract = copyRoleContract(DEFAULT_ROLE_CONTRACTS[role]);
 
-	const { capabilities: clampedCapabilities, clamps } =
-		clampCapabilitiesWithNotes(
-			presetExpansion.capabilities,
-			roleContract.ceilings,
-		);
-
-	const capabilities = applyLegacyToolOverrides(
-		clampedCapabilities,
-		legacyToolPolicy,
+	const { capabilities, clamps } = clampCapabilitiesWithNotes(
+		presetExpansion.capabilities,
+		roleContract.ceilings,
 	);
 
 	const evidence = {

@@ -156,38 +156,21 @@ describe("compilePolicy", () => {
 		});
 	});
 
-	describe("legacy tool overrides", () => {
-		it("attaches legacyToolOverrides when provided", () => {
+	describe("legacy tool overrides removal", () => {
+		it("ResolvedPolicy capabilities no longer include legacyToolOverrides", () => {
+			const p = compilePolicy(
+				makeCompileInput({ preset: "guarded", role: "proposer" }),
+			);
+			expect("legacyToolOverrides" in p.capabilities).toBe(false);
+		});
+
+		it("compiler ignores legacyToolPolicy input", () => {
 			const p = compilePolicy(
 				makeCompileInput({
 					legacyToolPolicy: { allow: ["Read", "Grep"], deny: ["WebFetch"] },
 				}),
 			);
-			expect(p.capabilities.legacyToolOverrides).toEqual({
-				allow: ["Read", "Grep"],
-				deny: ["WebFetch"],
-				source: "legacy-profile",
-			});
-		});
-
-		it("skips legacyToolOverrides when both are empty", () => {
-			const p = compilePolicy(
-				makeCompileInput({ legacyToolPolicy: { allow: [], deny: [] } }),
-			);
-			expect(p.capabilities.legacyToolOverrides).toBeUndefined();
-		});
-
-		it("skips legacyToolOverrides when undefined", () => {
-			const p = compilePolicy(makeCompileInput());
-			expect(p.capabilities.legacyToolOverrides).toBeUndefined();
-		});
-
-		it("attaches when only allow is provided", () => {
-			const p = compilePolicy(
-				makeCompileInput({ legacyToolPolicy: { allow: ["Read"] } }),
-			);
-			expect(p.capabilities.legacyToolOverrides?.allow).toEqual(["Read"]);
-			expect(p.capabilities.legacyToolOverrides?.deny).toBeUndefined();
+			expect("legacyToolOverrides" in p.capabilities).toBe(false);
 		});
 	});
 

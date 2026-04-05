@@ -738,12 +738,8 @@ describe("runner policy flow (real runDebate path)", () => {
 			).toBe(false);
 		});
 
-		it("legacyToolPolicyInput carries forward through sendTurn", async () => {
+		it("does not preserve legacy tool input through sendTurn", async () => {
 			const proposerTurns: TurnInput[] = [];
-			const legacyToolPolicy = {
-				allow: ["Read", "Grep"],
-				deny: ["WebFetch"],
-			};
 
 			const proposer = createScriptedAdapter(
 				"claude",
@@ -782,9 +778,7 @@ describe("runner policy flow (real runDebate path)", () => {
 					baselinePolicy: compilePolicy({
 						preset: "guarded",
 						role: "proposer",
-						legacyToolPolicy,
 					}),
-					legacyToolPolicyInput: legacyToolPolicy,
 				},
 				challenger: {
 					adapter: challenger,
@@ -802,13 +796,9 @@ describe("runner policy flow (real runDebate path)", () => {
 			await runDebate(debateConfig, adapters);
 
 			const receivedPolicy = proposerTurns[0].policy;
-			expect(receivedPolicy?.capabilities.legacyToolOverrides?.allow).toEqual([
-				"Read",
-				"Grep",
-			]);
-			expect(receivedPolicy?.capabilities.legacyToolOverrides?.deny).toEqual([
-				"WebFetch",
-			]);
+			expect(
+				"legacyToolOverrides" in (receivedPolicy?.capabilities ?? {}),
+			).toBe(false);
 		});
 	});
 
@@ -975,14 +965,9 @@ describe("runner policy flow (real runDebate path)", () => {
 
 		it("turn override smoke: baseline stored, override takes precedence, baseline clean", async () => {
 			const proposerTurns: TurnInput[] = [];
-			const legacyToolPolicy = {
-				allow: ["Read"],
-				deny: ["WebFetch"],
-			};
 			const baselineProposer = compilePolicy({
 				preset: "guarded",
 				role: "proposer",
-				legacyToolPolicy,
 			});
 
 			const proposer = createScriptedAdapter(
@@ -1020,7 +1005,6 @@ describe("runner policy flow (real runDebate path)", () => {
 						workingDirectory: "/tmp",
 					}),
 					baselinePolicy: baselineProposer,
-					legacyToolPolicyInput: legacyToolPolicy,
 				},
 				challenger: {
 					adapter: challenger,
@@ -1048,19 +1032,15 @@ describe("runner policy flow (real runDebate path)", () => {
 			expect(proposerTurns[0]?.policy?.preset).toBe("research");
 			expect(proposerTurns[0]?.policy?.capabilities.filesystem).toBe("read");
 			expect(
-				proposerTurns[0]?.policy?.capabilities.legacyToolOverrides?.allow,
-			).toEqual(["Read"]);
-			expect(
-				proposerTurns[0]?.policy?.capabilities.legacyToolOverrides?.deny,
-			).toEqual(["WebFetch"]);
+				"legacyToolOverrides" in (proposerTurns[0]?.policy?.capabilities ?? {}),
+			).toBe(false);
 			expect(proposerTurns[0]?.policy).not.toBe(baselineProposer);
 
 			expect(baselineProposer.preset).toBe("guarded");
 			expect(baselineProposer.capabilities.filesystem).toBe("write");
 			expect(
-				adapters.proposer.baselinePolicy?.capabilities.legacyToolOverrides
-					?.allow,
-			).toEqual(["Read"]);
+				"legacyToolOverrides" in (baselineProposer.capabilities ?? {}),
+			).toBe(false);
 		});
 	});
 });

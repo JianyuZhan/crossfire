@@ -101,15 +101,6 @@ export function inspectPolicy(
 	const sandbox = resolveSandboxLevel(policy);
 	const capabilityEffects = resolveCapabilityEffects(policy, sandbox.level);
 	const limitsWarnings = buildLimitsWarnings(policy.interaction.limits);
-	const legacyWarnings: PolicyTranslationWarning[] = [];
-	if (policy.capabilities.legacyToolOverrides) {
-		legacyWarnings.push({
-			field: "capabilities.legacyToolOverrides",
-			adapter: "codex",
-			reason: "not_implemented",
-			message: "Codex does not consume per-tool allow/deny lists",
-		});
-	}
 
 	const evidenceWarnings: PolicyTranslationWarning[] = [];
 	if (policy.evidence) {
@@ -124,7 +115,6 @@ export function inspectPolicy(
 	const allWarnings = [
 		...approval.warnings,
 		...sandbox.warnings,
-		...legacyWarnings,
 		...limitsWarnings,
 		...evidenceWarnings,
 	];

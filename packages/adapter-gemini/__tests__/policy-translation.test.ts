@@ -108,19 +108,18 @@ describe("translatePolicy (Gemini)", () => {
 		});
 	});
 
-	describe("golden: guarded + proposer + legacy overrides (not_implemented warning)", () => {
-		it("emits not_implemented warning for legacy tool overrides", () => {
+	describe("legacy tool override removal", () => {
+		it("no longer emits warnings for legacy tool overrides", () => {
 			const policy = makeResolvedPolicy({
 				preset: "guarded",
 				role: "proposer",
 				legacyToolPolicy: { allow: ["Read"] },
 			});
 			const { warnings } = translatePolicy(policy);
-			expectWarning(warnings, {
-				field: "capabilities.legacyToolOverrides",
-				adapter: "gemini",
-				reason: "not_implemented",
-			});
+			const legacyWarnings = warnings.filter((w) =>
+				w.field.includes("legacyToolOverrides"),
+			);
+			expect(legacyWarnings).toEqual([]);
 		});
 	});
 

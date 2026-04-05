@@ -20,8 +20,8 @@ The compilation pipeline:
 PresetInput -> compilePolicy() -> ResolvedPolicy -> adapter translatePolicy() -> ProviderTranslationResult
 ```
 
-- `PresetInput` carries a preset name (`research`, `guarded`, `dangerous`, `plan`), a role, and optional legacy tool overrides
-- `compilePolicy()` expands the preset, applies default role contracts, clamps capabilities to role ceilings, and merges legacy tool overrides
+- `PresetInput` carries a preset name (`research`, `guarded`, `dangerous`, `plan`), a role, and optional evidence/interaction overrides
+- `compilePolicy()` expands the preset, applies default role contracts, and clamps capabilities to role ceilings
 - Each adapter's `translatePolicy()` is a pure function that maps `ResolvedPolicy` to provider-native options plus translation warnings
 
 ## Policy Layers
@@ -29,8 +29,9 @@ PresetInput -> compilePolicy() -> ResolvedPolicy -> adapter translatePolicy() ->
 A `ResolvedPolicy` comprises:
 
 - **Role contract**: semantic constraints (exploration, fact-check scope, evidence bar, whether new proposals are allowed)
-- **Capability policy**: filesystem, network, shell, subagents levels plus optional legacy tool overrides
+- **Capability policy**: filesystem, network, shell, subagents levels
 - **Interaction policy**: approval mode (`always`, `on-risk`, `on-failure`, `never`) plus optional limits (maxTurns, budgetUsd, timeoutMs, maxToolCalls)
+- **Evidence policy**: citation strength requirements (low, medium, high)
 - **Preset**: the originating preset name, preserved for diagnostics only -- adapters must not branch on it
 
 ## Presets
@@ -168,7 +169,7 @@ role baseline < turn override
 - Role baseline is compiled via `compilePolicyWithDiagnostics({ preset, role })` during adapter wiring and stored as `baselinePolicy` plus baseline clamp/provenance/observation metadata on each adapter entry
 - Per-turn overrides are specified via `DebateConfig.turnPresets` (a `Record<string, PolicyPreset>` mapping turnId to preset name)
 
-When a turn override is active, the runner compiles a fresh policy with the override preset while preserving any `legacyToolPolicyInput` from the adapter entry. The baseline policy is never mutated.
+When a turn override is active, the runner compiles a fresh policy with the override preset. The baseline policy is never mutated.
 
 The runner emits `policy.baseline` once per role after `debate.started`, then emits `policy.turn.override` before a proposer / challenger turn when a turn-level override is active and `policy.turn.override.clear` after the turn completes. Override events carry the full effective override policy plus real translation summary and warnings from the same observation rule path used by inspection.
 
@@ -182,12 +183,11 @@ Each adapter has a `translatePolicy(policy: ResolvedPolicy): ProviderTranslation
 
 `translatePolicy()` maps `ResolvedPolicy` to Claude SDK query options:
 
-- `interaction.approval` -> `permissionMode`: `always` -> `default`, `on-risk` -> `default`, `on-failure` -> `dontAsk`, `never` -> `bypassPermissions`
+- `interaction.approval` -> `permissionMode`: `always`/`on-risk` -> `default`, `on-failure` -> approximate to `default`, `never` -> `bypassPermissions`
+- Plan-shaped policies (approval=always + read-only capabilities + off shell/subagents + off/search network) -> `permissionMode: "plan"`
 - `capabilities.shell === "exec"` -> `allowDangerouslySkipPermissions: true`
-- `interaction.limits.maxTurns` -> `maxTurns` (defaults to 12 for on-failure/dontAsk modes)
-- `capabilities.legacyToolOverrides.deny` -> `disallowedTools`; `.allow` -> `allowedTools`
-
-Intentional semantic delta: `research` preset now maps to `on-failure` approval (Claude `dontAsk`) rather than combining it with a hard-coded tool allowlist. Tool restrictions are driven by `capabilities.legacyToolOverrides` instead, making preset and tool policy independent knobs.
+- `interaction.limits.maxTurns` -> `maxTurns`
+- Capability enums drive tool deny lists: `filesystem: "off"` denies all file tools, `filesystem: "read"` denies write tools, `shell: "off"` denies Bash, etc.
 
 Recovery path: the Claude adapter reapplies the same translated policy options when falling back to transcript recovery, so permission mode, tool restrictions, and turn limits survive partial failures.
 

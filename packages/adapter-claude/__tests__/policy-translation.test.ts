@@ -114,20 +114,20 @@ describe("translatePolicy (Claude)", () => {
 		});
 	});
 
-	describe("golden: research + proposer + legacy allow Bash (legacy override conflict)", () => {
-		it("drops conflicting legacy allow with approximate warning", () => {
+	describe("legacy tool override removal", () => {
+		it("no longer processes legacy tool overrides", () => {
 			const policy = makeResolvedPolicy({
 				preset: "research",
 				role: "proposer",
 				legacyToolPolicy: { allow: ["Bash"] },
 			});
 			const { native, warnings } = translatePolicy(policy);
+			expect(native.allowedTools).toBeUndefined();
 			expect(native.disallowedTools).toContain("Bash");
-			expectWarning(warnings, {
-				field: "capabilities.legacyToolOverrides.allow",
-				adapter: "claude",
-				reason: "approximate",
-			});
+			const legacyWarnings = warnings.filter((w) =>
+				w.field.includes("legacyToolOverrides"),
+			);
+			expect(legacyWarnings).toEqual([]);
 		});
 	});
 

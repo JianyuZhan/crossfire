@@ -82,7 +82,6 @@ export async function createAdapters(
 			baselineTemplateName: resolved.templateName,
 			baselineTemplateBasePreset: resolved.templateBasePreset,
 			baselineObservation: observation,
-			legacyToolPolicyInput: undefined,
 			observePolicy: (nextPolicy: ResolvedPolicy): ProviderObservationResult =>
 				observePolicyForAdapter(
 					resolved.adapter,

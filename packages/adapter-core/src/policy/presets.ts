@@ -6,7 +6,7 @@ import type {
 } from "./types.js";
 
 export interface PresetExpansion {
-	readonly capabilities: Omit<CapabilityPolicy, "legacyToolOverrides">;
+	readonly capabilities: CapabilityPolicy;
 	readonly interaction: InteractionPolicy;
 }
 

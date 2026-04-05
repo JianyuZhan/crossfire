@@ -40,11 +40,11 @@ describe("makeResolvedPolicy", () => {
 		expect(policy.capabilities.shell).toBe("off");
 	});
 
-	it("accepts legacyToolPolicy", () => {
+	it("ignores legacyToolPolicy input", () => {
 		const policy = makeResolvedPolicy({
 			legacyToolPolicy: { allow: ["Read"] },
 		});
-		expect(policy.capabilities.legacyToolOverrides?.allow).toEqual(["Read"]);
+		expect("legacyToolOverrides" in policy.capabilities).toBe(false);
 	});
 });
 

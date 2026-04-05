@@ -107,34 +107,9 @@ export function resolveToolPolicy(
 	capabilities: CapabilityPolicy,
 ): ClaudeToolPolicyResolution {
 	const baseDeny = computeBaseDenyList(capabilities);
-	if (!capabilities.legacyToolOverrides) {
-		return {
-			...(baseDeny.length > 0 ? { disallowedTools: baseDeny } : {}),
-			warnings: [],
-		};
-	}
-
-	const warnings: PolicyTranslationWarning[] = [];
-	const { allow, deny } = capabilities.legacyToolOverrides;
-	const explicitDeny = new Set(deny ?? []);
-	const conflicting = allow?.filter((tool) => baseDeny.includes(tool));
-	if (conflicting?.length) {
-		warnings.push({
-			field: "capabilities.legacyToolOverrides.allow",
-			adapter: "claude",
-			reason: "approximate",
-			message: `Tools [${conflicting.join(", ")}] blocked by capability enum, legacy allow ignored`,
-		});
-	}
-	const effectiveAllow = allow?.filter(
-		(tool) => !baseDeny.includes(tool) && !explicitDeny.has(tool),
-	);
-	const effectiveDeny = [...baseDeny, ...explicitDeny];
-
 	return {
-		...(effectiveAllow?.length ? { allowedTools: effectiveAllow } : {}),
-		...(effectiveDeny.length ? { disallowedTools: effectiveDeny } : {}),
-		warnings,
+		...(baseDeny.length > 0 ? { disallowedTools: baseDeny } : {}),
+		warnings: [],
 	};
 }
 
@@ -171,45 +146,16 @@ export function resolveToolView(policy: ResolvedPolicy): {
 } {
 	const toolPolicy = resolveToolPolicy(policy.capabilities);
 	const denyList = new Set(toolPolicy.disallowedTools ?? []);
-	const allowList = toolPolicy.allowedTools
-		? new Set(toolPolicy.allowedTools)
-		: undefined;
-	const legacyDeny = new Set(
-		policy.capabilities.legacyToolOverrides?.deny ?? [],
-	);
 
 	return {
 		toolView: CLAUDE_ALL_KNOWN_TOOLS.map((name): ToolInspectionRecord => {
-			const blockedByCapability = denyList.has(name) && !legacyDeny.has(name);
-			const blockedByLegacyDeny = legacyDeny.has(name);
-			const blockedByLegacyAllow =
-				allowList !== undefined && !allowList.has(name) && !blockedByCapability;
-			const blocked =
-				blockedByCapability || blockedByLegacyDeny || blockedByLegacyAllow;
+			const blocked = denyList.has(name);
 			return {
 				name,
 				source: "builtin",
 				status: blocked ? "blocked" : "allowed",
-				reason: blocked
-					? blockedByCapability
-						? "capability_policy"
-						: "legacy_override"
-					: allowList?.has(name)
-						? "legacy_override"
-						: "adapter_default",
-				...(blockedByCapability
-					? { capabilityField: inferCapabilityField(name) }
-					: {}),
-				...(blockedByLegacyAllow
-					? {
-							details:
-								"Blocked because it is not included in the legacy allow list",
-						}
-					: blockedByLegacyDeny
-						? { details: "Blocked by legacy deny list" }
-						: allowList?.has(name)
-							? { details: "Explicitly allowed by legacy allow list" }
-							: {}),
+				reason: blocked ? "capability_policy" : "adapter_default",
+				...(blocked ? { capabilityField: inferCapabilityField(name) } : {}),
 			};
 		}),
 		warnings: toolPolicy.warnings,

@@ -13,11 +13,6 @@ export type CapabilityPolicy = {
 	readonly network: NetworkLevel;
 	readonly shell: ShellLevel;
 	readonly subagents: SubagentLevel;
-	readonly legacyToolOverrides?: {
-		readonly allow?: readonly string[];
-		readonly deny?: readonly string[];
-		readonly source: "legacy-profile";
-	};
 };
 
 // --- Role contract ---
@@ -32,9 +27,7 @@ export type RoleSemantics = {
 	readonly mayIntroduceNewProposal: boolean;
 };
 
-export type CapabilityCeilings = Partial<
-	Readonly<Omit<CapabilityPolicy, "legacyToolOverrides">>
->;
+export type CapabilityCeilings = Partial<Readonly<CapabilityPolicy>>;
 
 export type RoleContract = {
 	readonly semantics: RoleSemantics;
@@ -80,15 +73,9 @@ export type ResolvedPolicy = {
 
 // --- Compiler input ---
 
-export type LegacyToolPolicyInput = {
-	readonly allow?: readonly string[];
-	readonly deny?: readonly string[];
-};
-
 export type CompilePolicyInput = {
 	readonly preset: PolicyPreset;
 	readonly role: DebateRole;
-	readonly legacyToolPolicy?: LegacyToolPolicyInput;
 	readonly evidenceOverride?: {
 		readonly bar?: EvidenceBar;
 	};
@@ -98,6 +85,13 @@ export type CompilePolicyInput = {
 			readonly maxTurns?: number;
 		};
 	};
+};
+
+// --- Legacy support (deprecated, will be removed) ---
+
+export type LegacyToolPolicyInput = {
+	readonly allow?: readonly string[];
+	readonly deny?: readonly string[];
 };
 
 // --- Translation result ---

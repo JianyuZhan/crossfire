@@ -28,14 +28,6 @@ export function translatePolicy(
 		...approval.warnings,
 		...sandbox.warnings,
 	];
-	if (policy.capabilities.legacyToolOverrides) {
-		warnings.push({
-			field: "capabilities.legacyToolOverrides",
-			adapter: "codex",
-			reason: "not_implemented",
-			message: "Codex does not consume per-tool allow/deny lists",
-		});
-	}
 	warnings.push(...buildLimitsWarnings(policy.interaction.limits));
 	return {
 		native: {

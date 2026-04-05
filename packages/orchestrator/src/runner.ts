@@ -3,7 +3,6 @@ import { join } from "node:path";
 import {
 	type AgentAdapter,
 	type EvidenceSource,
-	type LegacyToolPolicyInput,
 	type NormalizedEvent,
 	type PolicyClampNote,
 	type PolicyPreset,
@@ -67,7 +66,6 @@ export interface AdapterMap {
 		baselineTemplateName?: string;
 		baselineTemplateBasePreset?: string;
 		baselineObservation?: ProviderObservationResult;
-		legacyToolPolicyInput?: LegacyToolPolicyInput;
 		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
 	};
 	challenger: {
@@ -83,7 +81,6 @@ export interface AdapterMap {
 		baselineTemplateName?: string;
 		baselineTemplateBasePreset?: string;
 		baselineObservation?: ProviderObservationResult;
-		legacyToolPolicyInput?: LegacyToolPolicyInput;
 		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
 	};
 	judge?: {
@@ -99,7 +96,6 @@ export interface AdapterMap {
 		baselineTemplateName?: string;
 		baselineTemplateBasePreset?: string;
 		baselineObservation?: ProviderObservationResult;
-		legacyToolPolicyInput?: LegacyToolPolicyInput;
 		observePolicy?: (policy: ResolvedPolicy) => ProviderObservationResult;
 	};
 }
@@ -589,7 +585,6 @@ export async function runDebate(
 			adapter: AgentAdapter;
 			session: SessionHandle;
 			baselinePolicy?: ResolvedPolicy;
-			legacyToolPolicyInput?: LegacyToolPolicyInput;
 		};
 		operationalPreamble?: string;
 	}
@@ -633,7 +628,6 @@ export async function runDebate(
 			? compilePolicy({
 					preset: turnOverridePreset,
 					role: role as "proposer" | "challenger" | "judge",
-					legacyToolPolicy: adapterEntry.legacyToolPolicyInput,
 				})
 			: adapterEntry.baselinePolicy;
 

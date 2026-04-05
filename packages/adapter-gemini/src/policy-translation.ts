@@ -23,14 +23,6 @@ export function translatePolicy(
 		...approval.warnings,
 		...capabilities.warnings,
 	];
-	if (policy.capabilities.legacyToolOverrides) {
-		warnings.push({
-			field: "capabilities.legacyToolOverrides",
-			adapter: "gemini",
-			reason: "not_implemented",
-			message: "Gemini does not consume per-tool allow/deny lists",
-		});
-	}
 	warnings.push(...buildLimitsWarnings(policy.interaction.limits));
 	return {
 		native: { approvalMode: approval.approvalMode },
