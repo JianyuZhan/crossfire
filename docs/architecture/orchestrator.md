@@ -24,7 +24,7 @@ Packages:
 
 ### DebateConfig
 
-`DebateConfig` defines debate topic, round limits, judge cadence, convergence threshold, optional execution-mode policy, optional prompt-template selections, and optional per-role model/system-prompt overrides.
+`DebateConfig` defines debate topic, round limits, judge cadence, convergence threshold, optional policy overrides, optional prompt-template selections, and optional per-role model/system-prompt overrides.
 
 ### OrchestratorEvent
 
@@ -224,10 +224,12 @@ Current built-in role guidance also matters:
 
 `runJudgeTurn()` is responsible for:
 
-- sending judge prompts
+- sending judge prompts with the compiled baseline policy (always uses the `plan` preset policy)
 - parsing `judge_verdict`
 - tolerating missing tool calls
 - returning graceful degradation rather than crashing the debate
+
+Judge turns use policy only - there is no `executionMode` fallback. The runner always provides the baseline `plan` policy when invoking the judge.
 
 The current judge contract remains score-based, but prompt guidance is action-plan-oriented:
 

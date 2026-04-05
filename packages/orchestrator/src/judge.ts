@@ -206,8 +206,6 @@ export async function runJudgeTurn(
 		turnId: input.turnId,
 		prompt: input.prompt,
 		policy: input.policy,
-		// Legacy fallback: only set executionMode when no policy is provided
-		...(input.policy ? {} : { executionMode: "plan" as const }),
 		role: "judge",
 		roundNumber: input.roundNumber,
 	});
