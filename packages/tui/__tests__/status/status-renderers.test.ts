@@ -1,10 +1,13 @@
+import { makeResolvedPolicy } from "@crossfire/adapter-core/testing";
 import { describe, expect, it } from "vitest";
-import type { StatusPolicyView, StatusToolsView } from "../../src/status/status-view-models.js";
 import {
 	renderStatusPolicy,
 	renderStatusTools,
 } from "../../src/status/status-renderers.js";
-import { makeResolvedPolicy } from "@crossfire/adapter-core/testing";
+import type {
+	StatusPolicyView,
+	StatusToolsView,
+} from "../../src/status/status-view-models.js";
 
 const basePolicyView: StatusPolicyView = {
 	role: "proposer",
@@ -13,7 +16,14 @@ const basePolicyView: StatusPolicyView = {
 	baseline: {
 		preset: { value: "research", source: "cli-role" },
 		policy: makeResolvedPolicy(),
-		clamps: [{ field: "capabilities.shell", before: "exec", after: "off", reason: "role_ceiling" }],
+		clamps: [
+			{
+				field: "capabilities.shell",
+				before: "exec",
+				after: "off",
+				reason: "role_ceiling",
+			},
+		],
 		translationSummary: {
 			adapter: "claude",
 			nativeSummary: { permissionMode: "default" },
@@ -22,7 +32,12 @@ const basePolicyView: StatusPolicyView = {
 			unsupportedFields: [],
 		},
 		warnings: [
-			{ field: "limits", adapter: "claude", reason: "approximate", message: "maxTurns is approximate" },
+			{
+				field: "limits",
+				adapter: "claude",
+				reason: "approximate",
+				message: "maxTurns is approximate",
+			},
 		],
 	},
 };
@@ -37,6 +52,9 @@ describe("renderStatusPolicy", () => {
 		expect(text).toContain("cli-role");
 		expect(text).toContain("capabilities.shell");
 		expect(text).toContain("maxTurns is approximate");
+		expect(text).toContain("exactFields: approval");
+		expect(text).toContain("approximateFields: (none)");
+		expect(text).toContain("unsupportedFields: (none)");
 	});
 
 	it("renders resolved policy capabilities summary", () => {
@@ -51,7 +69,13 @@ describe("renderStatusPolicy", () => {
 				turnId: "p-1",
 				preset: "dangerous",
 				policy: makeResolvedPolicy({ preset: "dangerous" }),
-				translationSummary: basePolicyView.baseline.translationSummary,
+				translationSummary: {
+					adapter: "claude",
+					nativeSummary: { permissionMode: "plan" },
+					exactFields: [],
+					approximateFields: ["approval"],
+					unsupportedFields: ["interaction.limits.maxTurns"],
+				},
 				warnings: [],
 			},
 		};
@@ -59,6 +83,10 @@ describe("renderStatusPolicy", () => {
 		expect(text).toContain("Override");
 		expect(text).toContain("p-1");
 		expect(text).toContain("dangerous");
+		expect(text).toContain("Override Translation:");
+		expect(text).toContain("permissionMode");
+		expect(text).toContain("approximateFields: approval");
+		expect(text).toContain("unsupportedFields: interaction.limits.maxTurns");
 	});
 
 	it("shows not-yet-available when views array is empty", () => {
@@ -73,7 +101,10 @@ describe("renderStatusPolicy", () => {
 		};
 		const viewWithEvidence: StatusPolicyView = {
 			...basePolicyView,
-			baseline: { ...basePolicyView.baseline, policy: policyWithEvidence as StatusPolicyView["baseline"]["policy"] },
+			baseline: {
+				...basePolicyView.baseline,
+				policy: policyWithEvidence as StatusPolicyView["baseline"]["policy"],
+			},
 		};
 		const text = renderStatusPolicy([viewWithEvidence]);
 		expect(text).toContain("Evidence");
@@ -93,8 +124,19 @@ describe("renderStatusTools", () => {
 		adapter: "claude",
 		source: "baseline",
 		toolView: [
-			{ name: "Bash", source: "builtin", status: "allowed", reason: "adapter_default" },
-			{ name: "Read", source: "builtin", status: "blocked", reason: "capability_policy", capabilityField: "capabilities.shell" },
+			{
+				name: "Bash",
+				source: "builtin",
+				status: "allowed",
+				reason: "adapter_default",
+			},
+			{
+				name: "Read",
+				source: "builtin",
+				status: "blocked",
+				reason: "capability_policy",
+				capabilityField: "capabilities.shell",
+			},
 		],
 		capabilityEffects: [{ field: "capabilities.shell", status: "applied" }],
 		completeness: "partial",

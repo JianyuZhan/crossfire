@@ -157,20 +157,23 @@ function buildApprovalLines(state: CommandState, width: number): string[] {
 	return lines;
 }
 
-function buildStatusLines(state: CommandState, width: number): string[] {
-	// Hide in normal mode with nothing special to show
-	if (
-		state.mode === "normal" &&
-		state.pendingApprovals.length === 0 &&
-		!state.livePaused &&
-		state.replaySpeed === undefined &&
-		!state.replayPaused
-	) {
-		return [];
+function buildOutputLines(text: string, width: number): string[] {
+	const contentWidth = Math.max(24, width - 2);
+	const lines: string[] = [];
+	for (const paragraph of text.split("\n")) {
+		lines.push(...wrapPlainText(paragraph, contentWidth));
 	}
+	return lines;
+}
 
+function buildStatusLines(state: CommandState, width: number): string[] {
 	if (state.pendingApprovals.length > 0) {
 		return buildApprovalLines(state, width);
+	}
+
+	const lines: string[] = [];
+	if (state.lastOutput) {
+		lines.push(...buildOutputLines(state.lastOutput, width));
 	}
 
 	const parts: string[] = [];
@@ -180,7 +183,11 @@ function buildStatusLines(state: CommandState, width: number): string[] {
 	if (state.replaySpeed !== undefined)
 		parts.push(`Speed: ${state.replaySpeed}x`);
 	if (state.replayPaused) parts.push("PAUSED");
-	return [parts.join(" | ")];
+	if (parts.length > 0) {
+		lines.push(parts.join(" | "));
+	}
+
+	return lines;
 }
 
 export function commandStatusLineHeight(

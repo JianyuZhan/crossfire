@@ -159,4 +159,33 @@ describe("CommandStatusLine", () => {
 		expect(normalHeight).toBe(0);
 		expect(approvalHeight).toBeGreaterThan(1);
 	});
+
+	it("renders command output from lastOutput", () => {
+		const state = makeState({
+			lastOutput:
+				'=== proposer (claude) ===\nPreset: research\nTranslation: {"permissionMode":"default"}',
+		});
+
+		const { lastFrame } = render(
+			<CommandStatusLine state={state} width={72} />,
+		);
+		const output = lastFrame();
+		expect(output).toContain("proposer");
+		expect(output).toContain("Preset: research");
+		expect(output).toContain("Translation:");
+	});
+
+	it("shows command output together with paused state when both are present", () => {
+		const state = makeState({
+			lastOutput: "Policy state not yet available.",
+			livePaused: true,
+		});
+
+		const { lastFrame } = render(
+			<CommandStatusLine state={state} width={72} />,
+		);
+		const output = lastFrame();
+		expect(output).toContain("Policy state not yet available.");
+		expect(output).toContain("PAUSED");
+	});
 });

@@ -14,6 +14,15 @@ import { createDefaultFactories } from "../wiring/create-factories.js";
 import { createTui } from "../wiring/create-tui.js";
 import { createLiveCommandHandler } from "../wiring/live-command-handler.js";
 
+export function hydrateTuiStoreFromEvents<TEvent>(
+	store: { handleEvent: (event: TEvent) => void },
+	events: readonly TEvent[],
+): void {
+	for (const event of events) {
+		store.handleEvent(event);
+	}
+}
+
 export const resumeCommand = new Command("resume")
 	.description("Resume an existing debate")
 	.argument("<output-dir>", "Output directory containing the debate")
@@ -95,6 +104,7 @@ export const resumeCommand = new Command("resume")
 				});
 			};
 			if (tuiBundle) {
+				hydrateTuiStoreFromEvents(tuiBundle.store, events);
 				inkInstance = render(
 					React.createElement(App, {
 						store: tuiBundle.store,

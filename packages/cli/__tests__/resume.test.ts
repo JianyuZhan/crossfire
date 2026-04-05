@@ -402,6 +402,24 @@ describe("bus hydration logic", () => {
 
 		expect(pushed).toHaveLength(0);
 	});
+
+	it("hydrates TUI store with existing events for resumed debates", async () => {
+		const { hydrateTuiStoreFromEvents } = await import(
+			"../src/commands/resume.js"
+		);
+		const handled: unknown[] = [];
+		const store = {
+			handleEvent: (event: unknown) => handled.push(event),
+		};
+		const events = [
+			{ kind: "debate.started", debateId: "deb-1", timestamp: 1000 },
+			{ kind: "policy.baseline", role: "proposer", timestamp: 2000 },
+		];
+
+		hydrateTuiStoreFromEvents(store, events);
+
+		expect(handled).toEqual(events);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -491,15 +509,20 @@ describe("error handling edge cases", () => {
 	});
 
 	it("missing profiles field in meta causes property access error", () => {
-		const meta = { config: { topic: "test" } } as Record<string, any>;
+		const meta = { config: { topic: "test" } } as Record<string, unknown>;
 		expect(() => {
-			const _name = meta.profiles.proposer.name;
+			const profiles = (meta as { profiles?: { proposer?: { name?: string } } })
+				.profiles;
+			const _name = profiles?.proposer?.name;
+			if (_name === undefined) {
+				throw new TypeError("Missing profiles.proposer.name");
+			}
 		}).toThrow();
 	});
 
 	it("missing debateId in meta is handled gracefully (undefined)", () => {
-		const meta = { config: { topic: "test" } } as Record<string, any>;
-		expect(meta.debateId).toBeUndefined();
+		const meta = { config: { topic: "test" } } as Record<string, unknown>;
+		expect((meta as { debateId?: string }).debateId).toBeUndefined();
 	});
 });
 

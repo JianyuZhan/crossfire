@@ -113,7 +113,7 @@ Runner-wired commands in `crossfire start`:
 - `/status tools`
 - approval commands (`/approve`, `/deny`, `/approve <index>`, `/deny <index>`, `/approve <index> <option>`, `/deny <index> <option>`, `/approve all`, `/deny all`)
 
-`/status` commands capture a snapshot of the current policy and tool state at invocation time, rendering it through view models defined in `packages/tui/src/status/`. The output reflects the effective policy configuration (baseline and any active turn override), clamps, translation warnings, and the best-effort tool view from provider observation.
+`/status` commands capture a snapshot of the current policy and tool state at invocation time, rendering it through view models defined in `packages/tui/src/status/`. The output reflects the effective policy configuration (baseline and any active turn override), clamps, translation warnings, and the best-effort tool view from provider observation. The command status area renders the most recent live-command output (`CommandState.lastOutput`), so `/status policy` and `/status tools` are visible in the live TUI rather than stored as invisible state.
 
 Runner-wired commands in `crossfire resume`:
 
@@ -136,6 +136,7 @@ Parsed but not currently wired:
 Important wiring nuance:
 
 - `crossfire start` and `crossfire resume` now share the same live command handler, so stop / interrupt / approval / inject / pause / resume / extend behavior stays aligned across fresh and resumed runs
+- `crossfire resume` hydrates the TUI store with previously persisted events before mounting the live app, so session-scoped runtime policy state is immediately available to `/status` on resumed debates
 - `/interrupt` is routed as a control event to the runner, which attempts provider-native `adapter.interrupt(turnId)` only for the currently active turn; unsupported adapters surface a warning instead
 - the TUI command status area reflects projected live pause state and expands pending approvals into a taller fixed region so commands stay visible while operator action is required
 - `/approve` and `/deny` still work as shorthand defaults, but when an approval exposes request-scoped approval capabilities, the handler can target a specific choice via `/approve <approval-index> <option-index>` or `/deny <approval-index> <option-index>`

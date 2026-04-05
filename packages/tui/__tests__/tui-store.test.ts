@@ -1303,6 +1303,38 @@ describe("TuiStore", () => {
 		expect(store.getState().proposer.preset).toBe("research");
 	});
 
+	it("preserves baseline preset across non-override round.started", () => {
+		const store = new TuiStore();
+		store.handleEvent(
+			ev("debate.started", {
+				debateId: "deb-1",
+				config: minimalConfig,
+			}),
+		);
+		store.handleEvent(
+			ev("policy.baseline", {
+				role: "proposer",
+				policy: {
+					preset: "research",
+					roleContract: {},
+					capabilities: {},
+					interaction: {},
+				},
+				clamps: [],
+				preset: { value: "research", source: "cli-role" },
+				translationSummary: stubObservation.translation,
+				warnings: [],
+				observation: stubObservation,
+			}),
+		);
+
+		store.handleEvent(
+			ev("round.started", { roundNumber: 1, speaker: "proposer" }),
+		);
+
+		expect(store.getState().proposer.preset).toBe("research");
+	});
+
 	it("ignores policy events before debate.started", () => {
 		const store = new TuiStore();
 		store.handleEvent(

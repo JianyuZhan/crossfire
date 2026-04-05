@@ -1,5 +1,11 @@
-import type { ResolvedPolicy } from "@crossfire/adapter-core";
-import type { StatusPolicyView, StatusToolsView } from "./status-view-models.js";
+import type {
+	PolicyTranslationSummary,
+	ResolvedPolicy,
+} from "@crossfire/adapter-core";
+import type {
+	StatusPolicyView,
+	StatusToolsView,
+} from "./status-view-models.js";
 
 function renderPolicySummary(policy: ResolvedPolicy): string[] {
 	const lines: string[] = [];
@@ -15,7 +21,9 @@ function renderPolicySummary(policy: ResolvedPolicy): string[] {
 	}
 	const interaction = policy.interaction;
 	if (interaction) {
-		const entries = Object.entries(interaction).filter(([, v]) => v !== undefined);
+		const entries = Object.entries(interaction).filter(
+			([, v]) => v !== undefined,
+		);
 		if (entries.length > 0) {
 			lines.push("  Interaction:");
 			for (const [k, v] of entries) {
@@ -37,6 +45,23 @@ function renderPolicySummary(policy: ResolvedPolicy): string[] {
 	return lines;
 }
 
+function renderTranslationSummary(
+	label: string,
+	summary: PolicyTranslationSummary,
+): string[] {
+	const lines = [`  ${label}:`];
+	lines.push(`    adapter: ${summary.adapter}`);
+	lines.push(`    nativeSummary: ${JSON.stringify(summary.nativeSummary)}`);
+	lines.push(`    exactFields: ${summary.exactFields.join(", ") || "(none)"}`);
+	lines.push(
+		`    approximateFields: ${summary.approximateFields.join(", ") || "(none)"}`,
+	);
+	lines.push(
+		`    unsupportedFields: ${summary.unsupportedFields.join(", ") || "(none)"}`,
+	);
+	return lines;
+}
+
 export function renderStatusPolicy(views: StatusPolicyView[]): string {
 	if (views.length === 0) {
 		return "Policy state not yet available.";
@@ -45,7 +70,9 @@ export function renderStatusPolicy(views: StatusPolicyView[]): string {
 	const lines: string[] = [];
 	for (const view of views) {
 		lines.push(`\n=== ${view.role} (${view.adapter}) model=${view.model} ===`);
-		lines.push(`  Preset: ${view.baseline.preset.value} (${view.baseline.preset.source})`);
+		lines.push(
+			`  Preset: ${view.baseline.preset.value} (${view.baseline.preset.source})`,
+		);
 
 		lines.push(...renderPolicySummary(view.baseline.policy));
 
@@ -56,8 +83,12 @@ export function renderStatusPolicy(views: StatusPolicyView[]): string {
 			}
 		}
 
-		const t = view.baseline.translationSummary;
-		lines.push(`  Translation: ${JSON.stringify(t.nativeSummary)}`);
+		lines.push(
+			...renderTranslationSummary(
+				"Translation",
+				view.baseline.translationSummary,
+			),
+		);
 
 		if (view.baseline.warnings.length > 0) {
 			lines.push("  Warnings:");
@@ -67,8 +98,16 @@ export function renderStatusPolicy(views: StatusPolicyView[]): string {
 		}
 
 		if (view.override) {
-			lines.push(`  Override: turnId=${view.override.turnId} preset=${view.override.preset}`);
+			lines.push(
+				`  Override: turnId=${view.override.turnId} preset=${view.override.preset}`,
+			);
 			lines.push(...renderPolicySummary(view.override.policy));
+			lines.push(
+				...renderTranslationSummary(
+					"Override Translation",
+					view.override.translationSummary,
+				),
+			);
 			if (view.override.warnings.length > 0) {
 				lines.push("  Override Warnings:");
 				for (const w of view.override.warnings) {
@@ -85,7 +124,9 @@ export function renderStatusTools(views: StatusToolsView[]): string {
 		return "Tool state not yet available.";
 	}
 
-	const lines: string[] = ["(Best-effort observation — not an execution guarantee)"];
+	const lines: string[] = [
+		"(Best-effort observation — not an execution guarantee)",
+	];
 	for (const view of views) {
 		lines.push(`\n=== ${view.role} (${view.adapter}) ===`);
 		lines.push(`  Source: ${view.source}`);
@@ -103,7 +144,9 @@ export function renderStatusTools(views: StatusToolsView[]): string {
 			for (const t of view.toolView) {
 				const icon = t.status === "allowed" ? "✓" : "✗";
 				const suffix = t.capabilityField ? ` (${t.capabilityField})` : "";
-				lines.push(`    ${icon} ${t.name} [${t.source}] ${t.status} — ${t.reason}${suffix}`);
+				lines.push(
+					`    ${icon} ${t.name} [${t.source}] ${t.status} — ${t.reason}${suffix}`,
+				);
 			}
 		}
 

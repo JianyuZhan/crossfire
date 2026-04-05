@@ -721,6 +721,10 @@ export class TuiStore {
 					this.state.metrics.debateId = debateId;
 					this.state.policySession = { debateId, roles: {} };
 				}
+				this.state.proposer.preset = undefined;
+				this.state.proposer.warningCount = 0;
+				this.state.challenger.preset = undefined;
+				this.state.challenger.warningCount = 0;
 				if (e.roles?.proposer) {
 					this.state.proposer.agentType = e.roles.proposer.agentType;
 					this.state.proposer.model = e.roles.proposer.model;
@@ -759,7 +763,6 @@ export class TuiStore {
 				p.status = "thinking";
 				p.turnDurationMs = undefined;
 				p.turnStatus = undefined;
-				p.preset = undefined;
 				// Clear completed judge panel when new round begins
 				if (this.state.judge.visible) {
 					this.state.judge.visible = false;
