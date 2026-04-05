@@ -129,10 +129,21 @@ export function inspectPolicy(
 	const capabilities = resolveCapabilityEffects(policy);
 	const limitsWarnings = buildLimitsWarnings(policy.interaction.limits);
 
+	const evidenceWarnings: PolicyTranslationWarning[] = [];
+	if (policy.evidence) {
+		evidenceWarnings.push({
+			field: "evidence.bar",
+			adapter: "gemini",
+			reason: "approximate",
+			message: `Gemini cannot natively enforce evidence bar; setting influences prompting only (configured: ${policy.evidence.bar})`,
+		});
+	}
+
 	const allWarnings = [
 		...approval.warnings,
 		...capabilities.warnings,
 		...limitsWarnings,
+		...evidenceWarnings,
 	];
 
 	return {

@@ -111,11 +111,22 @@ export function inspectPolicy(
 		});
 	}
 
+	const evidenceWarnings: PolicyTranslationWarning[] = [];
+	if (policy.evidence) {
+		evidenceWarnings.push({
+			field: "evidence.bar",
+			adapter: "codex",
+			reason: "approximate",
+			message: `Codex cannot natively enforce evidence bar; setting influences prompting only (configured: ${policy.evidence.bar})`,
+		});
+	}
+
 	const allWarnings = [
 		...approval.warnings,
 		...sandbox.warnings,
 		...legacyWarnings,
 		...limitsWarnings,
+		...evidenceWarnings,
 	];
 
 	return {

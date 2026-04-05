@@ -46,4 +46,20 @@ describe("Codex inspectPolicy", () => {
 			}
 		});
 	});
+
+	describe("evidence translation", () => {
+		it("emits approximate warning for evidence.bar", () => {
+			const policy = makeResolvedPolicy({
+				preset: "guarded",
+				role: "proposer",
+			});
+			const result = inspectPolicy(policy);
+			const evidenceWarning = result.warnings.find(
+				(w) => w.field === "evidence.bar",
+			);
+			expect(evidenceWarning).toBeDefined();
+			expect(evidenceWarning?.reason).toBe("approximate");
+			expect(evidenceWarning?.adapter).toBe("codex");
+		});
+	});
 });

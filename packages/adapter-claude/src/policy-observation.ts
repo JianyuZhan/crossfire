@@ -271,10 +271,21 @@ export function inspectPolicy(
 	const toolResolution = resolveToolView(policy);
 	const limitsWarnings = buildLimitsWarnings(policy.interaction.limits);
 
+	const evidenceWarnings: PolicyTranslationWarning[] = [];
+	if (policy.evidence) {
+		evidenceWarnings.push({
+			field: "evidence.bar",
+			adapter: "claude",
+			reason: "approximate",
+			message: `Claude cannot natively enforce evidence bar; setting influences prompting only (configured: ${policy.evidence.bar})`,
+		});
+	}
+
 	const allWarnings = [
 		...approval.warnings,
 		...toolResolution.warnings,
 		...limitsWarnings,
+		...evidenceWarnings,
 	];
 
 	const translation: PolicyTranslationSummary = {
