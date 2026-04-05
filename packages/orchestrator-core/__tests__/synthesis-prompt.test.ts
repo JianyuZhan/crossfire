@@ -14,7 +14,6 @@ import {
 	aggregatePhaseBlockContent,
 	assembleAdaptiveSynthesisPrompt,
 	buildCompressedRound,
-	buildFullTextSynthesisPrompt,
 	buildInstructions,
 	buildLayer1,
 	buildPhaseBlocks,
@@ -88,7 +87,10 @@ describe("detectCjkMajority", () => {
 	});
 });
 
-describe("buildFullTextSynthesisPrompt", () => {
+// Removed describe("buildFullTextSynthesisPrompt") block - this wrapper is being removed.
+// Tests for assembleAdaptiveSynthesisPrompt() are the canonical path forward.
+
+describe("assembleAdaptiveSynthesisPrompt - core behavior", () => {
 	const mockConfig: SynthesisPromptConfig = {
 		contextTokenLimit: 10000,
 	};
@@ -112,151 +114,41 @@ describe("buildFullTextSynthesisPrompt", () => {
 		},
 	});
 
-	interface JudgeNote {
-		roundNumber: number;
-		leading: "proposer" | "challenger" | "tie";
-		reasoning: string;
-	}
-
-	it("includes all turns when within budget", () => {
-		const turns: DebateTurn[] = [
-			{ roundNumber: 1, role: "proposer", content: "Proposer R1" },
-			{ roundNumber: 1, role: "challenger", content: "Challenger R1" },
-			{ roundNumber: 2, role: "proposer", content: "Proposer R2" },
-			{ roundNumber: 2, role: "challenger", content: "Challenger R2" },
-		];
-		const state = createMockState(turns);
-		const judgeNotes: JudgeNote[] = [
-			{ roundNumber: 2, leading: "proposer", reasoning: "Judge reasoning" },
-		];
-
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
-
-		// Should include all turns
-		expect(prompt).toContain("Proposer R1");
-		expect(prompt).toContain("Challenger R1");
-		expect(prompt).toContain("Proposer R2");
-		expect(prompt).toContain("Challenger R2");
-		expect(prompt).toContain("Judge reasoning");
-	});
-
-	it("includes section headings", () => {
+	it("includes topic in Layer 1", () => {
 		const turns: DebateTurn[] = [
 			{ roundNumber: 1, role: "proposer", content: "Proposer R1" },
 		];
 		const state = createMockState(turns);
-		const judgeNotes: JudgeNote[] = [];
+		const plan = emptyPlan();
 
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
+		const result = assembleAdaptiveSynthesisPrompt({
+			state,
+			plan,
+			topic: "Test Topic",
+			config: mockConfig,
+		});
 
-		// Should include recommended sections in instructions
-		expect(prompt).toContain("Executive Summary");
-		expect(prompt).toContain("Consensus Action Items");
-		expect(prompt).toContain("Unresolved Disagreements");
-		expect(prompt).toContain("Evidence Registry");
+		expect(result.prompt).toContain("Test Topic");
 	});
 
-	it("includes topic in prompt", () => {
+	it("returns debug metadata", () => {
 		const turns: DebateTurn[] = [
 			{ roundNumber: 1, role: "proposer", content: "Content" },
 		];
 		const state = createMockState(turns);
-		const judgeNotes: JudgeNote[] = [];
+		const plan = emptyPlan();
 
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
-
-		expect(prompt).toContain("Test Topic");
-	});
-
-	it("truncates early rounds when over budget", () => {
-		// Create a very long debate that will exceed 60% of token budget
-		const turns: DebateTurn[] = [];
-		const longContent = "x".repeat(2000); // Each turn ~1000 tokens
-
-		// Create 10 rounds with long content
-		for (let i = 1; i <= 10; i++) {
-			turns.push({
-				roundNumber: i,
-				role: "proposer",
-				content: `P${i} ${longContent}`,
-			});
-			turns.push({
-				roundNumber: i,
-				role: "challenger",
-				content: `C${i} ${longContent}`,
-			});
-		}
-
-		const state = createMockState(turns);
-		const judgeNotes: JudgeNote[] = [
-			{ roundNumber: 2, leading: "proposer", reasoning: "Verdict 2" },
-			{ roundNumber: 4, leading: "challenger", reasoning: "Verdict 4" },
-		];
-
-		const smallBudgetConfig: SynthesisPromptConfig = {
-			contextTokenLimit: 5000, // Small budget to force truncation
-		};
-
-		const prompt = buildFullTextSynthesisPrompt(
+		const result = assembleAdaptiveSynthesisPrompt({
 			state,
-			judgeNotes,
-			smallBudgetConfig,
-		);
+			plan,
+			topic: "Test Topic",
+			config: mockConfig,
+		});
 
-		// Should always include last 2 rounds (rounds 9, 10)
-		expect(prompt).toContain("### Round 9");
-		expect(prompt).toContain("### Round 10");
-
-		// Should always include all judge verdicts
-		expect(prompt).toContain("Verdict 2");
-		expect(prompt).toContain("Verdict 4");
-
-		// Should NOT include all early rounds - check that some are missing
-		const roundsIncluded: number[] = [];
-		for (let i = 1; i <= 10; i++) {
-			if (prompt.includes(`### Round ${i}`)) {
-				roundsIncluded.push(i);
-			}
-		}
-		// Should have fewer than all 10 rounds due to truncation
-		expect(roundsIncluded.length).toBeLessThan(10);
-		// But should always have round 9 and 10
-		expect(roundsIncluded).toContain(9);
-		expect(roundsIncluded).toContain(10);
-	});
-
-	it("handles empty judge notes", () => {
-		const turns: DebateTurn[] = [
-			{ roundNumber: 1, role: "proposer", content: "Proposer R1" },
-			{ roundNumber: 1, role: "challenger", content: "Challenger R1" },
-		];
-		const state = createMockState(turns);
-		const judgeNotes: JudgeNote[] = [];
-
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
-
-		expect(prompt).toContain("Proposer R1");
-		expect(prompt).toContain("Challenger R1");
+		expect(result.debug).toBeDefined();
+		expect(result.debug.budgetTier).toBeDefined();
+		expect(result.debug.totalEstimatedTokens).toBeGreaterThan(0);
 		// Should handle missing judge notes gracefully
-	});
-
-	it("handles round summaries when provided", () => {
-		const turns: DebateTurn[] = [
-			{ roundNumber: 1, role: "proposer", content: "Proposer R1" },
-			{ roundNumber: 1, role: "challenger", content: "Challenger R1" },
-		];
-		const state = createMockState(turns);
-		const judgeNotes: JudgeNote[] = [];
-		const roundSummaries = ["Round 1 was about X"];
-
-		const prompt = buildFullTextSynthesisPrompt(
-			state,
-			judgeNotes,
-			mockConfig,
-			roundSummaries,
-		);
-
-		expect(prompt).toContain("Round 1 was about X");
 	});
 });
 
@@ -1906,199 +1798,8 @@ describe("assembleAdaptiveSynthesisPrompt", () => {
 	});
 });
 
-// --- Task 9: Legacy wrapper backward-compatibility tests ---
-
-describe("buildFullTextSynthesisPrompt (backward-compat wrapper)", () => {
-	const mockConfig: SynthesisPromptConfig = {
-		contextTokenLimit: 10000,
-	};
-
-	const createMockState = (turns: DebateTurn[]): DebateState => ({
-		config: {
-			topic: "Test Topic",
-			maxRounds: 5,
-			judgeEveryNRounds: 2,
-			convergenceThreshold: 0.7,
-		},
-		phase: "completed",
-		currentRound:
-			turns.length > 0 ? Math.max(...turns.map((t) => t.roundNumber)) : 0,
-		turns,
-		convergence: {
-			converged: false,
-			stanceDelta: 0,
-			mutualConcessions: 0,
-			bothWantToConclude: false,
-		},
-	});
-
-	it("returns a non-empty string containing the topic without changing arguments", () => {
-		const turns: DebateTurn[] = [
-			{ roundNumber: 1, role: "proposer", content: "Proposer R1" },
-			{ roundNumber: 1, role: "challenger", content: "Challenger R1" },
-			{ roundNumber: 2, role: "proposer", content: "Proposer R2" },
-			{ roundNumber: 2, role: "challenger", content: "Challenger R2" },
-		];
-		const state = createMockState(turns);
-		const judgeNotes = [
-			{
-				roundNumber: 2,
-				leading: "proposer" as const,
-				reasoning: "Judge reasoning",
-			},
-		];
-
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
-
-		expect(typeof prompt).toBe("string");
-		expect(prompt.length).toBeGreaterThan(0);
-		expect(prompt).toContain("Test Topic");
-		expect(prompt).toContain("Proposer R1");
-		expect(prompt).toContain("Challenger R2");
-		expect(prompt).toContain("Judge reasoning");
-	});
-
-	it("does not throw with empty turns and no judge notes", () => {
-		const state = createMockState([]);
-		const judgeNotes: Array<{
-			roundNumber: number;
-			leading: "proposer" | "challenger" | "tie";
-			reasoning: string;
-		}> = [];
-
-		expect(() =>
-			buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig),
-		).not.toThrow();
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
-		expect(typeof prompt).toBe("string");
-		expect(prompt).toContain("Test Topic");
-	});
-
-	it("accepts JudgeNote[] without score (graceful degradation)", () => {
-		const turns: DebateTurn[] = [
-			{ roundNumber: 1, role: "proposer", content: "P1" },
-			{ roundNumber: 1, role: "challenger", content: "C1" },
-		];
-		const state = createMockState(turns);
-		const judgeNotes = [
-			{
-				roundNumber: 1,
-				leading: "proposer" as const,
-				reasoning: "Proposer led",
-			},
-			{
-				roundNumber: 2,
-				leading: "challenger" as const,
-				reasoning: "Challenger led",
-			},
-		];
-
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
-
-		expect(prompt).not.toContain("shift:");
-		expect(prompt).toContain("Proposer led");
-		expect(prompt).toContain("Challenger led");
-	});
-
-	it("includes round summaries when provided", () => {
-		const turns: DebateTurn[] = [
-			{ roundNumber: 1, role: "proposer", content: "P1" },
-		];
-		const state = createMockState(turns);
-		const judgeNotes: Array<{
-			roundNumber: number;
-			leading: "proposer" | "challenger" | "tie";
-			reasoning: string;
-		}> = [];
-		const roundSummaries = ["Round 1 covered key points"];
-
-		const prompt = buildFullTextSynthesisPrompt(
-			state,
-			judgeNotes,
-			mockConfig,
-			roundSummaries,
-		);
-
-		expect(prompt).toContain("Round 1 covered key points");
-	});
-
-	it("strips internal meta-tool blocks from turn content", () => {
-		const turns: DebateTurn[] = [
-			{
-				roundNumber: 1,
-				role: "proposer",
-				content: 'My argument.\n```debate_meta\n{"stance":"agree"}\n```',
-			},
-			{
-				roundNumber: 1,
-				role: "challenger",
-				content: "My rebuttal.",
-			},
-		];
-		const state = createMockState(turns);
-		const judgeNotes: Array<{
-			roundNumber: number;
-			leading: "proposer" | "challenger" | "tie";
-			reasoning: string;
-		}> = [];
-
-		const prompt = buildFullTextSynthesisPrompt(state, judgeNotes, mockConfig);
-
-		expect(prompt).toContain("My argument.");
-		expect(prompt).toContain("My rebuttal.");
-		expect(prompt).not.toContain("debate_meta");
-	});
-});
-
-describe("buildInstructions compression note", () => {
-	it("includes a compression note for medium tier", () => {
-		// We access buildInstructions indirectly through the wrapper.
-		// For medium/long, the prompt should mention compression.
-		// Create a scenario that triggers medium tier.
-		const turns: DebateTurn[] = [];
-		const longContent = "x".repeat(2000);
-		for (let i = 1; i <= 10; i++) {
-			turns.push({
-				roundNumber: i,
-				role: "proposer",
-				content: `P${i} ${longContent}`,
-			});
-			turns.push({
-				roundNumber: i,
-				role: "challenger",
-				content: `C${i} ${longContent}`,
-			});
-		}
-		const state: DebateState = {
-			config: {
-				topic: "Compression Test Topic",
-				maxRounds: 10,
-				judgeEveryNRounds: 2,
-				convergenceThreshold: 0.7,
-			},
-			phase: "completed",
-			paused: false,
-			currentRound: 10,
-			turns,
-			convergence: {
-				converged: false,
-				stanceDelta: 0,
-				mutualConcessions: 0,
-				bothWantToConclude: false,
-			},
-		};
-
-		const smallConfig: SynthesisPromptConfig = { contextTokenLimit: 5000 };
-		const prompt = buildFullTextSynthesisPrompt(state, [], smallConfig);
-
-		// The prompt should contain the topic at minimum
-		expect(prompt).toContain("Compression Test Topic");
-		// If the tier is medium or long, the instructions should note compression
-		// (we can't control tier from outside, but with this data it should be non-short)
-		// At minimum it should not throw
-		expect(prompt.length).toBeGreaterThan(0);
-	});
-});
+// Removed "buildFullTextSynthesisPrompt (backward-compat wrapper)" tests - wrapper is being removed.
+// Removed "buildInstructions compression note" test that used the wrapper.
 
 describe("buildInstructions no-exploration constraint", () => {
 	it("buildInstructions includes constraint against code exploration", () => {

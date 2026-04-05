@@ -1032,7 +1032,7 @@ export async function runDebate(
 						generationQuality:
 							synthesisQuality === "local-structured"
 								? "draft-filled"
-								: "legacy-fallback",
+								: "draft-minimal",
 					};
 					writeFileSync(
 						join(options.outputDir, "action-plan.html"),

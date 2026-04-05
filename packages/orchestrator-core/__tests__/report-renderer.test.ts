@@ -104,6 +104,12 @@ describe("renderActionPlanHtml", () => {
 		expect(html).toContain("Fallback synthesis");
 	});
 
+	it("shows minimal fallback badge for draft-minimal quality", () => {
+		const m = { ...meta, generationQuality: "draft-minimal" as const };
+		const html = renderActionPlanHtml(sampleReport, m);
+		expect(html).toContain("Minimal fallback");
+	});
+
 	it("uses details/summary for collapsible sections", () => {
 		const html = renderActionPlanHtml(sampleReport, meta);
 		expect(html).toContain("<details");

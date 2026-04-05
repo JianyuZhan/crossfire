@@ -14,13 +14,6 @@ export interface SynthesisPromptConfig {
 	quoteSnippetBudgetChars?: number;
 }
 
-export interface JudgeNote {
-	roundNumber: number;
-	leading: "proposer" | "challenger" | "tie";
-	reasoning: string;
-	score?: { proposer: number; challenger: number };
-}
-
 /**
  * Applies spec defaults and normalization rules to SynthesisPromptConfig.
  * - recentK: default 3, normalized to max(1, floor(value))
@@ -602,61 +595,6 @@ export function buildLayer1(plan: EvolvingPlan, topic: string): string {
 	}
 
 	return sections.join("\n\n");
-}
-
-/**
- * Transitional wrapper that delegates to assembleAdaptiveSynthesisPrompt().
- *
- * Reconstructs a cleanTranscript from state.turns via stripInternalBlocks(),
- * synthesises a best-effort EvolvingPlan from judgeNotes / roundSummaries,
- * then returns only the prompt string for backward compatibility.
- */
-export function buildFullTextSynthesisPrompt(
-	state: DebateState,
-	judgeNotes: JudgeNote[],
-	config: SynthesisPromptConfig,
-	roundSummaries?: string[],
-): string {
-	const cleanTranscript = reconstructCleanTranscript(state.turns);
-
-	// Synthesize a best-effort EvolvingPlan from legacy parameters
-	const plan: EvolvingPlan = {
-		...emptyPlan(),
-		judgeNotes: judgeNotes.map((jn) => ({
-			roundNumber: jn.roundNumber,
-			leading: jn.leading,
-			reasoning: jn.reasoning,
-			...(jn.score ? { score: jn.score } : {}),
-		})),
-		roundSummaries: roundSummaries ?? [],
-	};
-
-	// Delegate to the adaptive prompt assembler
-	const result = assembleAdaptiveSynthesisPrompt({
-		state,
-		plan,
-		topic: state.config.topic,
-		cleanTranscript,
-		config,
-	});
-
-	// Prepend synthesis instructions (same as old behavior)
-	const instructions = buildInstructions(result.debug.budgetTier);
-	let prompt = `${instructions}\n\n${result.prompt}`;
-
-	// Append full judge verdicts for backward compatibility.
-	// The adaptive prompt compresses judge notes in Layer 1, but legacy callers
-	// expect the full reasoning text to be present.
-	if (judgeNotes.length > 0) {
-		let verdicts = "\n\n## Judge Verdicts\n\n";
-		for (const note of judgeNotes) {
-			verdicts += `**Round ${note.roundNumber}** (Leading: ${note.leading}):\n\n`;
-			verdicts += `${note.reasoning}\n\n`;
-		}
-		prompt += verdicts;
-	}
-
-	return prompt;
 }
 
 export function buildInstructions(tier?: "short" | "medium" | "long"): string {

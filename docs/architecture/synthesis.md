@@ -162,7 +162,7 @@ Output quality tiers:
 - `local-structured`
 - `local-degraded`
 
-These tiers are surfaced in `synthesis.completed`, but rendering differs by output path: the markdown renderer shows notice treatment for `local-*` results, while the local fallback report renderer maps to its own `draft-filled` / `legacy-fallback` badges.
+These tiers are surfaced in `synthesis.completed`, but rendering differs by output path: the markdown renderer shows notice treatment for `local-*` results, while the local fallback report renderer maps to its own `draft-filled` / `draft-minimal` badges.
 
 Current classification rules:
 

@@ -30,7 +30,7 @@ export interface DraftReport {
 	risks: Array<{ risk: string; severity: string; round: number }>;
 	evidence: Array<{ claim: string; source: string; round: number }>;
 	judgeNotes: EvolvingPlan["judgeNotes"];
-	generationQuality: "full" | "draft-filled" | "legacy-fallback";
+	generationQuality: "full" | "draft-filled" | "draft-minimal";
 	degradedRounds: number[];
 	warnings: string[];
 }

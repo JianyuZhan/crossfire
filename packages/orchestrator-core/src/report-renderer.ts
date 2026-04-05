@@ -5,7 +5,7 @@ export interface ReportMeta {
 	roundsCompleted: number;
 	date: string;
 	participants: { proposer: string; challenger: string; judge?: string };
-	generationQuality: "full" | "draft-filled" | "legacy-fallback";
+	generationQuality: "full" | "draft-filled" | "draft-minimal";
 }
 
 /**
