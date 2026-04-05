@@ -121,6 +121,39 @@ it("evidenceOverride with undefined bar falls back to role contract", () => {
 	);
 	expect(p.evidence).toEqual({ bar: "medium" });
 });
+
+it("interactionOverride overrides approval from preset", () => {
+	const p = compilePolicy(
+		makeCompileInput({
+			preset: "guarded",
+			role: "proposer",
+			interactionOverride: { approval: "always" },
+		}),
+	);
+	expect(p.interaction.approval).toBe("always");
+});
+
+it("interactionOverride overrides maxTurns from preset", () => {
+	const p = compilePolicy(
+		makeCompileInput({
+			preset: "research",
+			role: "proposer",
+			interactionOverride: { limits: { maxTurns: 5 } },
+		}),
+	);
+	expect(p.interaction.limits?.maxTurns).toBe(5);
+});
+
+it("interactionOverride without fields keeps preset defaults", () => {
+	const p = compilePolicy(
+		makeCompileInput({
+			preset: "guarded",
+			role: "proposer",
+			interactionOverride: {},
+		}),
+	);
+	expect(p.interaction).toEqual({ approval: "on-risk" });
+});
 ```
 
 Update the provider-native leak guard test:
@@ -204,7 +237,7 @@ export type ResolvedPolicy = {
 };
 ```
 
-Add `evidenceOverride` to `CompilePolicyInput`:
+Add `evidenceOverride` and `interactionOverride` to `CompilePolicyInput`:
 
 ```typescript
 export type CompilePolicyInput = {
@@ -213,6 +246,12 @@ export type CompilePolicyInput = {
 	readonly legacyToolPolicy?: LegacyToolPolicyInput;
 	readonly evidenceOverride?: {
 		readonly bar?: EvidenceBar;
+	};
+	readonly interactionOverride?: {
+		readonly approval?: ApprovalLevel;
+		readonly limits?: {
+			readonly maxTurns?: number;
+		};
 	};
 };
 ```
@@ -276,13 +315,13 @@ function copyRoleContract(rc: RoleContract): RoleContract {
 }
 ```
 
-Update `compilePolicyInternal` to merge evidence:
+Update `compilePolicyInternal` to merge evidence and interaction overrides:
 
 ```typescript
 function compilePolicyInternal(
 	input: CompilePolicyInput,
 ): CompilePolicyDiagnostics {
-	const { preset, role, legacyToolPolicy, evidenceOverride } = input;
+	const { preset, role, legacyToolPolicy, evidenceOverride, interactionOverride } = input;
 
 	const presetExpansion = PRESET_EXPANSIONS[preset];
 	const roleContract = copyRoleContract(DEFAULT_ROLE_CONTRACTS[role]);
@@ -302,12 +341,30 @@ function compilePolicyInternal(
 		bar: evidenceOverride?.bar ?? roleContract.evidenceDefaults.bar,
 	};
 
+	const baseInteraction = presetExpansion.interaction;
+	const interaction = interactionOverride
+		? {
+				approval: interactionOverride.approval ?? baseInteraction.approval,
+				...(interactionOverride.limits?.maxTurns !== undefined ||
+				baseInteraction.limits
+					? {
+							limits: {
+								...baseInteraction.limits,
+								...(interactionOverride.limits?.maxTurns !== undefined
+									? { maxTurns: interactionOverride.limits.maxTurns }
+									: {}),
+							},
+						}
+					: {}),
+			}
+		: baseInteraction;
+
 	return {
 		policy: {
 			preset,
 			roleContract,
 			capabilities,
-			interaction: presetExpansion.interaction,
+			interaction,
 			evidence,
 		},
 		clamps,
@@ -334,25 +391,68 @@ export function makeCompileInput(
 		...(overrides.evidenceOverride !== undefined
 			? { evidenceOverride: overrides.evidenceOverride }
 			: {}),
+		...(overrides.interactionOverride !== undefined
+			? { interactionOverride: overrides.interactionOverride }
+			: {}),
 	};
 }
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [ ] **Step 7: Run adapter-core tests**
 
-Run: `cd /Users/jyzhan/code/crossfire && pnpm build --filter=@crossfire/adapter-core && pnpm vitest run packages/adapter-core/__tests__/policy/compiler.test.ts`
-Expected: All tests PASS. Build may still fail in downstream packages due to breaking type change — that is expected and will be fixed in Task 2.
+Run: `cd /Users/jyzhan/code/crossfire && pnpm vitest run packages/adapter-core/__tests__/policy/compiler.test.ts`
+Expected: All compiler tests PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Fix all downstream packages for the breaking type change**
+
+The `ResolvedPolicy` shape change is cross-package. The monorepo must build cleanly before committing. Run:
 
 ```bash
-git add packages/adapter-core/src/policy/types.ts packages/adapter-core/src/policy/role-contracts.ts packages/adapter-core/src/policy/compiler.ts packages/adapter-core/src/testing/policy-fixtures.ts packages/adapter-core/__tests__/policy/compiler.test.ts
+cd /Users/jyzhan/code/crossfire && pnpm build
+```
+
+If any downstream package fails to compile, fix the type references immediately. The most likely breakages:
+
+1. **Tests referencing `semantics.evidenceBar`** — grep the entire monorepo:
+```bash
+rg "semantics\.evidenceBar|semantics.evidenceBar" packages/ --type ts
+```
+Change every hit from `p.roleContract.semantics.evidenceBar` to `p.roleContract.evidenceDefaults.bar`.
+
+2. **Test assertions on `RoleSemantics` object shape** — any `toEqual` that includes `evidenceBar` must drop it.
+
+3. **TUI status-renderers.ts forward-compatible cast** — replace the `(policy as Record<string, unknown>).evidence` cast block in `renderPolicySummary` with typed access:
+```typescript
+if (policy.evidence) {
+	lines.push("  Evidence:");
+	lines.push(`    bar: ${policy.evidence.bar}`);
+}
+```
+
+4. **Any code constructing `RoleContract` or `RoleSemantics` in test fixtures** — add `evidenceDefaults` where `RoleContract` is built, remove `evidenceBar` where `RoleSemantics` is built.
+
+After fixing, run again:
+```bash
+pnpm build && pnpm test
+```
+Expected: Full monorepo build and test suite PASS.
+
+- [ ] **Step 9: Update architecture docs for the type change**
+
+Update `docs/architecture/orchestrator.md` to reflect that `ResolvedPolicy` now has a top-level `evidence: EvidencePolicy` section, and that `evidenceBar` has moved from `RoleSemantics` to `RoleContract.evidenceDefaults`.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add packages/adapter-core/src/policy/types.ts packages/adapter-core/src/policy/role-contracts.ts packages/adapter-core/src/policy/compiler.ts packages/adapter-core/src/testing/policy-fixtures.ts packages/adapter-core/__tests__/policy/compiler.test.ts packages/tui/src/status/status-renderers.ts docs/architecture/orchestrator.md
+# Also add any other files fixed in Step 8
 git commit -m "feat(policy): promote evidence to ResolvedPolicy top-level section
 
 Move evidenceBar from RoleSemantics to RoleContract.evidenceDefaults.
 Add EvidencePolicy type and evidence field to ResolvedPolicy.
 Add evidenceOverride to CompilePolicyInput for override resolution.
-Compiler merges evidence from override or role-contract defaults."
+Compiler merges evidence from override or role-contract defaults.
+Fix all downstream type references for breaking shape change."
 ```
 
 ---
@@ -367,7 +467,7 @@ Compiler merges evidence from override or role-contract defaults."
 - Test: `packages/adapter-codex/__tests__/policy-observation.test.ts`
 - Test: `packages/adapter-gemini/__tests__/policy-observation.test.ts`
 
-Each adapter must handle `ResolvedPolicy.evidence` honestly: emit a `not_implemented` warning because no provider natively enforces evidence bar. Fix any compilation errors from the Task 1 type changes.
+Each adapter must handle `ResolvedPolicy.evidence` honestly: emit an `approximate` warning because no provider can natively distinguish or enforce evidence bar levels — the setting influences prompting and observation summaries only. Fix any remaining compilation errors from the Task 1 type changes.
 
 ---
 
@@ -382,21 +482,21 @@ import { inspectPolicy } from "../src/policy-observation.js";
 
 // Add inside existing test file, or create new describe block:
 describe("evidence translation", () => {
-	it("emits not_implemented warning for evidence.bar", () => {
+	it("emits approximate warning for evidence.bar", () => {
 		const policy = makeResolvedPolicy({ preset: "guarded", role: "proposer" });
 		const result = inspectPolicy(policy);
 		const evidenceWarning = result.warnings.find(
 			(w) => w.field === "evidence.bar",
 		);
 		expect(evidenceWarning).toBeDefined();
-		expect(evidenceWarning?.reason).toBe("not_implemented");
+		expect(evidenceWarning?.reason).toBe("approximate");
 		expect(evidenceWarning?.adapter).toBe("claude");
 	});
 
-	it("includes evidence.bar in unsupportedFields", () => {
+	it("includes evidence.bar in approximateFields", () => {
 		const policy = makeResolvedPolicy({ preset: "guarded", role: "proposer" });
 		const result = inspectPolicy(policy);
-		expect(result.translation.unsupportedFields).toContain("evidence.bar");
+		expect(result.translation.approximateFields).toContain("evidence.bar");
 	});
 });
 ```
@@ -424,8 +524,8 @@ export function inspectPolicy(
 		evidenceWarnings.push({
 			field: "evidence.bar",
 			adapter: "claude",
-			reason: "not_implemented",
-			message: `Claude does not enforce evidence bar (configured: ${policy.evidence.bar})`,
+			reason: "approximate",
+			message: `Claude cannot natively enforce evidence bar; setting influences prompting only (configured: ${policy.evidence.bar})`,
 		});
 	}
 
@@ -476,14 +576,14 @@ Add to `packages/adapter-codex/__tests__/policy-observation.test.ts` (same patte
 
 ```typescript
 describe("evidence translation", () => {
-	it("emits not_implemented warning for evidence.bar", () => {
+	it("emits approximate warning for evidence.bar", () => {
 		const policy = makeResolvedPolicy({ preset: "guarded", role: "proposer" });
 		const result = inspectPolicy(policy);
 		const evidenceWarning = result.warnings.find(
 			(w) => w.field === "evidence.bar",
 		);
 		expect(evidenceWarning).toBeDefined();
-		expect(evidenceWarning?.reason).toBe("not_implemented");
+		expect(evidenceWarning?.reason).toBe("approximate");
 		expect(evidenceWarning?.adapter).toBe("codex");
 	});
 });
@@ -497,8 +597,8 @@ if (policy.evidence) {
 	evidenceWarnings.push({
 		field: "evidence.bar",
 		adapter: "codex",
-		reason: "not_implemented",
-		message: `Codex does not enforce evidence bar (configured: ${policy.evidence.bar})`,
+		reason: "approximate",
+		message: `Codex cannot natively enforce evidence bar; setting influences prompting only (configured: ${policy.evidence.bar})`,
 	});
 }
 
@@ -517,14 +617,14 @@ Same pattern as Codex. Add to `packages/adapter-gemini/__tests__/policy-observat
 
 ```typescript
 describe("evidence translation", () => {
-	it("emits not_implemented warning for evidence.bar", () => {
+	it("emits approximate warning for evidence.bar", () => {
 		const policy = makeResolvedPolicy({ preset: "guarded", role: "proposer" });
 		const result = inspectPolicy(policy);
 		const evidenceWarning = result.warnings.find(
 			(w) => w.field === "evidence.bar",
 		);
 		expect(evidenceWarning).toBeDefined();
-		expect(evidenceWarning?.reason).toBe("not_implemented");
+		expect(evidenceWarning?.reason).toBe("approximate");
 		expect(evidenceWarning?.adapter).toBe("gemini");
 	});
 });
@@ -543,9 +643,9 @@ Expected: All PASS. The full build succeeds (no type errors from the `ResolvedPo
 git add packages/adapter-claude/src/policy-observation.ts packages/adapter-codex/src/policy-observation.ts packages/adapter-gemini/src/policy-observation.ts packages/adapter-claude/__tests__ packages/adapter-codex/__tests__ packages/adapter-gemini/__tests__
 git commit -m "feat(adapters): add evidence translation warnings
 
-All three adapters now emit not_implemented warning for evidence.bar,
-since no provider natively enforces evidence bar. This makes the
-limitation visible in inspection and /status output."
+All three adapters now emit approximate warning for evidence.bar,
+since no provider can natively distinguish evidence bar levels.
+Evidence influences prompting only; limitation visible in inspect/status."
 ```
 
 ---
@@ -637,6 +737,52 @@ describe("CrossfireConfigSchema", () => {
 			expect(result.success).toBe(false);
 		});
 
+		it("accepts template with interaction override", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...MINIMAL_CONFIG,
+				templates: [
+					{
+						name: "cautious",
+						basePreset: "guarded",
+						overrides: {
+							interaction: { approval: "always", limits: { maxTurns: 5 } },
+						},
+					},
+				],
+			});
+			expect(result.success).toBe(true);
+		});
+
+		it("rejects template with invalid approval level", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...MINIMAL_CONFIG,
+				templates: [
+					{
+						name: "bad",
+						overrides: { interaction: { approval: "invalid" } },
+					},
+				],
+			});
+			expect(result.success).toBe(false);
+		});
+
+		it("accepts template with both evidence and interaction overrides", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...MINIMAL_CONFIG,
+				templates: [
+					{
+						name: "full",
+						basePreset: "research",
+						overrides: {
+							evidence: { bar: "high" },
+							interaction: { approval: "on-risk" },
+						},
+					},
+				],
+			});
+			expect(result.success).toBe(true);
+		});
+
 		it("accepts template with no basePreset (uses role default)", () => {
 			const result = CrossfireConfigSchema.safeParse({
 				...MINIMAL_CONFIG,
@@ -718,8 +864,20 @@ const ProviderBindingConfigSchema = z.object({
 	mcpServers: z.array(z.string()).optional(),
 });
 
+const ApprovalLevelSchema = z.enum(["always", "on-risk", "on-failure", "never"]);
+
 const PolicyTemplateOverridesSchema = z.object({
 	evidence: z.object({ bar: EvidenceBarSchema }).optional(),
+	interaction: z
+		.object({
+			approval: ApprovalLevelSchema.optional(),
+			limits: z
+				.object({
+					maxTurns: z.number().int().positive().optional(),
+				})
+				.optional(),
+		})
+		.optional(),
 });
 
 const PolicyTemplateConfigSchema = z.object({
@@ -779,14 +937,20 @@ Expected: All PASS.
 
 - [ ] **Step 5: Commit**
 
+Update `docs/architecture/execution-modes.md` to document the template config schema:
+
+Add a "Custom Templates" section describing the `templates` array in `crossfire.json`, template structure (`name`, `basePreset`, `overrides` with `evidence` and `interaction`), and the unique-name constraint.
+
 ```bash
-git add packages/cli/src/config/schema.ts packages/cli/__tests__/config/schema.test.ts
+git add packages/cli/src/config/schema.ts packages/cli/__tests__/config/schema.test.ts docs/architecture/execution-modes.md
 git commit -m "feat(config): add template and evidence schemas
 
 Add PolicyTemplateConfigSchema with Zod validation for unique names.
+Add evidence and interaction override fields to template overrides.
 Add evidence field to RoleProfileConfigSchema.
 Add template field to RoleProfileConfigSchema.
-Add templates array to CrossfireConfigSchema with duplicate-name check."
+Add templates array to CrossfireConfigSchema with duplicate-name check.
+Update execution-modes docs for template schema."
 ```
 
 ---
@@ -971,13 +1135,13 @@ In `packages/cli/src/config/resolver.ts`:
 Add imports:
 
 ```typescript
-import type { EvidenceBar } from "@crossfire/adapter-core";
+import type { ApprovalLevel, EvidenceBar, InteractionPolicy } from "@crossfire/adapter-core";
 import type { EvidenceSource, ResolvedEvidence } from "./evidence-resolution.js";
 import { resolveRoleEvidence } from "./evidence-resolution.js";
 import { resolveTemplate } from "./template-resolution.js";
 ```
 
-Add evidence to `ResolvedRoleRuntimeConfig`:
+Add evidence and interaction overrides to `ResolvedRoleRuntimeConfig`:
 
 ```typescript
 export interface ResolvedRoleRuntimeConfig {
@@ -990,6 +1154,10 @@ export interface ResolvedRoleRuntimeConfig {
 		source: PresetSource;
 	};
 	evidence: ResolvedEvidence;
+	interactionOverrides?: {
+		approval?: ApprovalLevel;
+		limits?: { maxTurns?: number };
+	};
 	templateName?: string;
 	systemPrompt?: string;
 	providerOptions?: Record<string, unknown>;
@@ -1043,7 +1211,7 @@ export function resolveAllRoles(
 			);
 		}
 
-		// Preset resolution (template.basePreset feeds into config-level preset)
+		// Preset resolution: template.basePreset takes priority over role preset
 		const cliRolePreset =
 			roleName === "proposer"
 				? cliOverrides.cliProposerPreset
@@ -1051,7 +1219,7 @@ export function resolveAllRoles(
 					? cliOverrides.cliChallengerPreset
 					: cliOverrides.cliJudgePreset;
 
-		const configOrTemplatePreset = roleConfig.preset ?? template?.basePreset;
+		const configOrTemplatePreset = template?.basePreset ?? roleConfig.preset;
 
 		const preset = resolveRolePreset({
 			role: roleName,
@@ -1068,6 +1236,9 @@ export function resolveAllRoles(
 			templateEvidence: template?.overrides?.evidence,
 			templateName: template?.name,
 		});
+
+		// Interaction overrides from template (approval, limits.maxTurns)
+		const interactionOverrides = template?.overrides?.interaction ?? undefined;
 
 		const resolvedMcpServers = binding.mcpServers
 			? Object.fromEntries(
@@ -1090,6 +1261,7 @@ export function resolveAllRoles(
 			model: roleConfig.model ?? binding.model,
 			preset: { value: preset.preset, source: preset.source },
 			evidence,
+			interactionOverrides,
 			templateName: template?.name,
 			systemPrompt: roleConfig.systemPrompt,
 			providerOptions: binding.providerOptions,
@@ -1232,7 +1404,7 @@ export function toCliPresetOverrides(
 
 - [ ] **Step 10: Wire evidence into create-adapters.ts**
 
-In `packages/cli/src/wiring/create-adapters.ts`, update `startResolvedRole` to pass evidence override:
+In `packages/cli/src/wiring/create-adapters.ts`, update `startResolvedRole` to pass evidence and interaction overrides:
 
 ```typescript
 async function startResolvedRole(resolved: ResolvedRoleRuntimeConfig) {
@@ -1241,6 +1413,9 @@ async function startResolvedRole(resolved: ResolvedRoleRuntimeConfig) {
 		role: resolved.role,
 		...(resolved.evidence.bar !== undefined
 			? { evidenceOverride: { bar: resolved.evidence.bar } }
+			: {}),
+		...(resolved.interactionOverrides
+			? { interactionOverride: resolved.interactionOverrides }
 			: {}),
 	});
 	// ... rest unchanged
@@ -1251,17 +1426,29 @@ async function startResolvedRole(resolved: ResolvedRoleRuntimeConfig) {
 Run: `cd /Users/jyzhan/code/crossfire && pnpm build && pnpm test`
 Expected: All PASS. Full monorepo builds and tests pass.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 12: Update docs and README**
+
+Update `docs/architecture/execution-modes.md` to add an "Evidence Policy" section describing the evidence resolution chain (CLI --evidence-bar > config inline > template override > role-contract default), default values per role, and the `approximate` adapter warning contract.
+
+Update `docs/architecture/tui-cli.md` to document `--evidence-bar` CLI option.
+
+Update `README.md` and `README.zh-CN.md` to document:
+- The `--evidence-bar` CLI option under the CLI usage section
+- Template config under the configuration section
+- A brief mention of evidence policy as a configurable dimension
+
+- [ ] **Step 13: Commit**
 
 ```bash
-git add packages/cli/src/config/evidence-resolution.ts packages/cli/src/config/template-resolution.ts packages/cli/src/config/resolver.ts packages/cli/src/commands/preset-options.ts packages/cli/src/wiring/create-adapters.ts packages/cli/__tests__/config/evidence-resolution.test.ts packages/cli/__tests__/config/template-resolution.test.ts
+git add packages/cli/src/config/evidence-resolution.ts packages/cli/src/config/template-resolution.ts packages/cli/src/config/resolver.ts packages/cli/src/commands/preset-options.ts packages/cli/src/wiring/create-adapters.ts packages/cli/__tests__/config/evidence-resolution.test.ts packages/cli/__tests__/config/template-resolution.test.ts docs/architecture/execution-modes.md docs/architecture/tui-cli.md README.md README.zh-CN.md
 git commit -m "feat(cli): add evidence resolution, template expansion, --evidence-bar
 
 Add resolveRoleEvidence() with independent resolution chain:
 CLI > config inline > template override > role-default.
 Add resolveTemplate() for flat template lookup.
-Wire evidence override into compilePolicyWithDiagnostics.
-Add --evidence-bar CLI option."
+Wire evidence and interaction overrides into compilePolicyWithDiagnostics.
+Add --evidence-bar CLI option.
+Update architecture docs and READMEs for evidence/template features."
 ```
 
 ---
@@ -1277,17 +1464,22 @@ Add --evidence-bar CLI option."
 
 ---
 
-- [ ] **Step 1: Write failing test for evidence in baseline event**
+- [ ] **Step 1: Write failing test for evidence provenance in baseline event**
 
-In `packages/orchestrator/__tests__/policy-runner.test.ts`, add a test that checks `policy.baseline` events carry evidence info:
+In `packages/orchestrator/__tests__/policy-runner.test.ts`, add a test that checks `policy.baseline` events carry evidence **provenance** (the `evidence.source` field on the event itself, not just `policy.evidence`):
 
 ```typescript
-it("policy.baseline event carries evidence field in resolved policy", async () => {
-	// Use existing test setup pattern from the file
+it("policy.baseline event carries evidence provenance source", async () => {
+	// Use existing test setup pattern from the file.
+	// Configure adapters with baselineEvidenceSource set.
 	const events: OrchestratorEvent[] = [];
 	bus.subscribe((e) => {
 		if ("kind" in e && typeof e.kind === "string") events.push(e as OrchestratorEvent);
 	});
+
+	// Set evidence source on adapter entries
+	adapters.proposer.baselineEvidenceSource = "config";
+	adapters.challenger.baselineEvidenceSource = "role-default";
 
 	await runDebate(bus, adapters, config);
 
@@ -1295,17 +1487,21 @@ it("policy.baseline event carries evidence field in resolved policy", async () =
 		(e): e is PolicyBaselineEvent => e.kind === "policy.baseline",
 	);
 	expect(baselineEvents.length).toBeGreaterThan(0);
-	for (const evt of baselineEvents) {
-		expect(evt.policy.evidence).toBeDefined();
-		expect(evt.policy.evidence.bar).toBeDefined();
-	}
+
+	const proposerBaseline = baselineEvents.find((e) => e.role === "proposer");
+	expect(proposerBaseline?.evidence).toBeDefined();
+	expect(proposerBaseline?.evidence?.source).toBe("config");
+
+	const challengerBaseline = baselineEvents.find((e) => e.role === "challenger");
+	expect(challengerBaseline?.evidence).toBeDefined();
+	expect(challengerBaseline?.evidence?.source).toBe("role-default");
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/jyzhan/code/crossfire && pnpm build && pnpm vitest run packages/orchestrator/__tests__/policy-runner.test.ts`
-Expected: Should PASS if Task 1 was done correctly (since `compilePolicy` now always produces `evidence`). If it fails, it means baseline emission or test setup is not seeing the new field.
+Expected: FAIL — `baselineEvidenceSource` does not exist on the adapter entry type yet, and `evidence` field does not exist on `PolicyBaselineEvent`.
 
 - [ ] **Step 3: Add EvidenceSource to observation-types.ts**
 
@@ -1984,48 +2180,19 @@ if (view.baseline.evidenceSource) {
 Run: `cd /Users/jyzhan/code/crossfire && pnpm build && pnpm vitest run packages/tui/__tests__/status`
 Expected: All PASS.
 
-- [ ] **Step 6: Update documentation**
+- [ ] **Step 6: Update remaining documentation**
 
-Update `docs/architecture/orchestrator.md` to mention evidence in policy events:
+Earlier tasks already updated:
+- `docs/architecture/orchestrator.md` (Task 1: ResolvedPolicy shape; Task 5: evidence provenance in events)
+- `docs/architecture/execution-modes.md` (Task 3: template schema; Task 4: evidence resolution chain)
+- `docs/architecture/tui-cli.md` (Task 4: --evidence-bar CLI; Task 6: inspection evidence display)
+- `README.md` and `README.zh-CN.md` (Task 4: evidence-bar CLI + template config)
 
-Add to the policy events section:
-```
-Policy events now carry evidence provenance. `PolicyBaselineEvent` includes
-an optional `evidence: { source: EvidenceSource }` field that tracks where
-the evidence bar configuration originated (CLI, config, template, or role-default).
-```
+In this task, update the remaining status-specific documentation:
 
-Update `docs/architecture/tui-cli.md` to mention evidence in inspection and status:
+Update `docs/architecture/tui-cli.md` to mention that `/status policy` now shows typed evidence with provenance source, and that the forward-compatible cast has been replaced with real typed access.
 
-Add to the inspection section:
-```
-`crossfire inspect policy` now shows evidence bar and source per role.
-`/status policy` displays the evidence section from ResolvedPolicy and
-the evidence source provenance when available.
-```
-
-Update `docs/architecture/execution-modes.md` to add evidence and templates sections:
-
-Add an evidence section:
-```
-## Evidence Policy
-
-Evidence bar is a first-class policy dimension (not part of RoleSemantics).
-It is resolved independently from preset through its own chain:
-CLI --evidence-bar > config inline > template override > role-contract default.
-
-Evidence bar values: low, medium, high.
-Default: proposer=medium, challenger=high, judge=high.
-
-No provider currently enforces evidence bar natively — all adapters emit
-a not_implemented warning for this field.
-```
-
-Add a templates section:
-```
-## Custom Templates
-
-Templates are flat named policy shortcuts defined in crossfire.json:
+Verify all architecture docs are consistent with the final implementation. Check that template examples in `execution-modes.md` include both `evidence` and `interaction` overrides:
 
 ```json
 {
@@ -2033,16 +2200,13 @@ Templates are flat named policy shortcuts defined in crossfire.json:
     {
       "name": "strict",
       "basePreset": "guarded",
-      "overrides": { "evidence": { "bar": "high" } }
+      "overrides": {
+        "evidence": { "bar": "high" },
+        "interaction": { "approval": "always", "limits": { "maxTurns": 5 } }
+      }
     }
   ]
 }
-```
-
-Templates are not a composition system — no inheritance, no nesting.
-A template provides a basePreset (optional) and overrides (optional).
-Template names must be unique. Reference a template in a role config
-with `"template": "strict"`.
 ```
 
 - [ ] **Step 7: Run full test suite**
@@ -2074,7 +2238,7 @@ Update architecture docs for evidence pipeline and custom templates."
 - Evidence provenance in events: Task 5
 - Inspection surface updates: Task 6
 - Status surface updates: Task 7
-- Documentation: Task 7
+- Documentation: distributed across tasks (Task 1: orchestrator.md, Task 3: execution-modes.md, Task 4: execution-modes.md + tui-cli.md + READMEs, Task 5: orchestrator.md, Task 6: tui-cli.md, Task 7: remaining)
 
 **2. Placeholder scan:** No TBD/TODO/placeholders found.
 
@@ -2083,5 +2247,8 @@ Update architecture docs for evidence pipeline and custom templates."
 - `EvidenceSource` — defined in `observation-types.ts`, re-defined in `evidence-resolution.ts` (CLI scope), used in events and view models
 - `ResolvedEvidence = { bar: EvidenceBar | undefined, source: EvidenceSource }` — used in resolver and inspection context
 - `evidenceOverride` on `CompilePolicyInput` — used in compiler, policy-fixtures, create-adapters
-- `PolicyTemplateConfig` — defined in schema.ts, used in template-resolution.ts
-- `makeCompileInput` accepts `evidenceOverride` — consistent with `CompilePolicyInput`
+- `interactionOverride` on `CompilePolicyInput` — used in compiler, policy-fixtures, create-adapters
+- `PolicyTemplateConfig` — defined in schema.ts, used in template-resolution.ts; includes both `evidence` and `interaction` overrides
+- `makeCompileInput` accepts `evidenceOverride` and `interactionOverride` — consistent with `CompilePolicyInput`
+- Template precedence: `template.basePreset` wins over `roleConfig.preset` — consistent with spec
+- Warning contract: all adapters use `approximate` for `evidence.bar` — consistent with spec (influences prompting only)
