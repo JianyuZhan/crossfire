@@ -303,7 +303,7 @@ interface StartSessionInput {
 - `startSession()` creates only the adapter handle; `providerSessionId` becomes known when the first `system/init` event arrives
 - session state is tracked in a local query-context map keyed by `adapterSessionId`
 - Crossfire policy presets map directly onto Claude permission modes per turn: `research` → `dontAsk` + allowlist + bounded `maxTurns`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
-- the Claude query function type signature accepts SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; the adapter's built-in execution-mode mapping currently only sets `maxTurns` (for research mode) to cap research-mode Claude turns before they sprawl indefinitely
+- the Claude query function type signature accepts SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; the adapter's built-in policy translation currently only sets `maxTurns` (for research preset) to cap research-mode Claude turns before they sprawl indefinitely
 - tool and subagent lifecycle visibility comes from SDK hooks: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, and `SubagentStop`
 - approval support is bridged through `canUseTool(toolName, input, options)`, which emits `approval.request` and blocks until `approve()` resolves it
 - `approval.request.payload` now retains Claude `suggestions`, `blockedPath`, `decisionReason`, and `agentId` metadata for display/debugging
