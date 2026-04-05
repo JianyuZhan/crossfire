@@ -24,6 +24,14 @@ export interface RolePolicyInspection {
 	adapter: string;
 	model?: string;
 	preset: PresetSelection;
+	evidence?: {
+		bar: string | undefined;
+		source: string;
+	};
+	template?: {
+		name: string;
+		basePreset?: string;
+	};
 	resolvedPolicy?: ResolvedPolicy;
 	clamps?: readonly PolicyClampNote[];
 	translation?: PolicyTranslationSummary;
@@ -62,6 +70,10 @@ export function buildPolicyInspectionReport(
 					adapter: ctx.adapter,
 					model: ctx.model,
 					preset: ctx.preset,
+					evidence: ctx.evidence
+						? { bar: ctx.evidence.bar, source: ctx.evidence.source }
+						: undefined,
+					template: ctx.template,
 					error: ctx.error,
 				};
 			}
@@ -70,6 +82,10 @@ export function buildPolicyInspectionReport(
 				adapter: ctx.adapter,
 				model: ctx.model,
 				preset: ctx.preset,
+				evidence: ctx.evidence
+					? { bar: ctx.evidence.bar, source: ctx.evidence.source }
+					: undefined,
+				template: ctx.template,
 				resolvedPolicy: ctx.resolvedPolicy,
 				clamps: ctx.clamps,
 				translation: ctx.observation.translation,

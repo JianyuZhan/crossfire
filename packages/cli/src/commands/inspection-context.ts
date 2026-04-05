@@ -1,11 +1,13 @@
 // packages/cli/src/commands/inspection-context.ts
 import {
+	type EvidenceBar,
 	type PolicyClampNote,
 	type PolicyPreset,
 	type ProviderObservationResult,
 	type ResolvedPolicy,
 	compilePolicyWithDiagnostics,
 } from "@crossfire/adapter-core";
+import type { EvidenceSource } from "../config/evidence-resolution.js";
 import type { PresetSource } from "../config/policy-resolution.js";
 import {
 	type CliPresetOverrides,
@@ -21,6 +23,14 @@ interface RoleInspectionBase {
 	preset: {
 		value: PolicyPreset;
 		source: PresetSource;
+	};
+	evidence?: {
+		bar: EvidenceBar | undefined;
+		source: EvidenceSource;
+	};
+	template?: {
+		name: string;
+		basePreset?: string;
 	};
 }
 
@@ -57,6 +67,12 @@ export function buildInspectionContext(
 			const diagnostics = compilePolicyWithDiagnostics({
 				preset: resolved.preset.value,
 				role: roleName,
+				...(resolved.evidence.bar !== undefined
+					? { evidenceOverride: { bar: resolved.evidence.bar } }
+					: {}),
+				...(resolved.interactionOverrides
+					? { interactionOverride: resolved.interactionOverrides }
+					: {}),
 			});
 
 			const observation = observePolicyForAdapter(
@@ -70,6 +86,13 @@ export function buildInspectionContext(
 				adapter: resolved.adapter,
 				model: resolved.model,
 				preset: resolved.preset,
+				evidence: resolved.evidence,
+				template: resolved.templateName
+					? {
+							name: resolved.templateName,
+							basePreset: resolved.templateBasePreset,
+						}
+					: undefined,
 				resolvedPolicy: diagnostics.policy,
 				clamps: diagnostics.clamps,
 				observation,
@@ -80,6 +103,13 @@ export function buildInspectionContext(
 				adapter: resolved.adapter,
 				model: resolved.model,
 				preset: resolved.preset,
+				evidence: resolved.evidence,
+				template: resolved.templateName
+					? {
+							name: resolved.templateName,
+							basePreset: resolved.templateBasePreset,
+						}
+					: undefined,
 				error: {
 					message: err instanceof Error ? err.message : String(err),
 				},

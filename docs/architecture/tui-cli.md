@@ -274,10 +274,14 @@ Key behavior:
 Output includes:
 
 - preset value and source (config, CLI override, or default)
+- template provenance (name and optional basePreset) when a template is used
+- evidence bar and source (cli, config, template:name, or role-default)
 - model name or "(default)"
 - policy clamp notes (field, before/after values, reason)
 - provider observation warnings
 - native translation summary
+
+JSON output includes `evidence` and `template` fields in each role inspection result, providing programmatic access to policy provenance for automated tooling.
 
 ### `crossfire inspect-tools`
 

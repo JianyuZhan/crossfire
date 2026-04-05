@@ -10,6 +10,17 @@ export function renderPolicyText(contexts: RoleInspectionContext[]): string {
 		}
 		lines.push(`\n=== ${ctx.role} (${ctx.adapter}) ===`);
 		lines.push(`  Preset: ${ctx.preset.value} (${ctx.preset.source})`);
+		if (ctx.template) {
+			const base = ctx.template.basePreset
+				? ` (basePreset: ${ctx.template.basePreset})`
+				: "";
+			lines.push(`  Template: ${ctx.template.name}${base}`);
+		}
+		if (ctx.evidence) {
+			const barDisplay = ctx.evidence.bar ?? "(role-default)";
+			lines.push("  Evidence:");
+			lines.push(`    bar: ${barDisplay} (${ctx.evidence.source})`);
+		}
 		lines.push(`  Model: ${ctx.model ?? "(default)"}`);
 		if (ctx.clamps.length > 0) {
 			lines.push("  Clamps:");
