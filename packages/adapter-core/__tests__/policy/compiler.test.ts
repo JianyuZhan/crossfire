@@ -163,15 +163,6 @@ describe("compilePolicy", () => {
 			);
 			expect("legacyToolOverrides" in p.capabilities).toBe(false);
 		});
-
-		it("compiler ignores legacyToolPolicy input", () => {
-			const p = compilePolicy(
-				makeCompileInput({
-					legacyToolPolicy: { allow: ["Read", "Grep"], deny: ["WebFetch"] },
-				}),
-			);
-			expect("legacyToolOverrides" in p.capabilities).toBe(false);
-		});
 	});
 
 	describe("evidence defaults and overrides", () => {

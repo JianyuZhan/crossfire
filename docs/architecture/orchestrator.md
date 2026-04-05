@@ -224,12 +224,12 @@ Current built-in role guidance also matters:
 
 `runJudgeTurn()` is responsible for:
 
-- sending judge prompts with the compiled baseline policy (always uses the `plan` preset policy)
+- sending judge prompts with the compiled baseline judge policy (which defaults to the `plan` preset)
 - parsing `judge_verdict`
 - tolerating missing tool calls
 - returning graceful degradation rather than crashing the debate
 
-Judge turns use policy only - there is no `executionMode` fallback. The runner always provides the baseline `plan` policy when invoking the judge.
+Judge turns use policy only - there is no `executionMode` fallback. The runner always provides the resolved baseline judge policy when invoking the judge; that baseline defaults to `plan` but may be overridden through the normal judge preset resolution path.
 
 The current judge contract remains score-based, but prompt guidance is action-plan-oriented:
 

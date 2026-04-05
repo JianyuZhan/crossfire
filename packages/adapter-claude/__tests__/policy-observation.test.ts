@@ -52,10 +52,6 @@ describe("Claude inspectPolicy", () => {
 		const policy = makeResolvedPolicy({
 			preset: "dangerous",
 			role: "proposer",
-			legacyToolPolicy: {
-				allow: ["Read"],
-				deny: ["WebFetch"],
-			},
 		});
 		const observation = inspectPolicy(policy);
 		const translation = translatePolicy(policy);

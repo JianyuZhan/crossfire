@@ -115,11 +115,10 @@ describe("translatePolicy (Claude)", () => {
 	});
 
 	describe("legacy tool override removal", () => {
-		it("no longer processes legacy tool overrides", () => {
+		it("has no legacy tool override path", () => {
 			const policy = makeResolvedPolicy({
 				preset: "research",
 				role: "proposer",
-				legacyToolPolicy: { allow: ["Bash"] },
 			});
 			const { native, warnings } = translatePolicy(policy);
 			expect(native.allowedTools).toBeUndefined();

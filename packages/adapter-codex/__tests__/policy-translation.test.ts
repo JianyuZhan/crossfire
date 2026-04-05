@@ -107,11 +107,10 @@ describe("translatePolicy (Codex)", () => {
 	});
 
 	describe("legacy tool override removal", () => {
-		it("no longer emits warnings for legacy tool overrides", () => {
+		it("does not emit legacy override warnings", () => {
 			const policy = makeResolvedPolicy({
 				preset: "guarded",
 				role: "proposer",
-				legacyToolPolicy: { allow: ["Read"] },
 			});
 			const { warnings } = translatePolicy(policy);
 			const legacyWarnings = warnings.filter((w) =>

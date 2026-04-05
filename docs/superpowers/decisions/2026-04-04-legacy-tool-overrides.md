@@ -13,7 +13,7 @@ Remove the `legacyToolOverrides` field from `CapabilityPolicy` and all associate
 ### Type Definitions (`adapter-core`)
 
 - `CapabilityPolicy.legacyToolOverrides?: { allow?, deny?, source }` - removed from capability type
-- `LegacyToolPolicyInput` - kept as deprecated export for now, but no longer consumed by compiler
+- `LegacyToolPolicyInput` - removed
 - `CompilePolicyInput.legacyToolPolicy` - removed from compiler input
 - Simplified `CapabilityCeilings` from `Partial<Readonly<Omit<CapabilityPolicy, "legacyToolOverrides">>>` to `Partial<Readonly<CapabilityPolicy>>`
 

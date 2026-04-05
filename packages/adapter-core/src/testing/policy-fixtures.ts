@@ -15,9 +15,7 @@ import type { AdapterId } from "../types.js";
  * Build a canonical CompilePolicyInput. Defaults to guarded + proposer.
  */
 export function makeCompileInput(
-	overrides: Partial<CompilePolicyInput> & {
-		legacyToolPolicy?: unknown;
-	} = {},
+	overrides: Partial<CompilePolicyInput> = {},
 ): CompilePolicyInput {
 	return {
 		preset: overrides.preset ?? "guarded",

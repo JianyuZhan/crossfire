@@ -49,7 +49,7 @@ Why `plan` is not a role baseline:
 - most productive proposer / challenger turns still need real reads, searches, or validation
 - treating `plan` as a normal baseline would make it too easy to accidentally degrade debate quality into pure reasoning-only turns
 
-Judge turns always use the `plan` preset.
+Judge turns default to the `plan` preset, but the judge baseline can still be overridden through the same shared role-preset resolution path (`--judge-preset` or config role preset).
 
 ### Preset Resolution Precedence
 
@@ -173,7 +173,7 @@ When a turn override is active, the runner compiles a fresh policy with the over
 
 The runner emits `policy.baseline` once per role after `debate.started`, then emits `policy.turn.override` before a proposer / challenger turn when a turn-level override is active and `policy.turn.override.clear` after the turn completes. Override events carry the full effective override policy plus real translation summary and warnings from the same observation rule path used by inspection.
 
-Judge turns always receive the judge adapter entry's baseline policy (compiled with `plan` preset).
+Judge turns always receive the judge adapter entry's baseline policy. That baseline defaults to `plan`, but it is compiled from the resolved judge preset and may be overridden through the normal judge preset resolution path.
 
 ## Provider Translation
 

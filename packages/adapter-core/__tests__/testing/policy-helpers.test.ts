@@ -14,7 +14,6 @@ describe("makeCompileInput", () => {
 		const input = makeCompileInput();
 		expect(input.preset).toBe("guarded");
 		expect(input.role).toBe("proposer");
-		expect(input.legacyToolPolicy).toBeUndefined();
 	});
 
 	it("accepts overrides", () => {
@@ -38,13 +37,6 @@ describe("makeResolvedPolicy", () => {
 		expect(policy.roleContract.semantics.exploration).toBe("forbidden");
 		// Judge ceiling clamps research capabilities
 		expect(policy.capabilities.shell).toBe("off");
-	});
-
-	it("ignores legacyToolPolicy input", () => {
-		const policy = makeResolvedPolicy({
-			legacyToolPolicy: { allow: ["Read"] },
-		});
-		expect("legacyToolOverrides" in policy.capabilities).toBe(false);
 	});
 });
 

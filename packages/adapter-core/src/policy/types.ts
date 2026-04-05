@@ -87,13 +87,6 @@ export type CompilePolicyInput = {
 	};
 };
 
-// --- Legacy support (deprecated, will be removed) ---
-
-export type LegacyToolPolicyInput = {
-	readonly allow?: readonly string[];
-	readonly deny?: readonly string[];
-};
-
 // --- Translation result ---
 
 export type PolicyTranslationWarning = {
