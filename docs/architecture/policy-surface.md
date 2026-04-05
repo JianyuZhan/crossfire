@@ -258,7 +258,7 @@ This keeps the event log explicit about policy decisions instead of forcing oper
 
 Phase B established a three-layer regression harness for the policy compilation pipeline:
 
-1. **Policy core** (`adapter-core`): Golden matrix of 7 preset x role combinations with full field assertions. Verifies `ResolvedPolicy` structure, capability clamping, and legacy override behavior. No provider-native assertions allowed in this layer.
+1. **Policy core** (`adapter-core`): Golden matrix of 7 preset x role combinations with full field assertions. Verifies `ResolvedPolicy` structure and capability clamping. No provider-native assertions allowed in this layer.
 
 2. **Adapter translation** (`adapter-{claude,codex,gemini}`): Per-adapter golden cases covering exact mappings, approximate mappings, and intentional deltas. All tests use structured `expectWarning()` assertions on `field` + `adapter` + `reason`, not message text.
 
@@ -267,3 +267,17 @@ Phase B established a three-layer regression harness for the policy compilation 
 Shared test fixtures and warning helpers live in `@crossfire/adapter-core/testing` (internal test-support surface, not a public API).
 
 Intentional behavior deltas (e.g., Claude `research` mapping to `default` instead of `dontAsk`) are grouped in `describe("intentional deltas")` blocks with `INTENTIONAL DELTA:` prefixed test names that assert both new and old behavior.
+
+## Packaging Abstraction: Why Provider-Specific
+
+Crossfire policy controls tool access through capability enums (`filesystem`, `network`, `shell`, `subagents`) rather than per-tool allow/deny lists. This is an intentional design decision:
+
+- **Semantic honesty:** Providers handle tools differently. Claude has named builtin tools with stable identity. Codex has a capability-driven sandbox model with no stable tool inventory. Gemini offers coarse approval-mode control only. A normalized tool catalog would misrepresent provider reality.
+- **User value:** Policy presets (`research`, `guarded`, `dangerous`, `plan`) already provide sufficient risk control. Per-tool granularity creates provider lock-in (Claude's `Read`/`Edit` vs Codex's sandbox modes).
+- **Execution relevance:** Provider-native translation (Claude tool deny lists, Codex sandbox levels, Gemini approval modes) is simpler and more maintainable than ongoing abstraction layers.
+
+The `ToolSource` enum (`builtin | mcp | provider-packaged | unknown`) in `adapter-core/src/policy/observation-types.ts` is observation metadata only, not a normalized product object. It exists for display and debugging purposes in inspection views like `/status policy`, not as a cross-provider control surface.
+
+Future cross-provider tool normalization would require a new plan with evidence of user demand and stable tool catalog semantics across all three providers.
+
+**Decision record:** See `docs/superpowers/decisions/2026-04-04-packaging-abstraction.md` for full evaluation criteria and rationale.

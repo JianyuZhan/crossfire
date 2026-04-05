@@ -194,14 +194,14 @@ The `adapter-core` package exports a policy compilation module (`policy/`) that 
 - **Level-order helpers** (`policy/level-order.ts`): `clampFilesystem`, `clampNetwork`, `clampShell`, `clampSubagents` — ordered enum comparison via index, not string
 - **Role contracts** (`policy/role-contracts.ts`): `DEFAULT_ROLE_CONTRACTS` — frozen defaults for proposer (no ceilings, medium evidence bar), challenger (no ceilings, high evidence bar), judge (read/search/off/off ceilings, high evidence bar)
 - **Presets** (`policy/presets.ts`): `PRESET_EXPANSIONS` — frozen table expanding `research | guarded | dangerous | plan` to capability + interaction policy
-- **Compiler** (`policy/compiler.ts`): `compilePolicy(input) → ResolvedPolicy` — preset expansion → role ceiling clamping → evidence resolution → legacy tool override attachment; `compilePolicyWithDiagnostics(input) → CompilePolicyDiagnostics` — same compilation with clamp notes recording when role ceilings reduce preset capabilities
+- **Compiler** (`policy/compiler.ts`): `compilePolicy(input) → ResolvedPolicy` — preset expansion → role ceiling clamping → evidence resolution; `compilePolicyWithDiagnostics(input) → CompilePolicyDiagnostics` — same compilation with clamp notes recording when role ceilings reduce preset capabilities
 - **Testing** (`testing/`): shared test fixtures (`makeCompileInput`, event order helpers, resource cleanup) used across policy and adapter tests; compiler tests cover 7-case golden matrix with full 5-field assertions
 
 `ResolvedPolicy` has five top-level sections:
 
 - `preset`: the selected policy preset name
 - `roleContract`: the role's semantic constraints (`semantics`), capability ceilings, and evidence defaults (`evidenceDefaults.bar`)
-- `capabilities`: filesystem/network/shell/subagents levels, plus optional legacy tool overrides
+- `capabilities`: filesystem/network/shell/subagents levels
 - `interaction`: approval level and optional execution limits
 - `evidence`: evidence quality bar (`bar: low | medium | high`), merged from `evidenceOverride` or role contract defaults
 
@@ -365,6 +365,26 @@ Current high-level behavior:
 - Claude retries in a new query without `resume`; this path requires both `recoveryContext` and an existing provider session to have failed
 - Codex creates a new thread and retries with a transcript recovery prompt when `recoveryContext` is available
 - Gemini falls back from native CLI resume to transcript recovery only when both `recoveryContext` and transcript entries exist; otherwise it uses a weaker stateless prompt path
+
+## Provider-Specific Packaging Surfaces
+
+Crossfire does **not** normalize provider-native packaging mechanisms (skills, plugins, extensions, function declarations) into a cross-provider abstraction. Each provider handles packaging differently:
+
+- **Claude:** Named builtin tools (Read, Edit, Bash, WebFetch, Task) with stable identity; MCP servers attach additional tools at session start; policy translation produces tool deny lists
+- **Codex:** Capability-driven sandbox model with no stable tool inventory; policy translation produces sandbox levels (readOnly, workspace-write, danger-full-access) and network control
+- **Gemini:** Coarse approval-mode control via CLI arguments; current integration does not expose tool-level inspection or per-tool blocking
+
+The `ToolSource` enum (`builtin | mcp | provider-packaged | unknown`) in `ToolInspectionRecord` is observation metadata for display and debugging, **not** a normalized product object. Claude populates `source: "builtin"` for its known tools; Codex and Gemini return empty `toolView[]` because they do not expose stable tool catalogs.
+
+Adapter-specific policy translation remains the primary control surface:
+
+- Claude `translatePolicy()` maps capability enums to tool deny lists (e.g., `filesystem: "off"` → deny all file tools)
+- Codex `translatePolicy()` maps capability enums to sandbox levels (e.g., `filesystem: "write"` + `shell: "exec"` → `danger-full-access`)
+- Gemini `translatePolicy()` maps interaction policy to approval modes (e.g., `approval: "never"` → `yolo`)
+
+This design prioritizes semantic honesty (Codex and Gemini do not have tool catalogs), execution relevance (provider-native translation is simpler), and testability (self-contained adapter translation tests). Any future cross-provider tool normalization requires a new plan with evidence of user demand and stable tool catalog semantics across all three providers.
+
+**Decision record:** See `docs/superpowers/decisions/2026-04-04-packaging-abstraction.md` for full rationale and evaluation criteria.
 
 ## Contract Tests
 

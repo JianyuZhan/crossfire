@@ -89,6 +89,8 @@ Important implications:
    The final action plan is generated in a new isolated session using an adaptive prompt budget strategy.
 8. **Segment-based resume**
    Resume appends new event segments rather than mutating the original log.
+9. **Provider-specific packaging surfaces**
+   Crossfire does not normalize provider-native packaging (tools, skills, extensions) into a cross-provider abstraction. Each adapter translates Crossfire policy to provider-native controls: Claude uses tool deny lists, Codex uses sandbox levels, Gemini uses approval modes. See `docs/superpowers/decisions/2026-04-04-packaging-abstraction.md` for rationale.
 
 ## File Layout
 
