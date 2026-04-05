@@ -161,7 +161,7 @@ Current behavior:
 
 `index.json` is the unified metadata file. It contains:
 
-- config and profile metadata
+- initial CLI-written metadata (`debateId`, `config`, `configFile`, resolved `roles`, versions)
 - root-level runtime summary fields
 - round and turn offsets
 - segment manifest
@@ -187,8 +187,8 @@ The current CLI replay command is non-interactive; it does not render the full I
 
 The CLI is a thin assembly layer. It is responsible for:
 
-- loading profiles
-- resolving models and adapter types
+- loading `crossfire.json`
+- resolving per-role adapter/model/preset/evidence/template runtime config
 - creating adapters
 - creating bus/persistence
 - creating TUI when not headless
@@ -202,7 +202,8 @@ High-level structure:
 
 - top-level `mcpServers` registry for MCP server definitions
 - `providerBindings[]` for adapter/model/runtime attachment data
-- fixed-key `roles` object for proposer/challenger/judge role intent
+- optional `templates[]` for policy templates
+- fixed-key `roles` object for proposer/challenger/judge role intent, including optional `preset`, `template`, `evidence`, and `systemPrompt`
 
 Resolution rules:
 
@@ -218,11 +219,11 @@ Resolution rules:
 Key behavior:
 
 - validates topic flags and numeric options
-- parses debate / role / per-turn policy preset options
-- infers a judge profile from proposer adapter type when not provided
+- parses debate / role / per-turn policy preset options plus `--evidence-bar`
 - creates `run_output/${debateId}` by default
 - writes the initial `index.json`
 - passes `transcriptWriter` through to the runner
+- uses only the roles present in `crossfire.json`; there is no runtime judge auto-inference path in the current command
 
 Policy preset CLI entry points:
 
@@ -230,9 +231,13 @@ Policy preset CLI entry points:
 - `--proposer-preset`, `--challenger-preset`, `--judge-preset` set per-role presets
 - repeatable `--turn-preset <turnId=preset>` applies a static per-turn override
 - `--evidence-bar <low|medium|high>` sets the evidence threshold for all roles
-- `--config <path>` loads a `crossfire.json` config file (new config-file path)
-- `--template <auto|general|code>` sets the default prompt-template family
-- `--proposer-template`, `--challenger-template`, and `--judge-template` override the family per role
+- `--config <path>` loads a `crossfire.json` config file
+
+Prompt customization in the current command surface is config-driven:
+
+- role-specific `systemPrompt` lives in `crossfire.json`
+- the built-in default prompt contracts come from `defaultSystemPrompt()` in `packages/orchestrator-core/src/context-builder.ts`
+- repo prompt assets under `prompts/` are not currently selected through `start` flags
 
 ### `crossfire resume`
 
@@ -241,8 +246,8 @@ Key behavior:
 - loads prior events via `EventStore.loadSegments()`
 - projects state to find the resume point
 - creates a new segment file
-- supports profile overrides
-- only honors `--judge` if the original run already had a judge profile
+- resolves adapters from the original `configFile` recorded in `index.json`, unless `--config <path>` is provided
+- shares the same live-command handler as `start`
 
 ### `crossfire replay`
 
@@ -250,7 +255,7 @@ Current implementation delegates to TUI replay logic, but the command itself is 
 
 ### `crossfire status`
 
-Reads `index.json` and prints summary information. Current special-casing for truly in-progress debates is limited.
+Reads `index.json` and prints a best-effort text summary, or dumps the full index via `--json`. Current special-casing for truly in-progress debates is limited.
 
 ### `crossfire inspect-policy`
 
@@ -306,9 +311,9 @@ Key behavior:
 Output includes:
 
 - preset value and source
-- completeness level (full, partial, minimal)
-- capability effects (allowed, blocked, limited) for filesystem, shell, network dimensions
-- per-tool inspection records: name, source (baseline/allowlist/blocklist), status (allowed/blocked), reason, linked capability field
+- completeness level (`full`, `partial`, `minimal`)
+- capability effects for filesystem, shell, network, and subagent dimensions
+- per-tool inspection records: name, source, status, reason, linked capability field
 - provider observation warnings
 
 Text format uses `✓` for allowed tools and `✗` for blocked tools. JSON format provides structured output suitable for programmatic analysis.
@@ -342,7 +347,7 @@ Persistence responsibilities are split:
 
 Common CLI failure modes:
 
-- missing or invalid profiles
+- missing or invalid config files
 - invalid numeric options
 - adapter start failure
 - resume on already completed debates

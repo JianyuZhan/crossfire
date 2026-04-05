@@ -32,7 +32,8 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 - [CLI 参考](#cli-参考)
 - [运行时命令](#运行时命令)
 - [支持的智能体](#支持的智能体)
-- [配置文件](#配置文件)
+- [配置文件格式](#配置文件格式)
+- [内置资产](#内置资产)
 - [输出文件](#输出文件)
 - [工作原理](#工作原理)
 - [系统模型](#系统模型)
@@ -51,7 +52,7 @@ Crossfire 是一个终端优先的**多智能体辩论编排器**，用于做决
 - **裁判仲裁** — 可选的裁判智能体评分论证、检测停滞、可提前终止辩论，并优先评估证据责任而不是奖励无依据断言
 - **自适应最终综合** — 辩论结束后在独立综合会话中生成最终行动计划，并强制综合阶段走无工具的 `plan` turn；模型综合失败时仍有结构化本地回退
 - **增量提示词** — 第 1 轮发送完整上下文，第 2 轮起仅发送对手/裁判的新消息，利用提供商会话记忆实现每轮 ~O(1) token 开销
-- **配置文件驱动** — `crossfire.json` 在单个文件中定义角色、provider 绑定、MCP 服务器和 policy preset
+- **配置文件驱动** — `crossfire.json` 在单个文件中定义角色、provider 绑定、MCP 服务器、policy preset、template 和 evidence 默认值
 - **策略预设** — 支持 debate 默认模式、按角色 baseline，以及 `research`、`guarded`、`dangerous`、`plan` 这类按 turn 覆盖
 
 ## 适用场景
@@ -107,13 +108,13 @@ node packages/cli/dist/index.js <command> [options]
 
 ## 快速开始
 
-第一次运行前，请确认你将要使用的 profile 对应的 agent CLI 已经安装、完成认证，并且能在当前 shell 中正常执行。
+第一次运行前，请确认 `crossfire.json` 中 provider binding 引用到的 agent CLI 已经安装、完成认证，并且能在当前 shell 中正常执行。
 
 ```bash
 # 首先创建配置文件 (crossfire.json) 定义角色和 provider 绑定
 # 详见下方"配置文件格式"章节
 
-# Claude 对战 Claude（裁判自动推断）
+# Claude 对战 Claude
 crossfire start \
   --config crossfire.json \
   --topic "Should we adopt microservices?" \
@@ -208,11 +209,11 @@ crossfire start \
 三家 provider 的当前映射是故意不对称的：
 
 - **Claude**
-  `research -> dontAsk + allowlist + bounded maxTurns`，`guarded -> default`，`dangerous -> bypassPermissions`，`plan -> plan`
+  plan-shaped policy 会映射到 `plan`，`approval: "never"` 会映射到 `bypassPermissions`，而 `on-risk` / `always` / `on-failure` 目前都会落到 `default`，必要时附带 approximate warning
 - **Codex**
   主要映射到 approval policy 和 sandbox policy 的组合，而不是单一 mode 字段
 - **Gemini**
-  当前 headless 接法只做启动/每 turn 的 approval-profile 映射，不应假设和 Claude/Codex 有同等 runtime parity
+  `approval: "never"` 会映射到 `yolo`，`on-failure` 会近似映射到 `auto_edit`，`on-risk` / `always` 会落到 `default`；filesystem/network 的关闭请求目前只会表现为 warning，不是硬性 enforcement
 
 实用建议：
 
@@ -254,20 +255,12 @@ crossfire start \
 | `--max-rounds <n>`            | 辩论最大轮数，达到后强制终止        | `10`                     |
 | `--judge-every-n-rounds <n>`  | 裁判每 N 轮介入一次（必须小于 max-rounds） | `3`                |
 | `--convergence-threshold <n>` | 立场距离 (0-1)，低于此值自动收敛    | `0.3`                    |
-| `--model <model>`             | 所有角色的模型覆盖                  | —                        |
-| `--proposer-model <model>`    | 提议者模型覆盖                      | —                        |
-| `--challenger-model <model>`  | 挑战者模型覆盖                      | —                        |
-| `--judge-model <model>`       | 裁判模型覆盖                        | —                        |
-| `--preset <preset>`           | debate 默认策略预设（`research`、`guarded`、`dangerous`） | —     |
+| `--preset <preset>`           | debate 默认策略预设（`research`、`guarded`、`dangerous`、`plan`） | — |
 | `--proposer-preset <preset>`  | proposer baseline 策略预设          | —                        |
 | `--challenger-preset <preset>`| challenger baseline 策略预设        | —                        |
 | `--judge-preset <preset>`     | judge baseline 策略预设             | —                        |
-| `--turn-preset <turnId=preset>` | 可重复的按 turn 覆盖，支持 `plan` | —                        |
+| `--turn-preset <turnId=preset>` | 可重复的按 turn preset 覆盖       | —                        |
 | `--evidence-bar <bar>`        | 所有角色的证据阈值（`low`、`medium`、`high`） | —                      |
-| `--template <family>`         | 所有角色的提示词模板族（`auto`、`general`、`code`） | `auto` |
-| `--proposer-template <family>` | proposer 提示词模板覆盖            | 继承 `--template` |
-| `--challenger-template <family>` | challenger 提示词模板覆盖       | 继承 `--template` |
-| `--judge-template <family>`   | judge 提示词模板覆盖                | 继承 `--template` |
 | `--output <dir>`              | 输出目录                            | `run_output/d-YYYYMMDD-HHMMSS` |
 | `--headless`                  | 禁用 TUI（完成信息仍输出到 stdout） | `false`                  |
 | `-v, --verbose`               | 详细日志                            | `false`                  |
@@ -280,7 +273,13 @@ crossfire start \
 CLI 角色特定 > CLI 全局 > 配置文件 > 角色默认
 ```
 
-**模型优先级：** `--proposer-model` > `--model` > 配置文件 `model` 字段 > 提供商默认值。
+证据阈值优先级：
+
+```text
+CLI --evidence-bar > 角色配置 evidence > template evidence override > 角色默认
+```
+
+模型、providerOptions、MCP 挂载、policy template、以及可选的 role `systemPrompt` 都在 `crossfire.json` 中配置，而不是通过额外的 `start` flag。
 
 ### `crossfire resume <output-dir>`
 
@@ -291,7 +290,7 @@ CLI 角色特定 > CLI 全局 > 配置文件 > 角色默认
 | `--config <path>`| 覆盖配置   | 来自 `index.json` |
 | `--headless`     | 禁用 TUI   | `false`          |
 
-配置更改（角色、preset、模型覆盖）在 resume 时允许，但你不能给一个最初无裁判的 debate 临时补加 judge。
+`resume` 默认会重新加载 `index.json` 里记录的 `configFile`，除非你显式传入 `--config <path>`。
 
 ### `crossfire replay <output-dir>`
 
@@ -306,39 +305,11 @@ CLI 角色特定 > CLI 全局 > 配置文件 > 角色默认
 
 ### `crossfire status <output-dir>`
 
-显示辩论状态摘要。加 `--json` 输出机器可读格式。
-
-```text
-Debate Status
-=============
-
-Debate ID: d-20260321-143022
-Topic: Should we adopt microservices?
-Started: 2026-03-21T14:30:22.000Z
-Ended: 2026-03-21T14:32:29.300Z
-Duration: 2m 7s
-
-Total Rounds: 8
-Total Events: 4523
-Termination Reason: convergence
-
-Profiles:
-  Proposer: claude_proposer (claude_code)
-    Model: us.anthropic.claude-opus-4-6-v1
-  Challenger: codex_challenger (codex)
-    Model: gpt-5.4
-  Judge: claude_judge (claude_code)
-    Model: us.anthropic.claude-opus-4-6-v1
-
-Configuration:
-  Max Rounds: 10
-  Judge Every N Rounds: 3
-  Convergence Threshold: 0.3
-```
+显示尽力而为的状态摘要。加 `--json` 会直接输出当前 `index.json` 的内容。
 
 ### `crossfire inspect-policy --config <path>`
 
-检查给定配置文件的策略编译。显示每个角色的已解析 preset、策略层和 provider 转换。
+检查配置文件的策略编译结果。该命令支持 `--format text|json`、可选 `--role`、与 `start` 相同的 preset override，以及 `--evidence-bar`。它会拒绝 `--turn-preset`，因为 inspection 只看 baseline。
 
 ```bash
 crossfire inspect-policy --config crossfire.json
@@ -346,7 +317,7 @@ crossfire inspect-policy --config crossfire.json
 
 ### `crossfire inspect-tools --config <path> [--role <role>]`
 
-检查配置文件中特定角色的工具/MCP 服务器接线。显示可用工具及其来源。
+检查配置文件中一个角色或所有角色的有效工具视图。该命令支持 `--format text|json`、可选 `--role`、与 `start` 相同的 preset override，以及 `--evidence-bar`。它会拒绝 `--turn-preset`，因为 inspection 只看 baseline。
 
 ```bash
 crossfire inspect-tools --config crossfire.json --role proposer
@@ -384,17 +355,19 @@ Inject 语义说明：
 
 ## 支持的智能体
 
-| 配置文件 `agent` 字段 | CLI 工具 | 传输方式                       |
-| --------------------- | -------- | ------------------------------ |
-| `claude_code`         | `claude` | 进程内 Agent SDK ≥0.1.77（异步生成器 + hooks） |
-| `codex`               | `codex`  | 双向 JSON-RPC 2.0 over stdio   |
-| `gemini_cli`          | `gemini` | 每轮子进程                     |
+| 配置 `providerBindings[].adapter` | CLI 工具 | 传输方式                       |
+| --------------------------------- | -------- | ------------------------------ |
+| `claude`                          | `claude` | 进程内 Agent SDK ≥0.1.77（异步生成器 + hooks） |
+| `codex`                           | `codex`  | 双向 JSON-RPC 2.0 over stdio   |
+| `gemini`                          | `gemini` | 每轮子进程                     |
 
 任何智能体可以担任任何角色（提议者、挑战者或裁判），自由混搭。
 
 ## 配置文件格式
 
-Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、MCP 服务器和策略预设。
+Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、MCP 服务器、策略预设、template 和 evidence override。
+
+这里的 `templates` 指的是策略模板：可复用的 preset/evidence/interaction 组合，而不是 `prompts/` 目录下的提示词 Markdown 资产。
 
 **`crossfire.json` 示例：**
 
@@ -419,18 +392,30 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
       "model": "gpt-5.4"
     }
   ],
+  "templates": [
+    {
+      "name": "strict-evidence",
+      "basePreset": "guarded",
+      "overrides": {
+        "evidence": { "bar": "high" },
+        "interaction": { "approval": "always" }
+      }
+    }
+  ],
   "roles": {
     "proposer": {
       "binding": "claude-main",
-      "preset": "research"
+      "template": "strict-evidence"
     },
     "challenger": {
       "binding": "codex-main",
-      "preset": "guarded"
+      "preset": "guarded",
+      "evidence": { "bar": "high" }
     },
     "judge": {
       "binding": "claude-main",
-      "preset": "plan"
+      "preset": "plan",
+      "systemPrompt": "Evaluate which side improves the action plan more."
     }
   }
 }
@@ -452,9 +437,9 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 | `binding` | Provider 绑定名 | 是 | — |
 | `model` | 当前角色的模型覆盖 | 否 | binding 默认 |
 | `preset` | 策略预设（`research`、`guarded`、`dangerous`、`plan`） | 否 | 角色默认（proposer/challenger 为 `guarded`，judge 为 `plan`） |
-| `template` | 策略模板名（覆盖 preset 解析） | 否 | — |
+| `template` | 策略模板名（可提供可选的 `basePreset` 与 evidence/interaction 覆盖） | 否 | — |
 | `evidence` | 证据策略覆盖（`{ bar: "low" \| "medium" \| "high" }`） | 否 | — |
-| `systemPrompt` | 角色级 system prompt 覆盖 | 否 | binding / 内置默认值 |
+| `systemPrompt` | 角色级 system prompt 覆盖 | 否 | 内置默认值 |
 
 配置校验是严格的：`allowed_tools`、`mcp_servers` 这类 legacy 字段，以及未批准的 template override key，会直接报错，不会被静默忽略。
 
@@ -470,114 +455,25 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 | `providerOptions` | Provider 原生 escape hatch（不是 policy 语义） | 否 | — |
 | `mcpServers` | 来自顶层注册表的已附着 MCP 服务器名称 | 否 | `[]` |
 
-## 配置文件（旧版）
+## 内置资产
 
-> **注意：** 基于 profile 的方式（`--proposer <profile>`、`--challenger <profile>`）已被弃用，请使用 `--config <path>`。内置 provider profile 仍用于内部测试和示例，但生产环境应迁移到配置文件格式。
+仓库里仍然保留了 `profiles/providers/` 和 `prompts/` 下的内置资产，但当前对外 CLI 已经是 config-first：
 
-Crossfire 之前使用独立的 provider/runtime profile 和可复用角色提示词。
+- 通过 `crossfire.json` 选择 adapter、model、MCP 挂载、preset、template、evidence，以及可选的 `systemPrompt`
+- 当前没有 `--template`、`--proposer-template`、`--challenger-template`、`--judge-template` 这些运行时 flag
+- 当前有效的提示词定制入口是 `roles.*.systemPrompt`，再加上 `packages/orchestrator-core/src/context-builder.ts` 里的内置默认 system prompt
 
-provider profile 使用 JSON：
-
-```json
-{
-  "name": "my_debater",
-  "description": "A skilled technical debater",
-  "agent": "claude_code",
-  "model": "us.anthropic.claude-opus-4-6-v1",
-  "prompt_family": "auto",
-  "inherit_global_config": true,
-  "mcp_servers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-filesystem"]
-    }
-  }
-}
-```
-
-| 字段                    | 说明                                              | 必填 | 默认值     |
-| ----------------------- | ------------------------------------------------- | ---- | ---------- |
-| `name`                  | 配置标识符                                        | 是   | —          |
-| `description`           | 可读描述                                          | 否   | —          |
-| `agent`                 | 智能体类型 (`claude_code`, `codex`, `gemini_cli`) | 是   | —          |
-| `model`                 | 首选模型                                          | 否   | 提供商默认 |
-| `prompt_family`         | 默认提示词模板族 (`auto`、`general`、`code`)      | 否   | `auto`     |
-| `inherit_global_config` | 合并用户全局 MCP 配置                             | 否   | `true`     |
-| `mcp_servers`           | 配置文件专属 MCP 服务器                           | 否   | `{}`       |
-
-角色提示词是普通 Markdown 文件，放在 `prompts/<family>/<role>.md`。
-
-**搜索路径：**
-
-- provider profile：`./profiles/providers/` → `~/.config/crossfire/profiles/providers/`
-- prompt template：`./prompts/` → `~/.config/crossfire/prompts/`
-
-**裁判自动推断：** 未指定 `--judge` 时，Crossfire 自动选择与提议者适配器类型匹配的裁判配置（例如 `claude/proposer` 默认使用 `claude/judge`）。
-
-内置提示词现在分成两层：
-
-- provider profile 负责选择 adapter、默认模型和运行时接线
-- prompt template 负责定义 `proposer`、`challenger`、`judge` 的角色契约
-- `general` 模板族用于商业、产品、研究类主题
-- 内置 proposer 模板现在会强制输出可执行方案，而不是停留在大方向；`general/proposer` 会覆盖定位、经济模型、控制措施、渠道保护和运营机制，`code/proposer` 会覆盖实现细节、迁移、测试、安全和发布落地
-- 内置 challenger 模板现在都会强制做多维度挑战，而不是停留在泛泛反对；`general/challenger` 会覆盖信任/转化、定价滥用、安全合规、渠道绕过和执行成本，`code/challenger` 会覆盖正确性、回归风险、测试、安全、运维和发布落地
-- 内置 judge 模板现在也会惩罚浅层风险清单和草率收敛，更明确要求基于证据的挑战、具体 failure mode，以及尚未闭环的高杠杆问题
-- `code` 模板族用于仓库、实现、调试类主题
-- `--template auto` 会先发起一次轻量 classifier 调用，使用 judge profile 对应的 provider/model 在 `general` 和 `code` 之间做选择
-- 如果 classifier 超时或没有返回合法 JSON，Crossfire 会退回本地启发式判定
-- `--proposer-template`、`--challenger-template`、`--judge-template` 仍然可以手工覆盖，并直接跳过 classifier
-
-这套拆分现在对 Claude、Codex、Gemini 是对称的。Crossfire 不再只给 Codex 特判“代码型 challenger 提示词”；三家内置 provider 都共享 `general` 和 `code` 两个角色模板族，而 provider 差异只留在 profile/runtime 层。
-
-内置文件结构：
+这些仓库内资产依然适合用于调整内置默认值、测试或内部实验：
 
 ```text
 profiles/
 └── providers/
-    ├── claude/   # proposer.json, challenger.json, judge.json
-    ├── codex/    # proposer.json, challenger.json, judge.json
-    └── gemini/   # proposer.json, challenger.json, judge.json
+    ├── claude/
+    ├── codex/
+    └── gemini/
 prompts/
-├── general/      # proposer.md, challenger.md, judge.md
-└── code/         # proposer.md, challenger.md, judge.md
-```
-
-典型用法：
-
-```bash
-# 让 Crossfire 自动分类模板族
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we launch an API resale product?" \
-  --template auto
-```
-
-```bash
-# 强制所有角色都使用 code 模板
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we rewrite the data layer?" \
-  --template code
-```
-
-```bash
-# 按角色使用不同模板族
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we rewrite the data layer?" \
-  --proposer-template general \
-  --challenger-template code
-```
-
-```bash
-# 组合 preset baseline、turn override 和模板选择
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we rewrite the data layer?" \
-  --proposer-preset research \
-  --challenger-preset guarded \
-  --turn-preset p-1=plan \
-  --template code
+├── general/
+└── code/
 ```
 
 ## 输出文件
@@ -591,7 +487,7 @@ crossfire start \
 | `transcript.html`      | 完整辩论记录的 HTML 版本                                     |
 | `transcript.md`        | 同一份 transcript 的 Markdown 版本                           |
 | `events.jsonl`         | 完整事件日志（每行一条 JSON）— 唯一事实来源                  |
-| `index.json`           | 元数据、字节偏移、段清单、profile 信息和辩论配置             |
+| `index.json`           | 元数据、字节偏移、段清单、已解析角色摘要和辩论配置           |
 | `synthesis-debug.json` | 综合提示词组装元数据加上综合运行期诊断信息，便于排查或分析输出质量 |
 
 恢复时会创建新的段文件（例如 `events-resumed-<ts>.jsonl`），并在 `index.json` 中追踪。
@@ -602,15 +498,15 @@ crossfire start \
 
 ## 工作原理
 
-1. **加载配置** — CLI 读取 JSON provider profile，用 Zod 校验，并把 `agent` 字段映射到适配器类型。
-2. **解析提示词模板** — Crossfire 会从 `--template`、按角色的 `--*-template` 覆盖、profile 的 `prompt_family`，或轻量 topic classifier 的回退结果中解析出 `general` / `code` 模板族，然后加载 `prompts/<family>/<role>.md`。这套机制现在对所有内置 provider 对称生效。
-3. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，把提供商特定协议统一为共享事件流。
-4. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 都订阅这个总线。
-5. **回合循环** — 编排器从投影状态构建提示词，发送给当前智能体，等待 `turn.completed`，再轮到另一方。每次决策前都会从事件重新投影状态。
-6. **结构化提取** — 智能体调用 `debate_meta` 上报立场、置信度、关键论点和让步。裁判调用 `judge_verdict` 给出评分和继续/停止建议，同时其提示词会优先惩罚缺乏依据的主张。
-7. **增量提示词** — 第 1 轮发送完整系统提示词、主题和输出格式；后续轮次仅发送对手最新回复和可选裁判反馈。
-8. **收敛检测** — Crossfire 跟踪立场差值、让步情况以及双方是否希望结束。达到阈值时可提前终止辩论。
-9. **持久化** — 事件每 100ms 批量写入 JSONL，并在回合或辩论完成时同步刷新。完整日志支持确定性回放和恢复。
+1. **加载配置** — CLI 读取 `crossfire.json`，用 Zod 校验，并解析 provider binding、MCP 挂载、role preset、template override、evidence override，以及可选的 `systemPrompt`。
+2. **策略编译** — Crossfire 为每个角色编译 baseline `ResolvedPolicy`，再把这个策略翻译成 Claude、Codex、Gemini 各自的 provider-native 控制参数。
+3. **创建适配器** — 每个角色获得一个 `AgentAdapter` 实例，把 provider 特定协议统一为共享事件流。
+4. **构建提示词** — turn prompt 来自 role `systemPrompt` 覆盖或 `defaultSystemPrompt()` 的内置默认值，再叠加 schema guidance、evidence guidance 和增量辩论上下文。
+5. **事件总线** — 所有事件流经 `DebateEventBus`。TUI、EventStore（JSONL 持久化）和 TranscriptWriter 都订阅这个总线。
+6. **回合循环** — 编排器从投影状态构建提示词，发送给当前智能体，等待 `turn.completed`，再轮到另一方。每次决策前都会从事件重新投影状态。
+7. **结构化提取** — 智能体调用 `debate_meta` 上报立场、置信度、关键论点、让步、rebuttal、evidence 和 risk flag。裁判调用 `judge_verdict` 给出评分和继续/停止建议。
+8. **增量提示词** — 第 1 轮发送完整系统提示词、主题和输出格式；后续轮次仅发送对手最新回复和可选裁判反馈。
+9. **持久化** — 事件每 100ms 批量写入 JSONL，并在 turn/debate/synthesis 边界同步刷新。完整日志支持确定性回放和恢复。
 10. **最终综合** — 辩论结束后，Crossfire 会在独立综合会话中生成 `action-plan.md` / `action-plan.html`，综合 turn 会以无工具的 `plan` 模式运行并拥有更长的 timeout 预算；同时记录综合诊断元数据供审计使用。如果模型综合失败，则回退到经 debate summary 补强的本地报告。
 
 完整架构文档请从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 进入。
@@ -636,7 +532,7 @@ packages/
 ├── orchestrator-core/   # 纯逻辑：状态投影、收敛、提示词构建、导演
 ├── orchestrator/        # 副作用：辩论运行器、DebateEventBus、EventStore、TranscriptWriter、综合流程
 ├── tui/                 # Ink（CLI 的 React）组件、TuiStore、EventSource/PlaybackClock
-└── cli/                 # Commander.js 入口、JSON 配置系统、组装工厂
+└── cli/                 # Commander.js 入口、配置加载、组装工厂
 ```
 
 分层说明：
@@ -657,7 +553,7 @@ packages/
 
 ## 扩展 Crossfire
 
-如果要新增一个 provider，通常需要在新 package 中实现 `AgentAdapter`，把 provider 输出归一化为共享事件模型，跑通适配器契约测试，然后在 CLI 工厂层接好适配器创建逻辑，并补充对应 profiles。
+如果要新增一个 provider，通常需要在新 package 中实现 `AgentAdapter`，把 provider 输出归一化为共享事件模型，跑通适配器契约测试，在 CLI 工厂层接好适配器创建逻辑；如果你希望和现有仓库内参考资产保持一致，也可以选择补充 `profiles/providers/` 下的内置资产。
 
 设计细节建议从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 开始，再看 **[docs/architecture/adapter-layer.md](docs/architecture/adapter-layer.md)** 和 **[docs/architecture/orchestrator.md](docs/architecture/orchestrator.md)**。
 

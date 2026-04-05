@@ -32,7 +32,8 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 - [CLI Reference](#cli-reference)
 - [Runtime Commands](#runtime-commands)
 - [Supported Agents](#supported-agents)
-- [Profiles](#profiles)
+- [Config File Format](#config-file-format)
+- [Built-in Assets](#built-in-assets)
 - [Output Files](#output-files)
 - [How It Works](#how-it-works)
 - [System Model](#system-model)
@@ -51,7 +52,7 @@ Use it to stress-test architecture proposals, migration plans, product bets, and
 - **Judge arbitration** — Optional judge agent scores arguments, detects stagnation, and emphasizes evidence responsibility instead of rewarding unsupported claims
 - **Adaptive final synthesis** — After the debate, Crossfire generates a final action plan in a fresh synthesis session, forces synthesis into a tool-free planning turn, and falls back to a structured local report if model-backed synthesis fails
 - **Incremental prompts** — Turn 1 sends full context; Turn 2+ sends only new opponent/judge messages, leveraging provider session memory for ~O(1) per-turn cost
-- **Config-driven setup** — `crossfire.json` defines roles, provider bindings, MCP servers, and policy presets in one file
+- **Config-driven setup** — `crossfire.json` defines roles, provider bindings, MCP servers, policy presets, templates, and evidence defaults in one file
 - **Policy presets** — Set debate defaults, per-role baselines, and per-turn overrides such as `research`, `guarded`, `dangerous`, and `plan`
 
 ## Best For
@@ -107,13 +108,13 @@ node packages/cli/dist/index.js <command> [options]
 
 ## Quick Start
 
-Before your first run, make sure the agent CLI used by your selected profiles is installed, authenticated, and works in your shell.
+Before your first run, make sure the agent CLI referenced by your `crossfire.json` provider bindings is installed, authenticated, and works in your shell.
 
 ```bash
 # First, create a config file (crossfire.json) with roles and provider bindings
 # See the "Config File Format" section below for details
 
-# Claude vs Claude (judge auto-inferred)
+# Claude vs Claude
 crossfire start \
   --config crossfire.json \
   --topic "Should we adopt microservices?" \
@@ -208,11 +209,11 @@ crossfire start \
 Current provider mapping is intentionally asymmetric:
 
 - **Claude**
-  `research -> dontAsk + allowlist + bounded maxTurns`, `guarded -> default`, `dangerous -> bypassPermissions`, `plan -> plan`
+  plan-shaped policies map to `plan`, `approval: "never"` maps to `bypassPermissions`, and `on-risk` / `always` / `on-failure` currently resolve to `default` with approximation warnings where needed
 - **Codex**
   maps to approval and sandbox policy combinations rather than a single mode field
 - **Gemini**
-  currently only gets startup / per-turn approval-profile mapping in headless mode; do not assume parity with Claude or Codex
+  `approval: "never"` maps to `yolo`, `on-failure` approximates to `auto_edit`, and `on-risk` / `always` resolve to `default`; filesystem/network shutdown requests remain warnings rather than hard enforcement
 
 Practical guidance:
 
@@ -254,20 +255,12 @@ Start a new debate.
 | `--max-rounds <n>`            | Maximum debate rounds before forced termination          | `10`                     |
 | `--judge-every-n-rounds <n>`  | Judge intervenes every N rounds (must be < max-rounds)   | `3`                      |
 | `--convergence-threshold <n>` | Stance distance (0-1) below which debate auto-converges  | `0.3`                    |
-| `--model <model>`             | Model override for all roles                             | —                        |
-| `--proposer-model <model>`    | Model override for proposer                              | —                        |
-| `--challenger-model <model>`  | Model override for challenger                            | —                        |
-| `--judge-model <model>`       | Model override for judge                                 | —                        |
-| `--preset <preset>`           | Debate default policy preset (`research`, `guarded`, `dangerous`) | —        |
+| `--preset <preset>`           | Debate default policy preset (`research`, `guarded`, `dangerous`, `plan`) | — |
 | `--proposer-preset <preset>`  | Proposer baseline policy preset                          | —                        |
 | `--challenger-preset <preset>`| Challenger baseline policy preset                        | —                        |
 | `--judge-preset <preset>`     | Judge baseline policy preset                             | —                        |
-| `--turn-preset <turnId=preset>` | Repeatable per-turn override; supports `plan`         | —                        |
+| `--turn-preset <turnId=preset>` | Repeatable per-turn preset override                   | —                        |
 | `--evidence-bar <bar>`        | Evidence threshold for all roles (`low`, `medium`, `high`) | —                      |
-| `--template <family>`         | Prompt template family for all roles (`auto`, `general`, `code`) | `auto` |
-| `--proposer-template <family>` | Proposer prompt template override                      | inherited from `--template` |
-| `--challenger-template <family>` | Challenger prompt template override                 | inherited from `--template` |
-| `--judge-template <family>`   | Judge prompt template override                           | inherited from `--template` |
 | `--output <dir>`              | Output directory                                         | `run_output/d-YYYYMMDD-HHMMSS` |
 | `--headless`                  | Disable TUI (completion info still printed to stdout)    | `false`                  |
 | `-v, --verbose`               | Verbose logging                                          | `false`                  |
@@ -280,7 +273,13 @@ Policy preset precedence is:
 CLI role-specific > CLI global > config file > role default
 ```
 
-**Model resolution:** `--proposer-model` > `--model` > config file `model` field > provider default.
+Evidence precedence is:
+
+```text
+CLI --evidence-bar > role config evidence > template evidence override > role default
+```
+
+Model, provider options, MCP attachments, policy templates, and optional role `systemPrompt` values are configured in `crossfire.json`, not via extra `start` flags.
 
 ### `crossfire resume <output-dir>`
 
@@ -291,7 +290,7 @@ Resume an interrupted debate. State is reconstructed from persisted events.
 | `--config <path>`| Override config | from `index.json` |
 | `--headless`     | Disable TUI     | `false`           |
 
-Config changes (role, preset, model overrides) are allowed on resume, but you cannot add a judge to a debate that started without one.
+`resume` reloads the original `configFile` recorded in `index.json` unless you pass `--config <path>`.
 
 ### `crossfire replay <output-dir>`
 
@@ -306,39 +305,11 @@ Replay a completed debate with time-scaled playback. No agent connections needed
 
 ### `crossfire status <output-dir>`
 
-Show debate status summary. Add `--json` for machine-readable output.
-
-```text
-Debate Status
-=============
-
-Debate ID: d-20260321-143022
-Topic: Should we adopt microservices?
-Started: 2026-03-21T14:30:22.000Z
-Ended: 2026-03-21T14:32:29.300Z
-Duration: 2m 7s
-
-Total Rounds: 8
-Total Events: 4523
-Termination Reason: convergence
-
-Profiles:
-  Proposer: claude_proposer (claude_code)
-    Model: us.anthropic.claude-opus-4-6-v1
-  Challenger: codex_challenger (codex)
-    Model: gpt-5.4
-  Judge: claude_judge (claude_code)
-    Model: us.anthropic.claude-opus-4-6-v1
-
-Configuration:
-  Max Rounds: 10
-  Judge Every N Rounds: 3
-  Convergence Threshold: 0.3
-```
+Show a best-effort status summary. Add `--json` to dump the current `index.json` payload directly.
 
 ### `crossfire inspect-policy --config <path>`
 
-Inspect policy compilation for a given config file. Shows the resolved preset, policy layers, and provider translation for each role.
+Inspect policy compilation for a config file. The command supports `--format text|json`, optional `--role`, the same preset overrides as `start`, and `--evidence-bar`. It rejects `--turn-preset` because inspection is baseline-only.
 
 ```bash
 crossfire inspect-policy --config crossfire.json
@@ -346,7 +317,7 @@ crossfire inspect-policy --config crossfire.json
 
 ### `crossfire inspect-tools --config <path> [--role <role>]`
 
-Inspect tool/MCP server wiring for a specific role in a config file. Shows available tools and their sources.
+Inspect the effective tool view for one role or all roles in a config file. The command supports `--format text|json`, optional `--role`, the same preset overrides as `start`, and `--evidence-bar`. It rejects `--turn-preset` because inspection is baseline-only.
 
 ```bash
 crossfire inspect-tools --config crossfire.json --role proposer
@@ -384,17 +355,19 @@ Inject semantics:
 
 ## Supported Agents
 
-| Profile `agent` field | CLI      | Transport                              |
-| --------------------- | -------- | -------------------------------------- |
-| `claude_code`         | `claude` | In-process Agent SDK ≥0.1.77 (async generator + hooks) |
-| `codex`               | `codex`  | Bidirectional JSON-RPC 2.0 over stdio  |
-| `gemini_cli`          | `gemini` | Subprocess per turn                    |
+| Config `providerBindings[].adapter` | CLI      | Transport                              |
+| ----------------------------------- | -------- | -------------------------------------- |
+| `claude`                            | `claude` | In-process Agent SDK ≥0.1.77 (async generator + hooks) |
+| `codex`                             | `codex`  | Bidirectional JSON-RPC 2.0 over stdio  |
+| `gemini`                            | `gemini` | Subprocess per turn                    |
 
 Any agent can play any role (proposer, challenger, or judge). Mix and match freely.
 
 ## Config File Format
 
-Crossfire uses a `crossfire.json` config file to define roles, provider bindings, MCP servers, and policy presets.
+Crossfire uses a `crossfire.json` config file to define roles, provider bindings, MCP servers, policy presets, templates, and evidence overrides.
+
+`templates` in this schema are policy templates: reusable preset/evidence/interaction bundles. They are not the repo-local prompt markdown assets under `prompts/`.
 
 **Example `crossfire.json`:**
 
@@ -419,18 +392,30 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
       "model": "gpt-5.4"
     }
   ],
+  "templates": [
+    {
+      "name": "strict-evidence",
+      "basePreset": "guarded",
+      "overrides": {
+        "evidence": { "bar": "high" },
+        "interaction": { "approval": "always" }
+      }
+    }
+  ],
   "roles": {
     "proposer": {
       "binding": "claude-main",
-      "preset": "research"
+      "template": "strict-evidence"
     },
     "challenger": {
       "binding": "codex-main",
-      "preset": "guarded"
+      "preset": "guarded",
+      "evidence": { "bar": "high" }
     },
     "judge": {
       "binding": "claude-main",
-      "preset": "plan"
+      "preset": "plan",
+      "systemPrompt": "Evaluate which side improves the action plan more."
     }
   }
 }
@@ -452,9 +437,9 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
 | `binding` | Provider binding name | yes | — |
 | `model` | Model override for this role | no | binding default |
 | `preset` | Policy preset (`research`, `guarded`, `dangerous`, `plan`) | no | role default (`guarded` for proposer/challenger, `plan` for judge) |
-| `template` | Policy template name (overrides preset resolution) | no | — |
+| `template` | Policy template name (supplies optional `basePreset` plus evidence/interaction overrides) | no | — |
 | `evidence` | Evidence policy override (`{ bar: "low" \| "medium" \| "high" }`) | no | — |
-| `systemPrompt` | Role-specific system prompt override | no | binding / built-in default |
+| `systemPrompt` | Role-specific system prompt override | no | built-in default |
 
 Config validation is strict: legacy fields such as `allowed_tools` / `mcp_servers` and unapproved template override keys are rejected instead of being silently ignored.
 
@@ -470,114 +455,25 @@ Config validation is strict: legacy fields such as `allowed_tools` / `mcp_server
 | `providerOptions` | Provider-native escape hatch (not policy semantics) | no | — |
 | `mcpServers` | Attached MCP server names from the top-level registry | no | `[]` |
 
-## Profiles (Legacy)
+## Built-in Assets
 
-> **Note:** The profile-based approach (`--proposer <profile>`, `--challenger <profile>`) is deprecated in favor of `--config <path>`. Built-in provider profiles are still used internally for testing and examples, but production usage should migrate to the config file format.
+The repo still contains built-in assets under `profiles/providers/` and `prompts/`, but the current public CLI is config-first:
 
-Crossfire previously used separate provider/runtime profiles from reusable role prompts.
+- use `crossfire.json` to pick adapters, models, MCP attachments, presets, templates, evidence, and optional `systemPrompt`
+- there are no current `--template`, `--proposer-template`, `--challenger-template`, or `--judge-template` runtime flags
+- prompt customization in the active runtime surface happens through `roles.*.systemPrompt` plus the built-in defaults in `packages/orchestrator-core/src/context-builder.ts`
 
-Provider profiles are JSON files:
-
-```json
-{
-  "name": "my_debater",
-  "description": "A skilled technical debater",
-  "agent": "claude_code",
-  "model": "us.anthropic.claude-opus-4-6-v1",
-  "prompt_family": "auto",
-  "inherit_global_config": true,
-  "mcp_servers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-filesystem"]
-    }
-  }
-}
-```
-
-| Field                   | Description                                       | Required | Default          |
-| ----------------------- | ------------------------------------------------- | -------- | ---------------- |
-| `name`                  | Profile identifier                                | yes      | —                |
-| `description`           | Human-readable description                        | no       | —                |
-| `agent`                 | Agent type (`claude_code`, `codex`, `gemini_cli`) | yes      | —                |
-| `model`                 | Preferred model                                   | no       | provider default |
-| `prompt_family`         | Default prompt family (`auto`, `general`, `code`) | no       | `auto`           |
-| `inherit_global_config` | Merge user's global MCP config                    | no       | `true`           |
-| `mcp_servers`           | Profile-specific MCP servers                      | no       | `{}`             |
-
-Prompt contracts are plain Markdown files under `prompts/<family>/<role>.md`.
-
-**Search paths:**
-
-- provider profiles: `./profiles/providers/` then `~/.config/crossfire/profiles/providers/`
-- prompt templates: `./prompts/` then `~/.config/crossfire/prompts/`
-
-**Judge auto-inference:** When `--judge` is omitted, Crossfire picks the judge profile matching the proposer's adapter type (for example, `claude/proposer` defaults to `claude/judge`).
-
-Built-in prompting is now split into two layers:
-
-- provider profiles choose the adapter, default model, and runtime wiring
-- prompt templates define the `proposer`, `challenger`, and `judge` role contract
-- template family `general` is for business, product, and research topics
-- the built-in proposer templates now force executable plans instead of high-level slogans; `general/proposer` pushes positioning, economics, controls, channel protection, and operations, while `code/proposer` pushes implementation detail, migration, tests, security, and rollout
-- the built-in challenger templates now force multi-dimensional challenge coverage instead of generic objections; `general/challenger` pushes trust/conversion, pricing abuse, security/compliance, channel leakage, and execution burden, while `code/challenger` pushes correctness, regression risk, testing, security, operations, and rollout
-- the built-in judge templates now penalize shallow risk lists and weak convergence calls; they explicitly look for evidence-backed challenges, concrete failure modes, and unresolved high-leverage gaps
-- template family `code` is for repository, implementation, and debugging topics
-- `--template auto` runs one lightweight classifier call first, using the judge profile's provider/model to choose between `general` and `code`
-- if the classifier times out or returns invalid JSON, Crossfire falls back to a local heuristic
-- `--proposer-template`, `--challenger-template`, and `--judge-template` still override the family manually and skip the classifier
-
-This split is now symmetric across Claude, Codex, and Gemini. Built-in provider profiles no longer hard-code provider-specific role prompts. Instead, all built-in providers share the same reusable `general` and `code` role-template families, while adapter/runtime differences stay in the provider profile layer.
-
-Built-in files:
+Those in-repo assets are still useful when editing built-in defaults, tests, or internal experiments:
 
 ```text
 profiles/
 └── providers/
-    ├── claude/   # proposer.json, challenger.json, judge.json
-    ├── codex/    # proposer.json, challenger.json, judge.json
-    └── gemini/   # proposer.json, challenger.json, judge.json
+    ├── claude/
+    ├── codex/
+    └── gemini/
 prompts/
-├── general/      # proposer.md, challenger.md, judge.md
-└── code/         # proposer.md, challenger.md, judge.md
-```
-
-Typical usage:
-
-```bash
-# Let Crossfire classify the template family automatically
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we launch an API resale product?" \
-  --template auto
-```
-
-```bash
-# Force code-oriented prompting for every role
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we rewrite the data layer?" \
-  --template code
-```
-
-```bash
-# Use different template families by role
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we rewrite the data layer?" \
-  --proposer-template general \
-  --challenger-template code
-```
-
-```bash
-# Combine role presets, per-turn override, and template selection
-crossfire start \
-  --config crossfire.json \
-  --topic "Should we rewrite the data layer?" \
-  --proposer-preset research \
-  --challenger-preset guarded \
-  --turn-preset p-1=plan \
-  --template code
+├── general/
+└── code/
 ```
 
 ## Output Files
@@ -591,7 +487,7 @@ Each debate produces files in its output directory:
 | `transcript.html`      | Full debate transcript in HTML                                                   |
 | `transcript.md`        | Same transcript in Markdown                                                      |
 | `events.jsonl`         | Complete event log (one JSON per line) — source of truth                         |
-| `index.json`           | Metadata, byte offsets, segment manifest, profile info, and debate config        |
+| `index.json`           | Metadata, byte offsets, segment manifest, resolved role summary, and debate config |
 | `synthesis-debug.json` | Prompt-assembly metadata plus synthesis runtime diagnostics for inspecting or troubleshooting output |
 
 On resume, a new segment file is created (for example, `events-resumed-<ts>.jsonl`) and tracked in `index.json`.
@@ -602,15 +498,15 @@ If model-backed synthesis fails, Crossfire still writes a fallback action plan s
 
 ## How It Works
 
-1. **Profile loading** — CLI reads JSON provider profiles, validates them with Zod, and maps `agent` to adapter type.
-2. **Prompt template resolution** — Crossfire resolves the `general` or `code` template family from `--template`, per-role `--*-template` overrides, profile `prompt_family`, or the lightweight topic classifier fallback, then loads `prompts/<family>/<role>.md`.
+1. **Config loading** — CLI reads `crossfire.json`, validates it with Zod, and resolves provider bindings, MCP attachments, role presets, template overrides, evidence overrides, and optional `systemPrompt` values.
+2. **Policy compilation** — Crossfire compiles a baseline `ResolvedPolicy` for each role, then translates that policy into provider-native controls for Claude, Codex, or Gemini.
 3. **Adapter creation** — Each role gets an `AgentAdapter` that normalizes provider-specific protocols into a shared event stream.
-4. **Event bus** — All events flow through `DebateEventBus`. The TUI, EventStore (JSONL persistence), and TranscriptWriter all subscribe here.
-5. **Turn loop** — The orchestrator builds prompts from projected state, sends them to the active agent, waits for `turn.completed`, then continues with the other side. State is re-projected from events before every decision.
-6. **Structured extraction** — Agents call `debate_meta` to report stance, confidence, key points, and concessions. The judge calls `judge_verdict` with scores and continue/stop recommendations, with prompt guidance that penalizes unsupported claims rather than quietly accepting them.
-7. **Incremental prompts** — Turn 1 sends the full system prompt, topic, and output schema; subsequent turns send only the opponent's latest response plus optional judge feedback.
-8. **Convergence** — Crossfire tracks stance delta, concessions, and whether both sides want to conclude. Debates can terminate early when convergence is high enough.
-9. **Persistence** — Events batch-flush to JSONL every 100ms, with sync flush on turn/debate completion. The full log enables deterministic replay and resume.
+4. **Prompt construction** — Turn prompts come from `systemPrompt` overrides or built-in defaults in `defaultSystemPrompt()`, then get enriched with schema guidance, evidence guidance, and incremental debate context.
+5. **Event bus** — All events flow through `DebateEventBus`. The TUI, EventStore (JSONL persistence), and TranscriptWriter all subscribe here.
+6. **Turn loop** — The orchestrator builds prompts from projected state, sends them to the active agent, waits for `turn.completed`, then continues with the other side. State is re-projected from events before every decision.
+7. **Structured extraction** — Agents call `debate_meta` to report stance, confidence, key points, concessions, rebuttals, evidence, and risk flags. The judge calls `judge_verdict` with scores and continue/stop recommendations.
+8. **Incremental prompts** — Turn 1 sends the full system prompt, topic, and output schema; subsequent turns send only the opponent's latest response plus optional judge feedback.
+9. **Persistence** — Events batch-flush to JSONL every 100ms, with synchronous flush on turn/debate/synthesis boundaries. The full log enables deterministic replay and resume.
 10. **Final synthesis** — After the debate, Crossfire generates `action-plan.md` / `action-plan.html` in a fresh synthesis session, runs that synthesis turn in tool-free `plan` mode with a longer timeout budget, records synthesis diagnostics for auditing, and falls back to an enriched local report if model-backed synthesis fails.
 
 For the architecture reference set, start at **[docs/architecture/overview.md](docs/architecture/overview.md)**.
@@ -636,7 +532,7 @@ packages/
 ├── orchestrator-core/   # Pure logic: state projection, convergence, prompt building, director
 ├── orchestrator/        # Side effects: debate runner, DebateEventBus, EventStore, TranscriptWriter, synthesis
 ├── tui/                 # Ink (React for CLI) components, TuiStore, EventSource/PlaybackClock
-└── cli/                 # Commander.js entry, JSON profile system, wiring factories
+└── cli/                 # Commander.js entry, config loading, wiring factories
 ```
 
 Layer guide:
@@ -657,7 +553,7 @@ Layer guide:
 
 ## Extending Crossfire
 
-To add a new provider, implement `AgentAdapter` in a new package, normalize provider output into the shared event model, run the adapter contract tests, then wire adapter creation in the CLI factory layer and add profiles for the new role set.
+To add a new provider, implement `AgentAdapter` in a new package, normalize provider output into the shared event model, run the adapter contract tests, wire adapter creation in the CLI factory layer, and optionally add built-in assets under `profiles/providers/` if you want parity with the existing in-repo reference assets.
 
 For design details, start with **[docs/architecture/overview.md](docs/architecture/overview.md)** and then read **[docs/architecture/adapter-layer.md](docs/architecture/adapter-layer.md)** and **[docs/architecture/orchestrator.md](docs/architecture/orchestrator.md)**.
 

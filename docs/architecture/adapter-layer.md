@@ -301,8 +301,8 @@ interface StartSessionInput {
 - in-process SDK `query()` stream
 - `startSession()` creates only the adapter handle; `providerSessionId` becomes known when the first `system/init` event arrives
 - session state is tracked in a local query-context map keyed by `adapterSessionId`
-- Crossfire policy presets map directly onto Claude permission modes per turn: `research` → `dontAsk` + allowlist + bounded `maxTurns`, `guarded` → `default`, `dangerous` → `bypassPermissions`, `plan` → `plan`
-- the Claude query function type signature accepts SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; the adapter's built-in policy translation currently only sets `maxTurns` (for research preset) to cap research-mode Claude turns before they sprawl indefinitely
+- Claude policy translation is policy-shaped rather than preset-name-shaped: plan-shaped policies map to `permissionMode: "plan"`, `approval: "never"` maps to `bypassPermissions`, and `on-risk` / `always` / `on-failure` currently resolve to `default` with structured approximation warnings where needed
+- the Claude query function type signature accepts SDK guardrails such as `maxTurns`, `maxThinkingTokens`, and `maxBudgetUsd`; Crossfire currently forwards policy-derived `maxTurns` when present and uses policy-driven deny lists for filesystem/network/shell/subagent restrictions
 - tool and subagent lifecycle visibility comes from SDK hooks: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, and `SubagentStop`
 - approval support is bridged through `canUseTool(toolName, input, options)`, which emits `approval.request` and blocks until `approve()` resolves it
 - `approval.request.payload` now retains Claude `suggestions`, `blockedPath`, `decisionReason`, and `agentId` metadata for display/debugging
@@ -340,7 +340,7 @@ interface StartSessionInput {
 
 - new subprocess per turn
 - `startSession()` creates adapter-side bookkeeping only; `providerSessionId` remains `undefined` until the first successful `init` event
-- Crossfire policy presets currently map only to CLI approval-mode arguments: `dangerous` → `yolo`, `plan` → `plan`, `research` currently reuses `plan`, and `guarded` leaves the CLI default in place
+- Gemini policy translation is also policy-shaped rather than preset-name-shaped: plan-shaped policies map to `plan`, `approval: "never"` maps to `yolo`, `on-failure` approximates to `auto_edit`, and `on-risk` / `always` resolve to `default`
 - resume is attempted through CLI arguments managed by `ResumeManager`
 - `session.started` is emitted from the first successful `init` event and is not re-emitted on later turns or fallback retries
 - current CLI normalization reads assistant text from `content` or `text` fields on the event, tool metadata from `tool_id` / `tool_use_id` / `tool_name` / `name` / `parameters` / `input`, tool results from `tool_id` / `tool_use_id` plus `success` or `status` with `output`, and usage from `event.usage` (with fallback to `event.stats`)

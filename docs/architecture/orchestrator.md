@@ -24,11 +24,11 @@ Packages:
 
 ### DebateConfig
 
-`DebateConfig` defines debate topic, round limits, judge cadence, convergence threshold, optional policy overrides, optional prompt-template selections, and optional per-role model/system-prompt overrides.
+`DebateConfig` defines debate topic, round limits, judge cadence, convergence threshold, optional turn-level preset overrides, and optional per-role model/system-prompt overrides.
 
 ### OrchestratorEvent
 
-`OrchestratorEvent` currently has 19 kinds:
+`OrchestratorEvent` currently has 21 kinds:
 
 - `debate.started`
 - `debate.resumed`
@@ -183,7 +183,7 @@ High-level flow:
 Important notes:
 
 - it waits for `turn.completed` on the bus
-- it resolves effective turn mode before each proposer / challenger turn using `debate default < role baseline < turn override`
+- it resolves effective turn policy before each proposer / challenger turn using `role baseline < turn override`
 - system prompt resolution is handled at the CLI layer: the runner receives pre-resolved system prompts from `config.proposerSystemPrompt` / `config.challengerSystemPrompt` / `config.judgeSystemPrompt`, falling back to `defaultSystemPrompt(role)` inside `buildInitialPrompt()`
 - it appends evidence-policy guidance derived from the effective `ResolvedPolicy.evidence.bar` to live prompts and recovery context, so evidence settings shape runtime behavior even though adapters only expose them as approximate observation warnings
 - it emits `policy.baseline` for each started role immediately after `debate.started`, carrying the full baseline `ResolvedPolicy`, clamp notes, preset provenance, evidence provenance (`evidence?: { source: EvidenceSource }`), template provenance (`template?: { name, basePreset? }`), translation summary, warnings, and the full `ProviderObservationResult` (tool view, capability effects, completeness) so that downstream consumers can reconstruct runtime policy state from events alone
@@ -213,12 +213,11 @@ Prompt builder families:
 - `buildJudgeIncrementalPrompt()`
 - `buildTranscriptRecoveryPrompt()`
 
-Current built-in role guidance also matters:
+Current role-guidance behavior:
 
-- built-in provider profiles are symmetric runtime shells for Claude, Codex, and Gemini rather than separate prompt contracts
-- `general` templates emphasize constructive adversarial review for product, research, and business topics
-- `code` templates emphasize repository evidence, tool-backed validation, and file/path citations for implementation topics
-- custom provider profiles currently supply runtime metadata such as adapter/model defaults and `prompt_family`; role prompt bodies still come from the resolved template files under `prompts/<family>/<role>.md`
+- runtime prompting is driven by `systemPrompt` overrides from resolved config, or by the built-in defaults in `defaultSystemPrompt()`
+- proposer/challenger/judge prompts are assembled directly by the context-builder helpers; they are not selected through current `--template` or profile-family CLI flags
+- repo prompt assets under `prompts/` still exist, but they are not part of the current `crossfire start` flag surface
 
 ## Judge Turn
 

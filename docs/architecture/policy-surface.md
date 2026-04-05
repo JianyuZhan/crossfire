@@ -12,15 +12,15 @@ See also:
 
 ## Purpose
 
-Crossfire reduces approval fatigue and provider lock-in by modeling turn execution through a layered policy system. Instead of mapping mode strings directly to provider-native parameters, Crossfire compiles a provider-agnostic `ResolvedPolicy` and then translates it into each adapter's native controls.
+Crossfire reduces approval fatigue by modeling turn execution through a layered policy system. Instead of mapping preset strings directly to provider-native parameters, Crossfire compiles a provider-agnostic `ResolvedPolicy` and then translates it into each adapter's native controls.
 
 The compilation pipeline:
 
 ```text
-PresetInput -> compilePolicy() -> ResolvedPolicy -> adapter translatePolicy() -> ProviderTranslationResult
+CompilePolicyInput -> compilePolicy() -> ResolvedPolicy -> adapter translatePolicy() -> ProviderTranslationResult
 ```
 
-- `PresetInput` carries a preset name (`research`, `guarded`, `dangerous`, `plan`), a role, and optional evidence/interaction overrides
+- `CompilePolicyInput` carries a preset name (`research`, `guarded`, `dangerous`, `plan`), a role, and optional evidence/interaction overrides
 - `compilePolicy()` expands the preset, applies default role contracts, and clamps capabilities to role ceilings
 - Each adapter's `translatePolicy()` is a pure function that maps `ResolvedPolicy` to provider-native options plus translation warnings
 
@@ -28,7 +28,7 @@ PresetInput -> compilePolicy() -> ResolvedPolicy -> adapter translatePolicy() ->
 
 A `ResolvedPolicy` comprises:
 
-- **Role contract**: semantic constraints (exploration, fact-check scope, evidence bar, whether new proposals are allowed)
+- **Role contract**: semantic constraints, capability ceilings, and default evidence expectations
 - **Capability policy**: filesystem, network, shell, subagents levels
 - **Interaction policy**: approval mode (`always`, `on-risk`, `on-failure`, `never`) plus optional limits (maxTurns, budgetUsd, timeoutMs, maxToolCalls)
 - **Evidence policy**: citation strength requirements (low, medium, high)
@@ -41,7 +41,7 @@ Crossfire uses these presets as entry points:
 - `research` -- read/search oriented, bounded turns, on-risk approval
 - `guarded` -- read/write with on-risk approval (the default)
 - `dangerous` -- full access, no approval
-- `plan` -- read-only reasoning, always-approve (used for judge turns)
+- `plan` -- read/search planning mode with always-approve interaction (used for judge turns by default)
 
 Why `plan` is not a role baseline:
 
@@ -61,7 +61,7 @@ CLI role-specific > CLI global > config file > role default
 
 - **CLI role-specific**: `--proposer-preset plan` applies only to proposer turns
 - **CLI global**: `--preset guarded` applies to all roles unless overridden
-- **Config file**: `roles.proposer.preset` in `crossfire.config.json`
+- **Config file**: `roles.proposer.preset` in `crossfire.json`
 - **Role default**: `proposer`/`challenger` default to `guarded`, `judge` defaults to `plan`
 
 The resolution function (`resolveRolePreset()` in `@crossfire/cli/config/policy-resolution`) returns both the resolved preset and its source (`cli-role`, `cli-global`, `config`, or `role-default`) for observability.
@@ -77,7 +77,7 @@ CLI --evidence-bar > config inline > template override > role-contract default
 ```
 
 - **CLI --evidence-bar**: `crossfire start --evidence-bar high` applies to all roles
-- **Config inline**: `roles.proposer.evidence.bar` in `crossfire.config.json`
+- **Config inline**: `roles.proposer.evidence.bar` in `crossfire.json`
 - **Template override**: `templates[].overrides.evidence.bar` for roles using that template
 - **Role-contract default**: each role's contract has a built-in default (`medium` for proposer, `high` for challenger and judge)
 
@@ -89,7 +89,7 @@ Evidence policy is passed to `compilePolicyWithDiagnostics()` via the `evidenceO
 
 ## Custom Templates
 
-The config file supports optional custom templates that bundle a base preset with evidence and interaction policy overrides. Templates are defined in the `templates` array and can be referenced by roles via the `template` field.
+The config file supports optional custom templates that bundle a base preset with evidence and interaction policy overrides. These are policy templates, not prompt-family selectors. Templates are defined in the `templates` array and can be referenced by roles via the `template` field.
 
 ### Template Structure
 
@@ -207,8 +207,8 @@ Warnings: Codex does not support per-tool allow/deny lists, per-session turn lim
 
 `translatePolicy()` maps `ResolvedPolicy` to Gemini CLI approval-mode arguments:
 
-- `interaction.approval` -> `approvalMode`: `never` -> `yolo`, `on-failure` -> `plan`, `on-risk`/`always` -> `default`
-- `capabilities.shell === "exec"` + `network === "full"` -> `yolo` override
+- `interaction.approval` -> `approvalMode`: `never` -> `yolo`, `on-failure` -> `auto_edit`, `on-risk` -> `default`, `always` -> approximate to `default`
+- filesystem/network shutdown requests remain observation warnings because Gemini does not expose native enforcement for those capability cuts
 
 Limitations: Gemini headless does not provide approval round-trips comparable to Claude or Codex; mode support is best-effort startup mapping. Tool-selection control remains provider-native / MCP-driven.
 

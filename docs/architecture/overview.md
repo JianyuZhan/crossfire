@@ -27,7 +27,7 @@ Subsystem details live in:
 - **Adapter layer** converts Claude, Codex, and Gemini protocols into a shared event model.
 - **Orchestrator layer** runs the debate loop using event projection plus a pure decision layer.
 - **TUI layer** renders live and replayed debates from the same event stream.
-- **CLI layer** loads profiles, builds adapters, creates persistence, and starts the debate.
+- **CLI layer** loads `crossfire.json`, resolves per-role runtime config, builds adapters, creates persistence, and starts or resumes the debate.
 
 ## Package Dependency Graph
 
@@ -45,6 +45,12 @@ Subsystem details live in:
 ```
 
 Key principle: pure logic lives in `-core` packages, while file/process/network effects live in the outer packages.
+
+Important scope note:
+
+- current user-facing runtime is config-first (`crossfire start --config <path>`)
+- the repo still contains built-in `profiles/` and `prompts/` assets, but the current CLI does not expose profile-selection or prompt-family flags
+- role prompt customization currently happens through config `roles.*.systemPrompt` plus the built-in defaults in `packages/orchestrator-core/src/context-builder.ts`
 
 ## Event Flow
 
@@ -107,12 +113,12 @@ crossfire/
 │   └── cli/
 ├── profiles/
 │   └── providers/
-│       ├── claude/    # proposer.json, challenger.json, judge.json
-│       ├── codex/     # proposer.json, challenger.json, judge.json
-│       └── gemini/    # proposer.json, challenger.json, judge.json
+│       ├── claude/    # built-in provider assets retained in-repo
+│       ├── codex/
+│       └── gemini/
 ├── prompts/
-│   ├── general/       # proposer.md, challenger.md, judge.md
-│   └── code/          # proposer.md, challenger.md, judge.md
+│   ├── general/       # built-in prompt assets retained in-repo
+│   └── code/
 ├── docs/
 │   ├── architecture/
 │   │   ├── overview.md
