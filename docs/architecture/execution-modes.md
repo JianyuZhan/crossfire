@@ -67,6 +67,76 @@ The resolution function (`resolveRolePreset()` in `@crossfire/cli/config/policy-
 
 This preset resolution feeds into the runtime turn-level precedence system described below.
 
+## Custom Templates
+
+The config file supports optional custom templates that bundle a base preset with evidence and interaction policy overrides. Templates are defined in the `templates` array and can be referenced by roles via the `template` field.
+
+### Template Structure
+
+Each template in `crossfire.json` has:
+
+- `name` (string, required): Unique identifier for the template
+- `basePreset` (enum, optional): One of `research`, `guarded`, `dangerous`, `plan`. If omitted, the role's default preset is used.
+- `overrides` (object, optional): Policy overrides applied after base preset compilation
+  - `evidence` (object, optional): Evidence policy overrides
+    - `bar` (enum): One of `low`, `medium`, `high`
+  - `interaction` (object, optional): Interaction policy overrides
+    - `approval` (enum, optional): One of `always`, `on-risk`, `on-failure`, `never`
+    - `limits` (object, optional): Turn limits
+      - `maxTurns` (number, optional): Maximum number of turns
+
+### Template Usage
+
+Templates are referenced by name in role configs:
+
+```json
+{
+  "templates": [
+    {
+      "name": "strict-evidence",
+      "basePreset": "guarded",
+      "overrides": {
+        "evidence": { "bar": "high" },
+        "interaction": { "approval": "always" }
+      }
+    }
+  ],
+  "roles": {
+    "proposer": {
+      "binding": "claude-default",
+      "template": "strict-evidence"
+    },
+    "challenger": {
+      "binding": "claude-default",
+      "preset": "research"
+    }
+  }
+}
+```
+
+Roles can also override evidence directly without using templates:
+
+```json
+{
+  "roles": {
+    "proposer": {
+      "binding": "claude-default",
+      "preset": "guarded",
+      "evidence": { "bar": "high" }
+    }
+  }
+}
+```
+
+### Validation Rules
+
+- Template names must be unique within the `templates` array
+- `basePreset` must be a valid preset name if specified
+- Evidence `bar` must be one of `low`, `medium`, `high`
+- Interaction `approval` must be one of `always`, `on-risk`, `on-failure`, `never`
+
+Templates are resolved during config loading and their resolved policies are stored in the adapter wiring layer for runtime use.
+
 ## Turn-Level Precedence
 
 Effective turn policy is resolved with this priority:

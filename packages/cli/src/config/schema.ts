@@ -2,6 +2,15 @@ import { z } from "zod";
 
 const PolicyPresetSchema = z.enum(["research", "guarded", "dangerous", "plan"]);
 
+const EvidenceBarSchema = z.enum(["low", "medium", "high"]);
+
+const ApprovalLevelSchema = z.enum([
+	"always",
+	"on-risk",
+	"on-failure",
+	"never",
+]);
+
 const McpServerConfigSchema = z.object({
 	command: z.string(),
 	args: z.array(z.string()).optional(),
@@ -16,24 +25,73 @@ const ProviderBindingConfigSchema = z.object({
 	mcpServers: z.array(z.string()).optional(),
 });
 
+const PolicyTemplateOverridesSchema = z.object({
+	evidence: z
+		.object({
+			bar: EvidenceBarSchema,
+		})
+		.optional(),
+	interaction: z
+		.object({
+			approval: ApprovalLevelSchema.optional(),
+			limits: z
+				.object({
+					maxTurns: z.number().optional(),
+				})
+				.optional(),
+		})
+		.optional(),
+});
+
+const PolicyTemplateConfigSchema = z.object({
+	name: z.string(),
+	basePreset: PolicyPresetSchema.optional(),
+	overrides: PolicyTemplateOverridesSchema.optional(),
+});
+
 const RoleProfileConfigSchema = z.object({
 	binding: z.string(),
 	model: z.string().optional(),
 	preset: PolicyPresetSchema.optional(),
 	systemPrompt: z.string().optional(),
+	template: z.string().optional(),
+	evidence: z
+		.object({
+			bar: EvidenceBarSchema,
+		})
+		.optional(),
 });
 
-export const CrossfireConfigSchema = z.object({
-	mcpServers: z.record(McpServerConfigSchema).optional(),
-	providerBindings: z.array(ProviderBindingConfigSchema),
-	roles: z.object({
-		proposer: RoleProfileConfigSchema,
-		challenger: RoleProfileConfigSchema,
-		judge: RoleProfileConfigSchema.optional(),
-	}),
-});
+export const CrossfireConfigSchema = z
+	.object({
+		mcpServers: z.record(McpServerConfigSchema).optional(),
+		providerBindings: z.array(ProviderBindingConfigSchema),
+		templates: z.array(PolicyTemplateConfigSchema).optional(),
+		roles: z.object({
+			proposer: RoleProfileConfigSchema,
+			challenger: RoleProfileConfigSchema,
+			judge: RoleProfileConfigSchema.optional(),
+		}),
+	})
+	.superRefine((config, ctx) => {
+		// Validate unique template names
+		if (config.templates) {
+			const names = new Set<string>();
+			for (const [index, template] of config.templates.entries()) {
+				if (names.has(template.name)) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: `Duplicate template name: ${template.name}`,
+						path: ["templates", index, "name"],
+					});
+				}
+				names.add(template.name);
+			}
+		}
+	});
 
 export type CrossfireConfig = z.infer<typeof CrossfireConfigSchema>;
 export type ProviderBindingConfig = z.infer<typeof ProviderBindingConfigSchema>;
 export type RoleProfileConfig = z.infer<typeof RoleProfileConfigSchema>;
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+export type PolicyTemplateConfig = z.infer<typeof PolicyTemplateConfigSchema>;
