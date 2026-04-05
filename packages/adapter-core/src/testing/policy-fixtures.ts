@@ -23,6 +23,12 @@ export function makeCompileInput(
 		...(overrides.legacyToolPolicy !== undefined
 			? { legacyToolPolicy: overrides.legacyToolPolicy }
 			: {}),
+		...(overrides.evidenceOverride !== undefined
+			? { evidenceOverride: overrides.evidenceOverride }
+			: {}),
+		...(overrides.interactionOverride !== undefined
+			? { interactionOverride: overrides.interactionOverride }
+			: {}),
 	};
 }
 

@@ -43,10 +43,8 @@ describe("DEFAULT_ROLE_CONTRACTS", () => {
 		expect(DEFAULT_ROLE_CONTRACTS.judge.semantics.factCheck).toBe("minimal");
 	});
 
-	it("challenger evidenceBar is high", () => {
-		expect(DEFAULT_ROLE_CONTRACTS.challenger.semantics.evidenceBar).toBe(
-			"high",
-		);
+	it("challenger evidenceDefaults.bar is high", () => {
+		expect(DEFAULT_ROLE_CONTRACTS.challenger.evidenceDefaults.bar).toBe("high");
 	});
 
 	it("constants are frozen and cannot be mutated", () => {

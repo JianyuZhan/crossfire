@@ -31,16 +31,9 @@ function renderPolicySummary(policy: ResolvedPolicy): string[] {
 			}
 		}
 	}
-	// Forward-compatible: render evidence section when D2 adds it to ResolvedPolicy.
-	const evidence = (policy as Record<string, unknown>).evidence;
-	if (evidence && typeof evidence === "object") {
-		const entries = Object.entries(evidence).filter(([, v]) => v !== undefined);
-		if (entries.length > 0) {
-			lines.push("  Evidence:");
-			for (const [k, v] of entries) {
-				lines.push(`    ${k}: ${String(v)}`);
-			}
-		}
+	if (policy.evidence) {
+		lines.push("  Evidence:");
+		lines.push(`    bar: ${policy.evidence.bar}`);
 	}
 	return lines;
 }

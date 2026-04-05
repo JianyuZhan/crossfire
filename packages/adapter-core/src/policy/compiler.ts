@@ -23,6 +23,7 @@ function copyRoleContract(rc: RoleContract): RoleContract {
 	return {
 		semantics: { ...rc.semantics },
 		ceilings: { ...rc.ceilings },
+		evidenceDefaults: { ...rc.evidenceDefaults },
 	};
 }
 
@@ -104,7 +105,13 @@ function applyLegacyToolOverrides(
 function compilePolicyInternal(
 	input: CompilePolicyInput,
 ): CompilePolicyDiagnostics {
-	const { preset, role, legacyToolPolicy } = input;
+	const {
+		preset,
+		role,
+		legacyToolPolicy,
+		evidenceOverride,
+		interactionOverride,
+	} = input;
 
 	const presetExpansion = PRESET_EXPANSIONS[preset];
 	const roleContract = copyRoleContract(DEFAULT_ROLE_CONTRACTS[role]);
@@ -120,12 +127,35 @@ function compilePolicyInternal(
 		legacyToolPolicy,
 	);
 
+	const evidence = {
+		bar: evidenceOverride?.bar ?? roleContract.evidenceDefaults.bar,
+	};
+
+	const baseInteraction = presetExpansion.interaction;
+	const interaction = interactionOverride
+		? {
+				approval: interactionOverride.approval ?? baseInteraction.approval,
+				...(interactionOverride.limits?.maxTurns !== undefined ||
+				baseInteraction.limits
+					? {
+							limits: {
+								...baseInteraction.limits,
+								...(interactionOverride.limits?.maxTurns !== undefined
+									? { maxTurns: interactionOverride.limits.maxTurns }
+									: {}),
+							},
+						}
+					: {}),
+			}
+		: baseInteraction;
+
 	return {
 		policy: {
 			preset,
 			roleContract,
 			capabilities,
-			interaction: presetExpansion.interaction,
+			interaction,
+			evidence,
 		},
 		clamps,
 	};

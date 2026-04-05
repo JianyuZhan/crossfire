@@ -94,27 +94,29 @@ describe("renderStatusPolicy", () => {
 		expect(text).toContain("not yet available");
 	});
 
-	it("renders evidence section when present on resolved policy (forward-compat for D2)", () => {
-		const policyWithEvidence = {
-			...basePolicyView.baseline.policy,
-			evidence: { bar: "high" },
-		};
-		const viewWithEvidence: StatusPolicyView = {
+	it("renders evidence section (always present in D2+)", () => {
+		const text = renderStatusPolicy([basePolicyView]);
+		expect(text).toContain("Evidence");
+		expect(text).toContain("bar");
+		expect(text).toContain("medium");
+	});
+
+	it("renders custom evidence bar when overridden", () => {
+		const policyWithHighEvidence = makeResolvedPolicy({
+			preset: "guarded",
+			role: "challenger",
+		});
+		const viewWithHighEvidence: StatusPolicyView = {
 			...basePolicyView,
 			baseline: {
 				...basePolicyView.baseline,
-				policy: policyWithEvidence as StatusPolicyView["baseline"]["policy"],
+				policy: policyWithHighEvidence,
 			},
 		};
-		const text = renderStatusPolicy([viewWithEvidence]);
+		const text = renderStatusPolicy([viewWithHighEvidence]);
 		expect(text).toContain("Evidence");
 		expect(text).toContain("bar");
 		expect(text).toContain("high");
-	});
-
-	it("omits evidence section when not present (pre-D2 resolved policy)", () => {
-		const text = renderStatusPolicy([basePolicyView]);
-		expect(text).not.toContain("Evidence:");
 	});
 });
 

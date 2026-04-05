@@ -14,7 +14,6 @@ describe("compilePolicy", () => {
 				exploration: "allowed",
 				factCheck: "allowed",
 				mayIntroduceNewProposal: true,
-				evidenceBar: "medium",
 			});
 			expect(p.capabilities).toEqual({
 				filesystem: "read",
@@ -68,7 +67,7 @@ describe("compilePolicy", () => {
 			);
 			expect(p.preset).toBe("guarded");
 			expect(p.roleContract.semantics.mayIntroduceNewProposal).toBe(false);
-			expect(p.roleContract.semantics.evidenceBar).toBe("high");
+			expect(p.roleContract.evidenceDefaults).toEqual({ bar: "high" });
 			expect(p.capabilities).toEqual({
 				filesystem: "write",
 				network: "search",
@@ -130,12 +129,18 @@ describe("compilePolicy", () => {
 	});
 
 	describe("provider-native leak guard", () => {
-		it("ResolvedPolicy keys contain only preset, roleContract, capabilities, interaction", () => {
+		it("ResolvedPolicy keys contain only preset, roleContract, capabilities, interaction, evidence", () => {
 			const p = compilePolicy(
 				makeCompileInput({ preset: "research", role: "proposer" }),
 			);
 			expect(Object.keys(p).sort()).toEqual(
-				["capabilities", "interaction", "preset", "roleContract"].sort(),
+				[
+					"capabilities",
+					"evidence",
+					"interaction",
+					"preset",
+					"roleContract",
+				].sort(),
 			);
 		});
 
@@ -183,6 +188,87 @@ describe("compilePolicy", () => {
 			);
 			expect(p.capabilities.legacyToolOverrides?.allow).toEqual(["Read"]);
 			expect(p.capabilities.legacyToolOverrides?.deny).toBeUndefined();
+		});
+	});
+
+	describe("evidence defaults and overrides", () => {
+		it("evidence defaults: proposer gets medium bar from role contract", () => {
+			const p = compilePolicy(
+				makeCompileInput({ preset: "guarded", role: "proposer" }),
+			);
+			expect(p.evidence).toEqual({ bar: "medium" });
+			expect(p.roleContract.evidenceDefaults).toEqual({ bar: "medium" });
+		});
+
+		it("evidence defaults: challenger gets high bar from role contract", () => {
+			const p = compilePolicy(
+				makeCompileInput({ preset: "guarded", role: "challenger" }),
+			);
+			expect(p.evidence).toEqual({ bar: "high" });
+			expect(p.roleContract.evidenceDefaults).toEqual({ bar: "high" });
+		});
+
+		it("evidence defaults: judge gets high bar from role contract", () => {
+			const p = compilePolicy(
+				makeCompileInput({ preset: "plan", role: "judge" }),
+			);
+			expect(p.evidence).toEqual({ bar: "high" });
+			expect(p.roleContract.evidenceDefaults).toEqual({ bar: "high" });
+		});
+
+		it("evidenceOverride overrides role contract default", () => {
+			const p = compilePolicy(
+				makeCompileInput({
+					preset: "guarded",
+					role: "proposer",
+					evidenceOverride: { bar: "high" },
+				}),
+			);
+			expect(p.evidence).toEqual({ bar: "high" });
+		});
+
+		it("evidenceOverride with undefined bar falls back to role contract", () => {
+			const p = compilePolicy(
+				makeCompileInput({
+					preset: "guarded",
+					role: "proposer",
+					evidenceOverride: {},
+				}),
+			);
+			expect(p.evidence).toEqual({ bar: "medium" });
+		});
+
+		it("interactionOverride overrides approval from preset", () => {
+			const p = compilePolicy(
+				makeCompileInput({
+					preset: "guarded",
+					role: "proposer",
+					interactionOverride: { approval: "always" },
+				}),
+			);
+			expect(p.interaction.approval).toBe("always");
+		});
+
+		it("interactionOverride overrides maxTurns from preset", () => {
+			const p = compilePolicy(
+				makeCompileInput({
+					preset: "research",
+					role: "proposer",
+					interactionOverride: { limits: { maxTurns: 5 } },
+				}),
+			);
+			expect(p.interaction.limits?.maxTurns).toBe(5);
+		});
+
+		it("interactionOverride without fields keeps preset defaults", () => {
+			const p = compilePolicy(
+				makeCompileInput({
+					preset: "guarded",
+					role: "proposer",
+					interactionOverride: {},
+				}),
+			);
+			expect(p.interaction).toEqual({ approval: "on-risk" });
 		});
 	});
 

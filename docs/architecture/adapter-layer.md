@@ -189,13 +189,23 @@ Contract tests enforce selected capability claims and exercise approval and inte
 
 The `adapter-core` package exports a policy compilation module (`policy/`) that replaces provider-first mode mapping with a provider-agnostic policy architecture:
 
-- **Types** (`policy/types.ts`): `ResolvedPolicy`, `CapabilityPolicy`, `RoleContract`, `InteractionPolicy`, `PolicyPreset`, `CompilePolicyInput`, `ProviderTranslationResult<T>`
+- **Types** (`policy/types.ts`): `ResolvedPolicy`, `CapabilityPolicy`, `RoleContract`, `InteractionPolicy`, `EvidencePolicy`, `PolicyPreset`, `CompilePolicyInput`, `ProviderTranslationResult<T>`
 - **Observation types** (`policy/observation-types.ts`): `CompilePolicyDiagnostics`, `PolicyClampNote`, `ToolInspectionRecord`, `CapabilityEffectRecord`, `PolicyTranslationSummary`, `ProviderObservationResult` — diagnostics and inspection types for policy observability (Phase C)
 - **Level-order helpers** (`policy/level-order.ts`): `clampFilesystem`, `clampNetwork`, `clampShell`, `clampSubagents` — ordered enum comparison via index, not string
-- **Role contracts** (`policy/role-contracts.ts`): `DEFAULT_ROLE_CONTRACTS` — frozen defaults for proposer (no ceilings), challenger (no ceilings), judge (read/search/off/off)
+- **Role contracts** (`policy/role-contracts.ts`): `DEFAULT_ROLE_CONTRACTS` — frozen defaults for proposer (no ceilings, medium evidence bar), challenger (no ceilings, high evidence bar), judge (read/search/off/off ceilings, high evidence bar)
 - **Presets** (`policy/presets.ts`): `PRESET_EXPANSIONS` — frozen table expanding `research | guarded | dangerous | plan` to capability + interaction policy
-- **Compiler** (`policy/compiler.ts`): `compilePolicy(input) → ResolvedPolicy` — preset expansion → role ceiling clamping → legacy tool override attachment; `compilePolicyWithDiagnostics(input) → CompilePolicyDiagnostics` — same compilation with clamp notes recording when role ceilings reduce preset capabilities
-- **Testing** (`testing/`): shared test fixtures (`makeCompileInput`, event order helpers, resource cleanup) used across policy and adapter tests; compiler tests cover 7-case golden matrix with full 4-field assertions
+- **Compiler** (`policy/compiler.ts`): `compilePolicy(input) → ResolvedPolicy` — preset expansion → role ceiling clamping → evidence resolution → legacy tool override attachment; `compilePolicyWithDiagnostics(input) → CompilePolicyDiagnostics` — same compilation with clamp notes recording when role ceilings reduce preset capabilities
+- **Testing** (`testing/`): shared test fixtures (`makeCompileInput`, event order helpers, resource cleanup) used across policy and adapter tests; compiler tests cover 7-case golden matrix with full 5-field assertions
+
+`ResolvedPolicy` has five top-level sections:
+
+- `preset`: the selected policy preset name
+- `roleContract`: the role's semantic constraints (`semantics`), capability ceilings, and evidence defaults (`evidenceDefaults.bar`)
+- `capabilities`: filesystem/network/shell/subagents levels, plus optional legacy tool overrides
+- `interaction`: approval level and optional execution limits
+- `evidence`: evidence quality bar (`bar: low | medium | high`), merged from `evidenceOverride` or role contract defaults
+
+Evidence bar moved from `RoleContract.semantics.evidenceBar` to `RoleContract.evidenceDefaults.bar` and is resolved into `ResolvedPolicy.evidence` during compilation. The compiler merges evidence from `CompilePolicyInput.evidenceOverride?.bar` or falls back to the role contract's evidence defaults.
 
 Each adapter implements a `translatePolicy(ResolvedPolicy) → ProviderTranslationResult<NativeOptions>` pure function that maps the resolved policy to provider-native parameters plus structured warnings:
 

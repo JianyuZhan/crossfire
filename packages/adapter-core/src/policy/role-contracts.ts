@@ -19,25 +19,24 @@ export const DEFAULT_ROLE_CONTRACTS: Readonly<
 			exploration: "allowed",
 			factCheck: "allowed",
 			mayIntroduceNewProposal: true,
-			evidenceBar: "medium",
 		},
 		ceilings: {},
+		evidenceDefaults: { bar: "medium" },
 	},
 	challenger: {
 		semantics: {
 			exploration: "allowed",
 			factCheck: "allowed",
 			mayIntroduceNewProposal: false,
-			evidenceBar: "high",
 		},
 		ceilings: {},
+		evidenceDefaults: { bar: "high" },
 	},
 	judge: {
 		semantics: {
 			exploration: "forbidden",
 			factCheck: "minimal",
 			mayIntroduceNewProposal: false,
-			evidenceBar: "high",
 		},
 		ceilings: {
 			filesystem: "read",
@@ -45,5 +44,6 @@ export const DEFAULT_ROLE_CONTRACTS: Readonly<
 			shell: "off",
 			subagents: "off",
 		},
+		evidenceDefaults: { bar: "high" },
 	},
 });
