@@ -36,7 +36,9 @@ export const inspectToolsCommand = new Command("inspect-tools")
 				evidenceBar: options.evidenceBar,
 				turnPreset: options.turnPreset,
 			});
-			const contexts = buildInspectionContext(config, cliOverrides);
+			const contexts = buildInspectionContext(config, cliOverrides, {
+				configFilePath: options.config,
+			});
 
 			const filtered = options.role
 				? contexts.filter((c) => c.role === options.role)

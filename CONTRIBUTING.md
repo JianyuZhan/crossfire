@@ -130,7 +130,8 @@ If behavior is specific to one environment, keep it in that environment's entry 
 | `packages/orchestrator/src/final-synthesis.ts`      | Final action-plan synthesis session runner                          |
 | `packages/tui/src/state/tui-store.ts`               | TUI state projection                                                |
 | `packages/cli/src/wiring/create-factories.ts`       | Provider adapter factory registration                               |
-| `packages/cli/src/profile/resolver.ts`              | Profile `agent` to adapter-type resolution                          |
+| `packages/cli/src/config/resolver.ts`               | Config-driven role resolution and policy compilation inputs         |
+| `docs/configuration.md`                             | User-facing configuration guide and runtime-surface constraints     |
 
 ## Adding a New Adapter
 
@@ -138,7 +139,7 @@ If behavior is specific to one environment, keep it in that environment's entry 
 2. Map your protocol's events to the shared `NormalizedEvent` model and respect capability-gated methods such as `approve` and `interrupt`
 3. Run `runContractTests()` from `adapter-core` and add package-specific tests for provider quirks or transport behavior
 4. Register the adapter in `packages/cli/src/wiring/create-factories.ts`
-5. Update adapter resolution and profiles so the new provider can be selected from the CLI
+5. Update the config schema, checked-in reference config, and user docs so the new provider can be selected from the CLI
 6. Update the relevant architecture docs and contributor-facing docs if the extension changes user-facing behavior or system boundaries
 
 ## Submitting Changes

@@ -62,7 +62,13 @@ export const resumeCommand = new Command("resume")
 				process.exit(1);
 			}
 			const crossfireConfig = loadConfig(configFilePath);
-			const resolvedAllRoles = resolveAllRoles(crossfireConfig, {});
+			const resolvedAllRoles = resolveAllRoles(
+				crossfireConfig,
+				{},
+				{
+					configFilePath: configFilePath,
+				},
+			);
 
 			console.log(
 				`Resuming debate from round ${currentState.currentRound + 1}`,

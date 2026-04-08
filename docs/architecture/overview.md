@@ -49,8 +49,8 @@ Key principle: pure logic lives in `-core` packages, while file/process/network 
 Important scope note:
 
 - current user-facing runtime is config-first (`crossfire start --config <path>`)
-- the repo still contains built-in `profiles/` and `prompts/` assets, but the current CLI does not expose profile-selection or prompt-family flags
-- role prompt customization currently happens through config `roles.*.systemPrompt` plus the built-in defaults in `packages/orchestrator-core/src/context-builder.ts`
+- the checked-in starting point is `crossfire.example.json`, with task-oriented guidance in `docs/configuration.md`
+- role prompt customization currently happens through config `roles.*.systemPromptFile` or `roles.*.systemPrompt`, plus the built-in defaults in `packages/orchestrator-core/src/context-builder.ts`
 
 ## Event Flow
 
@@ -102,6 +102,7 @@ Important implications:
 
 ```text
 crossfire/
+├── crossfire.example.json
 ├── packages/
 │   ├── adapter-core/
 │   ├── adapter-claude/
@@ -111,15 +112,11 @@ crossfire/
 │   ├── orchestrator/
 │   ├── tui/
 │   └── cli/
-├── profiles/
-│   └── providers/
-│       ├── claude/    # built-in provider assets retained in-repo
-│       ├── codex/
-│       └── gemini/
 ├── prompts/
-│   ├── general/       # built-in prompt assets retained in-repo
-│   └── code/
+│   ├── code/          # reusable prompt files referenced via systemPromptFile
+│   └── general/
 ├── docs/
+│   ├── configuration.md
 │   ├── architecture/
 │   │   ├── overview.md
 │   │   ├── adapter-layer.md

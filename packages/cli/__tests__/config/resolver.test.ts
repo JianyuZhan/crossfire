@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveAllRoles } from "../../src/config/resolver.js";
 import type { CrossfireConfig } from "../../src/config/schema.js";
@@ -103,5 +106,72 @@ describe("resolveAllRoles", () => {
 			},
 		};
 		expect(() => resolveAllRoles(config, {})).toThrow(/binding.*nonexistent/i);
+	});
+
+	it("supports multiple bindings for the same adapter with different models", () => {
+		const config: CrossfireConfig = {
+			...baseConfig,
+			providerBindings: [
+				{
+					name: "claude-fast",
+					adapter: "claude",
+					model: "claude-sonnet",
+				},
+				{
+					name: "claude-deep",
+					adapter: "claude",
+					model: "claude-opus",
+				},
+				{
+					name: "codex-main",
+					adapter: "codex",
+					model: "gpt-5.4",
+				},
+			],
+			roles: {
+				proposer: { binding: "claude-fast" },
+				challenger: { binding: "claude-deep" },
+				judge: { binding: "codex-main" },
+			},
+		};
+
+		const roles = resolveAllRoles(config, {});
+		expect(roles.proposer.adapter).toBe("claude");
+		expect(roles.proposer.model).toBe("claude-sonnet");
+		expect(roles.challenger.adapter).toBe("claude");
+		expect(roles.challenger.model).toBe("claude-opus");
+		expect(roles.judge?.adapter).toBe("codex");
+	});
+
+	it("loads systemPromptFile relative to the config file path", () => {
+		const configDir = mkdtempSync(join(tmpdir(), "crossfire-config-"));
+		const promptsDir = join(configDir, "prompts");
+		mkdirSync(promptsDir, { recursive: true });
+		writeFileSync(
+			join(promptsDir, "proposer.md"),
+			"Prompt loaded from file.\n",
+		);
+
+		const config: CrossfireConfig = {
+			providerBindings: [
+				{ name: "b1", adapter: "claude", model: "claude-sonnet" },
+			],
+			roles: {
+				proposer: {
+					binding: "b1",
+					systemPromptFile: "prompts/proposer.md",
+				},
+				challenger: { binding: "b1" },
+			},
+		};
+
+		const roles = resolveAllRoles(
+			config,
+			{},
+			{
+				configFilePath: join(configDir, "crossfire.json"),
+			},
+		);
+		expect(roles.proposer.systemPrompt).toBe("Prompt loaded from file.");
 	});
 });

@@ -235,9 +235,9 @@ Policy preset CLI entry points:
 
 Prompt customization in the current command surface is config-driven:
 
-- role-specific `systemPrompt` lives in `crossfire.json`
+- role-specific `systemPromptFile` and `systemPrompt` live in `crossfire.json`
 - the built-in default prompt contracts come from `defaultSystemPrompt()` in `packages/orchestrator-core/src/context-builder.ts`
-- repo prompt assets under `prompts/` are not currently selected through `start` flags
+- there is no current profile or prompt-family selector in `start`
 
 ### `crossfire resume`
 

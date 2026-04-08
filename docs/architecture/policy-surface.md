@@ -148,12 +148,21 @@ Roles can also override evidence directly without using templates:
 }
 ```
 
+Role prompt guidance is config-driven:
+
+- `systemPrompt` provides an inline prompt override
+- `systemPromptFile` provides a file-based prompt override, resolved relative to `crossfire.json`
+- a role may set one or the other, but not both
+
+Provider bindings are an inventory, not a one-provider-one-entry map. The same adapter may appear multiple times with different binding names and models, and roles choose among them through `roles.*.binding`.
+
 ### Validation Rules
 
 - Template names must be unique within the `templates` array
 - `basePreset` must be a valid preset name if specified
 - Evidence `bar` must be one of `low`, `medium`, `high`
 - Interaction `approval` must be one of `always`, `on-risk`, `on-failure`, `never`
+- `systemPrompt` and `systemPromptFile` are mutually exclusive within a role config
 - The config schema is strict: legacy fields such as `allowed_tools` / `mcp_servers` and unapproved template override keys are rejected rather than silently ignored
 
 Templates are resolved during config loading and their resolved policies are stored in the adapter wiring layer for runtime use.

@@ -167,7 +167,9 @@ export const startCommand = new Command("start")
 			const crossfireConfig = loadConfig(options.config);
 			const cliOverrides: CliPresetOverrides =
 				toCliPresetOverrides(presetConfig);
-			const resolvedAllRoles = resolveAllRoles(crossfireConfig, cliOverrides);
+			const resolvedAllRoles = resolveAllRoles(crossfireConfig, cliOverrides, {
+				configFilePath: options.config,
+			});
 
 			const config: DebateConfig = {
 				topic,

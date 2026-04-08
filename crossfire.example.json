@@ -1,0 +1,52 @@
+{
+	"providerBindings": [
+		{
+			"name": "claude-fast",
+			"adapter": "claude",
+			"model": "claude-sonnet"
+		},
+		{
+			"name": "claude-deep",
+			"adapter": "claude",
+			"model": "us.anthropic.claude-opus-4-6-v1"
+		},
+		{
+			"name": "codex-main",
+			"adapter": "codex",
+			"model": "gpt-5.4"
+		},
+		{
+			"name": "gemini-fast",
+			"adapter": "gemini",
+			"model": "gemini-2.5-flash"
+		}
+	],
+	"templates": [
+		{
+			"name": "strict-evidence",
+			"basePreset": "guarded",
+			"overrides": {
+				"evidence": {
+					"bar": "high"
+				}
+			}
+		}
+	],
+	"roles": {
+		"proposer": {
+			"binding": "codex-main",
+			"preset": "guarded",
+			"systemPromptFile": "prompts/code/proposer.md"
+		},
+		"challenger": {
+			"binding": "claude-deep",
+			"template": "strict-evidence",
+			"systemPromptFile": "prompts/code/challenger.md"
+		},
+		"judge": {
+			"binding": "gemini-fast",
+			"preset": "plan",
+			"systemPromptFile": "prompts/code/judge.md"
+		}
+	}
+}

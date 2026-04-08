@@ -111,8 +111,8 @@ node packages/cli/dist/index.js <command> [options]
 Before your first run, make sure the agent CLI referenced by your `crossfire.json` provider bindings is installed, authenticated, and works in your shell.
 
 ```bash
-# First, create a config file (crossfire.json) with roles and provider bindings
-# See the "Config File Format" section below for details
+# Start from the checked-in reference config and edit adapter/model as needed
+cp crossfire.example.json crossfire.json
 
 # Claude vs Claude
 crossfire start \
@@ -367,59 +367,34 @@ Any agent can play any role (proposer, challenger, or judge). Mix and match free
 
 Crossfire uses a `crossfire.json` config file to define roles, provider bindings, MCP servers, policy presets, templates, and evidence overrides.
 
-`templates` in this schema are policy templates: reusable preset/evidence/interaction bundles. They are not the repo-local prompt markdown assets under `prompts/`.
+`templates` in this schema are policy templates: reusable preset/evidence/interaction bundles. They are not prompt-family selectors.
 
-**Example `crossfire.json`:**
+## User Configuration
 
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"]
-    }
-  },
-  "providerBindings": [
-    {
-      "name": "claude-main",
-      "adapter": "claude",
-      "model": "claude-sonnet",
-      "mcpServers": ["github"]
-    },
-    {
-      "name": "codex-main",
-      "adapter": "codex",
-      "model": "gpt-5.4"
-    }
-  ],
-  "templates": [
-    {
-      "name": "strict-evidence",
-      "basePreset": "guarded",
-      "overrides": {
-        "evidence": { "bar": "high" },
-        "interaction": { "approval": "always" }
-      }
-    }
-  ],
-  "roles": {
-    "proposer": {
-      "binding": "claude-main",
-      "template": "strict-evidence"
-    },
-    "challenger": {
-      "binding": "codex-main",
-      "preset": "guarded",
-      "evidence": { "bar": "high" }
-    },
-    "judge": {
-      "binding": "claude-main",
-      "preset": "plan",
-      "systemPrompt": "Evaluate which side improves the action plan more."
-    }
-  }
-}
+Start from the checked-in reference config:
+
+```bash
+cp crossfire.example.json crossfire.json
 ```
+
+Then edit it in this order:
+
+- `providerBindings`: define the provider CLI, model, and optional MCP attachments you have installed
+- the same adapter can appear multiple times with different `name` and `model` values
+- `roles.*.binding`: choose which binding each role uses
+- `roles.*.preset` or `roles.*.template`: choose the baseline policy behavior
+- `roles.*.evidence`, `roles.*.systemPrompt`, and `roles.*.systemPromptFile`: add role-specific tuning only when needed
+
+Before the first real run, inspect the resolved runtime shape:
+
+```bash
+crossfire inspect-policy --config crossfire.json
+crossfire inspect-tools --config crossfire.json
+```
+
+For a task-oriented guide, see [docs/configuration.md](docs/configuration.md).
+
+Reference file: [`crossfire.example.json`](./crossfire.example.json)
 
 | Field | Description | Required |
 | ----- | ----------- | -------- |
@@ -439,7 +414,8 @@ Crossfire uses a `crossfire.json` config file to define roles, provider bindings
 | `preset` | Policy preset (`research`, `guarded`, `dangerous`, `plan`) | no | role default (`guarded` for proposer/challenger, `plan` for judge) |
 | `template` | Policy template name (supplies optional `basePreset` plus evidence/interaction overrides) | no | — |
 | `evidence` | Evidence policy override (`{ bar: "low" \| "medium" \| "high" }`) | no | — |
-| `systemPrompt` | Role-specific system prompt override | no | built-in default |
+| `systemPrompt` | Role-specific inline system prompt override | no | built-in default |
+| `systemPromptFile` | Role-specific prompt file path, resolved relative to `crossfire.json` | no | — |
 
 Config validation is strict: legacy fields such as `allowed_tools` / `mcp_servers` and unapproved template override keys are rejected instead of being silently ignored.
 
@@ -455,26 +431,14 @@ Config validation is strict: legacy fields such as `allowed_tools` / `mcp_server
 | `providerOptions` | Provider-native escape hatch (not policy semantics) | no | — |
 | `mcpServers` | Attached MCP server names from the top-level registry | no | `[]` |
 
-## Built-in Assets
+Current runtime prompt customization is config-driven:
 
-The repo still contains built-in assets under `profiles/providers/` and `prompts/`, but the current public CLI is config-first:
+- use `roles.*.systemPromptFile` for long prompt files
+- use `roles.*.systemPrompt` for short inline overrides
+- built-in defaults come from `defaultSystemPrompt()` in `packages/orchestrator-core/src/context-builder.ts`
+- there are no current profile or prompt-family runtime selectors
 
-- use `crossfire.json` to pick adapters, models, MCP attachments, presets, templates, evidence, and optional `systemPrompt`
-- there are no current `--template`, `--proposer-template`, `--challenger-template`, or `--judge-template` runtime flags
-- prompt customization in the active runtime surface happens through `roles.*.systemPrompt` plus the built-in defaults in `packages/orchestrator-core/src/context-builder.ts`
-
-Those in-repo assets are still useful when editing built-in defaults, tests, or internal experiments:
-
-```text
-profiles/
-└── providers/
-    ├── claude/
-    ├── codex/
-    └── gemini/
-prompts/
-├── general/
-└── code/
-```
+Set either `systemPromptFile` or `systemPrompt` for a given role, not both.
 
 ## Output Files
 
@@ -553,7 +517,7 @@ Layer guide:
 
 ## Extending Crossfire
 
-To add a new provider, implement `AgentAdapter` in a new package, normalize provider output into the shared event model, run the adapter contract tests, wire adapter creation in the CLI factory layer, and optionally add built-in assets under `profiles/providers/` if you want parity with the existing in-repo reference assets.
+To add a new provider, implement `AgentAdapter` in a new package, normalize provider output into the shared event model, run the adapter contract tests, wire adapter creation in the CLI factory layer, and update the checked-in configuration examples and docs if the new provider should appear in the user-facing setup guide.
 
 For design details, start with **[docs/architecture/overview.md](docs/architecture/overview.md)** and then read **[docs/architecture/adapter-layer.md](docs/architecture/adapter-layer.md)** and **[docs/architecture/orchestrator.md](docs/architecture/orchestrator.md)**.
 

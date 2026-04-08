@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	type CrossfireConfig,
@@ -5,6 +8,11 @@ import {
 } from "../../src/config/schema.js";
 
 describe("CrossfireConfigSchema", () => {
+	const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+	const EXAMPLE_CONFIG_PATH = resolve(
+		TEST_DIR,
+		"../../../../crossfire.example.json",
+	);
 	const validConfig: CrossfireConfig = {
 		providerBindings: [
 			{ name: "claude-default", adapter: "claude", model: "claude-sonnet" },
@@ -18,6 +26,12 @@ describe("CrossfireConfigSchema", () => {
 
 	it("accepts a valid minimal config", () => {
 		const result = CrossfireConfigSchema.safeParse(validConfig);
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts the checked-in reference config example", () => {
+		const raw = readFileSync(EXAMPLE_CONFIG_PATH, "utf-8");
+		const result = CrossfireConfigSchema.safeParse(JSON.parse(raw));
 		expect(result.success).toBe(true);
 	});
 
@@ -290,6 +304,42 @@ describe("CrossfireConfigSchema", () => {
 				},
 			});
 			expect(result.success).toBe(true);
+		});
+	});
+
+	describe("systemPromptFile", () => {
+		const MINIMAL_CONFIG = {
+			providerBindings: [{ name: "b1", adapter: "claude" as const }],
+			roles: {
+				proposer: { binding: "b1" },
+				challenger: { binding: "b1" },
+			},
+		};
+
+		it("accepts role with systemPromptFile", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...MINIMAL_CONFIG,
+				roles: {
+					proposer: { binding: "b1", systemPromptFile: "prompts/proposer.md" },
+					challenger: { binding: "b1" },
+				},
+			});
+			expect(result.success).toBe(true);
+		});
+
+		it("rejects role that sets both systemPrompt and systemPromptFile", () => {
+			const result = CrossfireConfigSchema.safeParse({
+				...MINIMAL_CONFIG,
+				roles: {
+					proposer: {
+						binding: "b1",
+						systemPrompt: "inline",
+						systemPromptFile: "prompts/proposer.md",
+					},
+					challenger: { binding: "b1" },
+				},
+			});
+			expect(result.success).toBe(false);
 		});
 	});
 

@@ -1,4 +1,6 @@
 // packages/cli/src/config/resolver.ts
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import type {
 	ApprovalLevel,
 	CompilePolicyDiagnostics,
@@ -56,8 +58,40 @@ export interface CliPresetOverrides {
 export function resolveAllRoles(
 	config: CrossfireConfig,
 	cliOverrides: CliPresetOverrides,
+	options?: {
+		configFilePath?: string;
+	},
 ): ResolvedAllRoles {
 	const bindingMap = new Map(config.providerBindings.map((b) => [b.name, b]));
+	const configBaseDir = options?.configFilePath
+		? dirname(resolve(options.configFilePath))
+		: process.cwd();
+
+	function resolveRoleSystemPrompt(input: {
+		role: "proposer" | "challenger" | "judge";
+		systemPrompt?: string;
+		systemPromptFile?: string;
+	}): string | undefined {
+		if (input.systemPrompt) return input.systemPrompt;
+		if (!input.systemPromptFile) return undefined;
+		const filePath = resolve(configBaseDir, input.systemPromptFile);
+		try {
+			const prompt = readFileSync(filePath, "utf-8").trim();
+			if (prompt.length === 0) {
+				throw new Error(
+					`Role "${input.role}" systemPromptFile is empty: ${input.systemPromptFile}`,
+				);
+			}
+			return prompt;
+		} catch (error) {
+			if (error instanceof Error && error.message.includes("is empty")) {
+				throw error;
+			}
+			throw new Error(
+				`Role "${input.role}" systemPromptFile could not be read: ${input.systemPromptFile}`,
+			);
+		}
+	}
 
 	function resolveRole(
 		roleName: "proposer" | "challenger" | "judge",
@@ -146,7 +180,11 @@ export function resolveAllRoles(
 			interactionOverrides,
 			templateName: template?.name,
 			templateBasePreset: template?.basePreset,
-			systemPrompt: roleConfig.systemPrompt,
+			systemPrompt: resolveRoleSystemPrompt({
+				role: roleName,
+				systemPrompt: roleConfig.systemPrompt,
+				systemPromptFile: roleConfig.systemPromptFile,
+			}),
 			providerOptions: binding.providerOptions,
 			mcpServers: resolvedMcpServers,
 		};

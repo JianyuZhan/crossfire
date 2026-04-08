@@ -66,6 +66,7 @@ const RoleProfileConfigSchema = z
 		model: z.string().optional(),
 		preset: PolicyPresetSchema.optional(),
 		systemPrompt: z.string().optional(),
+		systemPromptFile: z.string().optional(),
 		template: z.string().optional(),
 		evidence: z
 			.object({
@@ -103,6 +104,17 @@ export const CrossfireConfigSchema = z
 					});
 				}
 				names.add(template.name);
+			}
+		}
+
+		for (const [roleName, role] of Object.entries(config.roles)) {
+			if (!role) continue;
+			if (role.systemPrompt && role.systemPromptFile) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: 'Use either "systemPrompt" or "systemPromptFile", not both',
+					path: ["roles", roleName, "systemPromptFile"],
+				});
 			}
 		}
 	});

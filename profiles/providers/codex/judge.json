@@ -1,7 +1,0 @@
-{
-	"name": "codex_judge",
-	"description": "Quality assessor (Codex) - evaluates plan readiness, identifies gaps",
-	"agent": "codex",
-	"model": "gpt-5.4",
-	"prompt_family": "auto"
-}

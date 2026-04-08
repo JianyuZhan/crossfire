@@ -111,7 +111,7 @@ export class EventStore {
 		const lastEvent = this.totalEvents > 0 ? Date.now() : this.startedAt;
 		const indexPath = join(this.dir, "index.json");
 
-		// Read existing index.json (written by CLI with profiles/config/versions)
+		// Read existing index.json (written by CLI with config/versions metadata)
 		let existing: Record<string, unknown> = {};
 		try {
 			existing = JSON.parse(readFileSync(indexPath, "utf-8"));

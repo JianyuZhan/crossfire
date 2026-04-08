@@ -215,9 +215,8 @@ Prompt builder families:
 
 Current role-guidance behavior:
 
-- runtime prompting is driven by `systemPrompt` overrides from resolved config, or by the built-in defaults in `defaultSystemPrompt()`
-- proposer/challenger/judge prompts are assembled directly by the context-builder helpers; they are not selected through current `--template` or profile-family CLI flags
-- repo prompt assets under `prompts/` still exist, but they are not part of the current `crossfire start` flag surface
+- runtime prompting is driven by `systemPromptFile` or `systemPrompt` overrides from resolved config, or by the built-in defaults in `defaultSystemPrompt()`
+- proposer/challenger/judge prompts are assembled directly by the context-builder helpers; there is no current profile or prompt-family selector in the `crossfire start` surface
 
 ## Judge Turn
 

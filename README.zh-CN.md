@@ -111,8 +111,8 @@ node packages/cli/dist/index.js <command> [options]
 第一次运行前，请确认 `crossfire.json` 中 provider binding 引用到的 agent CLI 已经安装、完成认证，并且能在当前 shell 中正常执行。
 
 ```bash
-# 首先创建配置文件 (crossfire.json) 定义角色和 provider 绑定
-# 详见下方"配置文件格式"章节
+# 先从仓库内参考配置开始，再按需修改 adapter/model
+cp crossfire.example.json crossfire.json
 
 # Claude 对战 Claude
 crossfire start \
@@ -367,59 +367,34 @@ Inject 语义说明：
 
 Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、MCP 服务器、策略预设、template 和 evidence override。
 
-这里的 `templates` 指的是策略模板：可复用的 preset/evidence/interaction 组合，而不是 `prompts/` 目录下的提示词 Markdown 资产。
+这里的 `templates` 指的是策略模板：可复用的 preset/evidence/interaction 组合，而不是 prompt-family 选择器。
 
-**`crossfire.json` 示例：**
+## 用户如何配置
 
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"]
-    }
-  },
-  "providerBindings": [
-    {
-      "name": "claude-main",
-      "adapter": "claude",
-      "model": "claude-sonnet",
-      "mcpServers": ["github"]
-    },
-    {
-      "name": "codex-main",
-      "adapter": "codex",
-      "model": "gpt-5.4"
-    }
-  ],
-  "templates": [
-    {
-      "name": "strict-evidence",
-      "basePreset": "guarded",
-      "overrides": {
-        "evidence": { "bar": "high" },
-        "interaction": { "approval": "always" }
-      }
-    }
-  ],
-  "roles": {
-    "proposer": {
-      "binding": "claude-main",
-      "template": "strict-evidence"
-    },
-    "challenger": {
-      "binding": "codex-main",
-      "preset": "guarded",
-      "evidence": { "bar": "high" }
-    },
-    "judge": {
-      "binding": "claude-main",
-      "preset": "plan",
-      "systemPrompt": "Evaluate which side improves the action plan more."
-    }
-  }
-}
+先从仓库内参考配置开始：
+
+```bash
+cp crossfire.example.json crossfire.json
 ```
+
+然后按这个顺序改：
+
+- `providerBindings`：填你已经安装好的 provider CLI、model、以及可选 MCP 挂载
+- 同一个 adapter 可以出现多次，只要 `name` 不同、`model` 不同即可
+- `roles.*.binding`：决定每个角色使用哪个 binding
+- `roles.*.preset` 或 `roles.*.template`：决定基础策略行为
+- `roles.*.evidence`、`roles.*.systemPrompt`、`roles.*.systemPromptFile`：只在确实需要时做角色级微调
+
+第一次正式运行前，先看解析后的实际结果：
+
+```bash
+crossfire inspect-policy --config crossfire.json
+crossfire inspect-tools --config crossfire.json
+```
+
+更完整的任务式说明见 [docs/configuration.md](docs/configuration.md)。
+
+参考文件：[`crossfire.example.json`](./crossfire.example.json)
 
 | 字段 | 说明 | 必填 |
 | ---- | ---- | ---- |
@@ -439,7 +414,8 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 | `preset` | 策略预设（`research`、`guarded`、`dangerous`、`plan`） | 否 | 角色默认（proposer/challenger 为 `guarded`，judge 为 `plan`） |
 | `template` | 策略模板名（可提供可选的 `basePreset` 与 evidence/interaction 覆盖） | 否 | — |
 | `evidence` | 证据策略覆盖（`{ bar: "low" \| "medium" \| "high" }`） | 否 | — |
-| `systemPrompt` | 角色级 system prompt 覆盖 | 否 | 内置默认值 |
+| `systemPrompt` | 角色级内联 system prompt 覆盖 | 否 | 内置默认值 |
+| `systemPromptFile` | 角色级 prompt 文件路径，相对 `crossfire.json` 解析 | 否 | — |
 
 配置校验是严格的：`allowed_tools`、`mcp_servers` 这类 legacy 字段，以及未批准的 template override key，会直接报错，不会被静默忽略。
 
@@ -455,26 +431,14 @@ Crossfire 使用 `crossfire.json` 配置文件定义角色、provider 绑定、M
 | `providerOptions` | Provider 原生 escape hatch（不是 policy 语义） | 否 | — |
 | `mcpServers` | 来自顶层注册表的已附着 MCP 服务器名称 | 否 | `[]` |
 
-## 内置资产
+当前运行时的提示词定制入口是 config：
 
-仓库里仍然保留了 `profiles/providers/` 和 `prompts/` 下的内置资产，但当前对外 CLI 已经是 config-first：
+- 用 `roles.*.systemPromptFile` 放长 prompt 文件
+- 用 `roles.*.systemPrompt` 放短的内联覆盖
+- 内置默认值来自 `packages/orchestrator-core/src/context-builder.ts` 中的 `defaultSystemPrompt()`
+- 当前没有 profile 或 prompt-family 运行时选择器
 
-- 通过 `crossfire.json` 选择 adapter、model、MCP 挂载、preset、template、evidence，以及可选的 `systemPrompt`
-- 当前没有 `--template`、`--proposer-template`、`--challenger-template`、`--judge-template` 这些运行时 flag
-- 当前有效的提示词定制入口是 `roles.*.systemPrompt`，再加上 `packages/orchestrator-core/src/context-builder.ts` 里的内置默认 system prompt
-
-这些仓库内资产依然适合用于调整内置默认值、测试或内部实验：
-
-```text
-profiles/
-└── providers/
-    ├── claude/
-    ├── codex/
-    └── gemini/
-prompts/
-├── general/
-└── code/
-```
+同一个角色请二选一：要么用 `systemPromptFile`，要么用 `systemPrompt`。
 
 ## 输出文件
 
@@ -553,7 +517,7 @@ packages/
 
 ## 扩展 Crossfire
 
-如果要新增一个 provider，通常需要在新 package 中实现 `AgentAdapter`，把 provider 输出归一化为共享事件模型，跑通适配器契约测试，在 CLI 工厂层接好适配器创建逻辑；如果你希望和现有仓库内参考资产保持一致，也可以选择补充 `profiles/providers/` 下的内置资产。
+如果要新增一个 provider，通常需要在新 package 中实现 `AgentAdapter`，把 provider 输出归一化为共享事件模型，跑通适配器契约测试，并在 CLI 工厂层接好适配器创建逻辑；如果它也应该出现在面向用户的配置入口里，再同步更新参考配置和用户文档。
 
 设计细节建议从 **[docs/architecture/overview.md](docs/architecture/overview.md)** 开始，再看 **[docs/architecture/adapter-layer.md](docs/architecture/adapter-layer.md)** 和 **[docs/architecture/orchestrator.md](docs/architecture/orchestrator.md)**。
 

@@ -1,7 +1,0 @@
-{
-	"name": "claude_judge",
-	"description": "Quality assessor (Claude) - evaluates plan readiness, identifies gaps",
-	"agent": "claude_code",
-	"model": "us.anthropic.claude-opus-4-6-v1",
-	"prompt_family": "auto"
-}

@@ -55,8 +55,11 @@ export type RoleInspectionContext =
 export function buildInspectionContext(
 	config: CrossfireConfig,
 	cliOverrides: CliPresetOverrides,
+	options?: {
+		configFilePath?: string;
+	},
 ): RoleInspectionContext[] {
-	const roles = resolveAllRoles(config, cliOverrides);
+	const roles = resolveAllRoles(config, cliOverrides, options);
 	const results: RoleInspectionContext[] = [];
 
 	for (const roleName of ["proposer", "challenger", "judge"] as const) {
